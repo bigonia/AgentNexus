@@ -69,7 +69,7 @@
     </root>
 
     <!-- 可选：自定义包级别日志（比如给业务包单独设置DEBUG级别） -->
-    <!-- <logger name="com.zwbd.dbcrawlerv4" level="DEBUG" additivity="false">
+    <!-- <logger name="com.zwbd.agentnexus" level="DEBUG" additivity="false">
         <appender-ref ref="CONSOLE" />
         <appender-ref ref="FILE_ROLLING" />
     </logger> -->

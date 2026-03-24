@@ -57,12 +57,12 @@ spring:
                 - /c
                 - npx
                 - "@playwright/mcp@latest"
-        sse:
-          connections:
-            visualization-server:
-#              url: "http://localhost:3000"
-#              url: "https://www.wavelets.cn/visual"
-              url: "https://www.wavelets.cn/"
+#        sse:
+#          connections:
+#            visualization-server:
+##              url: "http://localhost:3000"
+##              url: "https://www.wavelets.cn/visual"
+#              url: "https://www.wavelets.cn/"
 
     openai:
       base-url: https://dashscope.aliyuncs.com/compatible-mode

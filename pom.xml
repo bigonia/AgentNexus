@@ -114,6 +114,17 @@
             <artifactId>spring-ai-starter-mcp-client-webflux</artifactId>
         </dependency>
 
+        <!-- Spring Boot WebSocket 基础支持 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <!-- 用于 JSON 解析的高性能库 (如果项目中已有可忽略) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- Swagger UI for API documentation -->
         <dependency>
             <groupId>org.springdoc</groupId>

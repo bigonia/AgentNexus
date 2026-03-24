@@ -1,7 +1,7 @@
 # 通用 RAG 引擎与向量化模块
 
 ## 1. 模块概述
-本模块（`com.zwbd.dbcrawlerv4.ai`）实现了通用的 **检索增强生成 (RAG)** 引擎。该引擎不再耦合于特定的数据源（如数据库），而是基于统一的 **领域文档 (Domain Document)** 抽象。这意味着无论是数据库的 Schema info，还是用户上传的 PDF/Word/Markdown 文件，都可以被统一向量化并用于 AI 问答。
+本模块（`com.zwbd.agentnexus.ai`）实现了通用的 **检索增强生成 (RAG)** 引擎。该引擎不再耦合于特定的数据源（如数据库），而是基于统一的 **领域文档 (Domain Document)** 抽象。这意味着无论是数据库的 Schema info，还是用户上传的 PDF/Word/Markdown 文件，都可以被统一向量化并用于 AI 问答。
 
 ## 2. 核心架构
 
@@ -30,13 +30,13 @@ graph TD
 ## 3. 关键组件
 
 ### 3.1 统一输入抽象：DomainDocument
-位于 `com.zwbd.dbcrawlerv4.document.entity`。
+位于 `com.zwbd.agentnexus.document.entity`。
 所有下游 RAG 处理只认 `DomainDocument` 对象。
 *   **对于数据库**: `MetadataCollectorService` 将采集到的元数据组装成 `DomainDocument`。
 *   **对于文件**: `KnowledgeFileService` 将上传的文件（PDF/Excel等）通过 ETL 转换为 `DomainDocument`。
 
 ### 3.2 摄取服务 (IngestionService)
-位于 `com.zwbd.dbcrawlerv4.ai.service`。
+位于 `com.zwbd.agentnexus.ai.service`。
 *   **功能**: 负责将 `DomainDocument` 进行切片（Splitting）、向量化（Embedding）并持久化。
 *   **更新策略**: 支持全量更新和增量更新（根据 sourceId）。
 

@@ -1,7 +1,7 @@
 # 领域文档与数据清洗模块
 
 ## 1. 模块概述
-本模块（`com.zwbd.dbcrawlerv4.document`）专注于将杂乱的技术元数据转化为AI可理解的“领域文档（Domain Document）”。通过内置的ETL流水线，实现数据加载、解析、清洗和语义增强。
+本模块（`com.zwbd.agentnexus.document`）专注于将杂乱的技术元数据转化为AI可理解的“领域文档（Domain Document）”。通过内置的ETL流水线，实现数据加载、解析、清洗和语义增强。
 
 ## 2. 核心流程 (ETL Pipeline)
 
