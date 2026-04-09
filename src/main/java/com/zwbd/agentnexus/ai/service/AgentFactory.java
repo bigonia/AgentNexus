@@ -61,6 +61,14 @@ public class AgentFactory {
         return clientCache.computeIfAbsent(agentId, this::buildAgentClient);
     }
 
+    public void evictAgentClient(String agentId) {
+        clientCache.remove(agentId);
+    }
+
+    public void evictAllClients() {
+        clientCache.clear();
+    }
+
     /**
      * 根据 Agent ID 创建可执行的 ChatClient
      */
@@ -79,9 +87,12 @@ public class AgentFactory {
             throw new IllegalStateException("ChatModel not found in registry: " + modelName);
         }
 
-        // 3. 获取工具列表
+        // 3. 获取工具列表（新模型优先：toolIds/providerIds；兼容旧模型：toolNames）
         List<String> toolNames = agentEntity.getToolNames();
-        List<ToolCallback> tools = toolManager.getTools(toolNames);
+        List<String> toolIds = agentEntity.getToolIds();
+        List<String> providerIds = agentEntity.getProviderIds();
+        List<String> resolvedToolRefs = resolveAgentToolRefs(toolNames, toolIds, providerIds);
+        List<ToolCallback> tools = toolManager.getTools(resolvedToolRefs);
 
         // 4. 获取 Advisors (增强组件)
         List<String> advisorNames = agentEntity.getAdvisors();
@@ -99,8 +110,8 @@ public class AgentFactory {
                     .collect(Collectors.toList());
         }
 
-        log.info("Building Agent [{}]: Model={}, Tools={}, Advisors={}",
-                agentEntity.getName(), modelName, toolNames, advisorNames);
+        log.info("Building Agent [{}]: Model={}, ToolRefs={}, Advisors={}",
+                agentEntity.getName(), modelName, resolvedToolRefs, advisorNames);
 
         // 5. 组装 ChatClient
         // 注意：ChatClient.builder(chatModel) 会创建一个新的 Builder 绑定到该模型
@@ -129,6 +140,13 @@ public class AgentFactory {
         if (!modelRegistry.containsModel(agent.getModelName())) {
             log.warn("Warning: Saving agent with unknown model name: {}", agent.getModelName());
         }
+        if (agent.getProviderIds() != null) {
+            for (String providerId : agent.getProviderIds()) {
+                if (!toolManager.getProviderIds().contains(providerId)) {
+                    log.warn("Warning: Agent references unknown provider: {}", providerId);
+                }
+            }
+        }
         // 校验 Advisors 是否存在
         if (agent.getAdvisors() != null) {
             for (String advisorName : agent.getAdvisors()) {
@@ -137,7 +155,32 @@ public class AgentFactory {
                 }
             }
         }
-        return agentRepository.save(agent);
+        AgentEntity saved = agentRepository.save(agent);
+        evictAgentClient(saved.getId());
+        return saved;
+    }
+
+    private List<String> resolveAgentToolRefs(List<String> legacyToolNames,
+                                              List<String> toolIds,
+                                              List<String> providerIds) {
+        // 按顺序去重，保证请求构建稳定
+        LinkedHashSet<String> refs = new LinkedHashSet<>();
+
+        if (toolIds != null && !toolIds.isEmpty()) {
+            refs.addAll(toolIds);
+        }
+
+        if (providerIds != null && !providerIds.isEmpty()) {
+            for (String providerId : providerIds) {
+                refs.addAll(toolManager.getProviderToolIds(providerId));
+            }
+        }
+
+        if (refs.isEmpty() && legacyToolNames != null && !legacyToolNames.isEmpty()) {
+            refs.addAll(legacyToolNames);
+        }
+
+        return new ArrayList<>(refs);
     }
 
     /**
@@ -146,6 +189,7 @@ public class AgentFactory {
     @Transactional
     public void deleteAgent(String agentId) {
         agentRepository.deleteById(agentId);
+        evictAgentClient(agentId);
     }
 
     /**

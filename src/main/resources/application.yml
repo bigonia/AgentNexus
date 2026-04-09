@@ -32,7 +32,7 @@ spring:
         model: text-embedding-v4
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: sk-d358b79a019c46d18fc84c1042db3042
+      api-key: sk-b1b3e65d5d984b839bf53dd5021363b7
       chat:
         model: deepseek-chat
         temperature: 0.7
@@ -41,6 +41,8 @@ spring:
       client:
         enabled: true
         type: sync
+        toolcallback:
+          enabled: false
         stdio:
           connections:
 #            antv-chart:
@@ -103,7 +105,7 @@ spring:
   jpa:
     properties:
       hibernate:
-        tenant_identifier_resolver: com.zwbd.dbcrawlerv4.common.SpaceIdResolver
+        tenant_identifier_resolver: com.zwbd.agentnexus.common.SpaceIdResolver
         jdbc:
           batch_size: 500
     hibernate:
@@ -143,7 +145,7 @@ logging:
     # 设置数据库相关日志级别，方便查看执行的 SQL
     org.springframework.jdbc.core: DEBUG
     # 设置项目包的日志级别为 DEBUG，启用调试日志
-    com.zwbd.dbcrawlerv4: DEBUG
+    com.zwbd.agentnexus: DEBUG
 #    root: debug
 # org.springframework.ai.chat.client.DefaultChatClient: TRACE
 
@@ -162,3 +164,16 @@ jwt:
 
 file:
   upload-dir: ./upload-dir
+
+sdui:
+  runtime:
+    worker-count: 2
+    python-command: python
+    request-timeout-ms: 800
+  command:
+    timeout-scan-ms: 3000
+  asset:
+    processed-dir: ./upload-dir/sdui-processed
+    ffmpeg-command: ffmpeg
+    image-max-width: 200
+    image-max-height: 200

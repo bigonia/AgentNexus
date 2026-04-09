@@ -1,83 +1,118 @@
 package com.zwbd.agentnexus.ai.tools;
 
 import com.zwbd.agentnexus.ai.dto.ToolInfo;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
  * @Author: wnli
  * @Date: 2026/1/6 17:01
- * @Desc: 全局工具管理，控制工具状态，查看全部工具
+ * @Desc: Global tool manager with provider-level namespace.
  */
 @Slf4j
 @Service
 public class GlobalToolManager {
 
+    public static final String PROVIDER_TYPE_LOCAL = "LOCAL";
+    public static final String PROVIDER_TYPE_MCP = "MCP";
+    public static final String LOCAL_PROVIDER = "local";
+    public static final String BOOTSTRAP_MCP_PROVIDER = "bootstrap-mcp";
 
-    // 物理存储：ToolName -> ToolCallback 实例
-    private final Map<String, ToolCallback> toolRegistry = new ConcurrentHashMap<>();
+    // qualifiedToolId -> entry
+    private final Map<String, ToolEntry> toolRegistry = new ConcurrentHashMap<>();
+    // rawName -> qualified ids
+    private final Map<String, Set<String>> nameIndex = new ConcurrentHashMap<>();
+    // providerId -> qualified ids
+    private final Map<String, Set<String>> providerIndex = new ConcurrentHashMap<>();
 
-    // 状态管理：ToolName -> IsEnabled (true: 启用, false: 禁用)
-    private final Map<String, Boolean> toolStatus = new ConcurrentHashMap<>();
-
-    @Autowired
-    public void setSyncMcpToolCallbackProvider(SyncMcpToolCallbackProvider toolCallbackProvider){
-        register(toolCallbackProvider.getToolCallbacks());
+    @Autowired(required = false)
+    public void setSyncMcpToolCallbackProvider(SyncMcpToolCallbackProvider toolCallbackProvider) {
+        if (toolCallbackProvider != null) {
+            registerMcpTools(BOOTSTRAP_MCP_PROVIDER, PROVIDER_TYPE_MCP, toolCallbackProvider.getToolCallbacks());
+        }
     }
 
     /**
-     * 构造函数：启动时自动装配 Spring 容器中已有的 ToolCallback
+     * Constructor: register all spring local ToolCallback beans.
      */
     public GlobalToolManager(List<ToolCallback> initialTools) {
         if (initialTools != null) {
-            initialTools.forEach(this::register);
+            initialTools.forEach(tool -> registerLocalTool(tool, true));
         }
-        log.info("GlobalToolManager initialized. tools: {}", toolRegistry.values());
+        log.info("GlobalToolManager initialized. tools={}", toolRegistry.size());
     }
 
-    public void register(ToolCallback[] tool){
-        for (ToolCallback toolCallback : tool) {
-            ToolDefinition toolDefinition = toolCallback.getToolDefinition();
-//            toolCallback.getToolMetadata()
-            register(toolCallback);
+    public void register(ToolCallback[] tools) {
+        if (tools == null) {
+            return;
+        }
+        for (ToolCallback toolCallback : tools) {
+            registerLocalTool(toolCallback, true);
         }
     }
 
-    /**
-     * 注册工具
-     * 如果存在同名工具，将被覆盖
-     */
     public void register(ToolCallback tool) {
-        String name = tool.getToolDefinition().name();
+        registerLocalTool(tool, true);
+    }
 
-        if (toolRegistry.containsKey(name)) {
-            log.warn("Tool [{}] is being overwritten by a new registration.", name);
+    public void registerLocalTool(ToolCallback tool, boolean enabled) {
+        registerTool(LOCAL_PROVIDER, PROVIDER_TYPE_LOCAL, tool, enabled);
+    }
+
+    public synchronized void registerMcpTools(String providerId, String providerType, ToolCallback[] tools) {
+        if (tools == null) {
+            return;
         }
+        removeByProvider(providerId);
+        for (ToolCallback tool : tools) {
+            registerTool(providerId, providerType, tool, true);
+        }
+        log.info("Registered {} MCP tools for provider [{}]", tools.length, providerId);
+    }
 
-        toolRegistry.put(name, tool);
-        // 默认注册即启用，除非之前显式禁用过（保留状态），这里简化为默认 true
-        toolStatus.putIfAbsent(name, true);
-
-        log.info("Tool registered: [{}] - {}", name, tool.getToolDefinition().description());
+    public synchronized void removeByProvider(String providerId) {
+        Set<String> ids = providerIndex.remove(providerId);
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (String toolId : ids) {
+            ToolEntry removed = toolRegistry.remove(toolId);
+            if (removed == null) {
+                continue;
+            }
+            Set<String> sameNameSet = nameIndex.get(removed.getName());
+            if (sameNameSet != null) {
+                sameNameSet.remove(toolId);
+                if (sameNameSet.isEmpty()) {
+                    nameIndex.remove(removed.getName());
+                }
+            }
+        }
+        log.info("Removed {} tools for provider [{}]", ids.size(), providerId);
     }
 
     /**
-     * 核心方法：根据名称列表获取可用的工具实例
-     * 通常由 AgentFactory 在组装 ChatClient 时调用
-     *
-     * @param toolNames Agent 申请使用的工具名称列表
-     * @return 过滤后的、可用的 ToolCallback 列表
+     * Resolve tool names for an Agent.
+     * Supports:
+     * 1) fully qualified id: providerId:toolName
+     * 2) raw name: toolName (if unique)
      */
     public List<ToolCallback> getTools(List<String> toolNames) {
         if (toolNames == null || toolNames.isEmpty()) {
@@ -85,64 +120,166 @@ public class GlobalToolManager {
         }
 
         List<ToolCallback> activeTools = new ArrayList<>();
-
-        for (String name : toolNames) {
-            ToolCallback tool = toolRegistry.get(name);
-            Boolean isEnabled = toolStatus.getOrDefault(name, false);
-
-            if (tool != null && isEnabled) {
-                activeTools.add(tool);
-            } else {
-                if (tool == null) {
-                    log.debug("Requested tool [{}] not found in registry.", name);
-                } else {
-                    log.debug("Requested tool [{}] is currently disabled.", name);
-                }
+        for (String requested : toolNames) {
+            ToolEntry entry = findEntry(requested);
+            if (entry == null) {
+                continue;
             }
+            if (!entry.enabled) {
+                log.debug("Requested tool [{}] exists but disabled", requested);
+                continue;
+            }
+            activeTools.add(entry.callback);
         }
         return activeTools;
     }
 
-    /**
-     * 管理功能：启用工具
-     */
-    public void enableTool(String toolName) {
-        if (toolRegistry.containsKey(toolName)) {
-            toolStatus.put(toolName, true);
-            log.info("Tool [{}] has been enabled.", toolName);
-        } else {
-            log.warn("Cannot enable tool [{}]: Tool not found.", toolName);
+    public void enableTool(String toolNameOrId) {
+        ToolEntry entry = findEntry(toolNameOrId);
+        if (entry == null) {
+            log.warn("Cannot enable tool [{}]: not found.", toolNameOrId);
+            return;
         }
+        entry.enabled = true;
+        log.info("Tool [{}] has been enabled.", entry.getToolId());
     }
 
-    /**
-     * 管理功能：禁用工具
-     */
-    public void disableTool(String toolName) {
-        if (toolRegistry.containsKey(toolName)) {
-            toolStatus.put(toolName, false);
-            log.info("Tool [{}] has been disabled.", toolName);
-        } else {
-            log.warn("Cannot disable tool [{}]: Tool not found.", toolName);
+    public void disableTool(String toolNameOrId) {
+        ToolEntry entry = findEntry(toolNameOrId);
+        if (entry == null) {
+            log.warn("Cannot disable tool [{}]: not found.", toolNameOrId);
+            return;
         }
+        entry.enabled = false;
+        log.info("Tool [{}] has been disabled.", entry.getToolId());
     }
 
-    /**
-     * 观测功能：获取所有工具的当前状态信息
-     * 用于管理后台 UI 展示
-     */
     public List<ToolInfo> getAllToolsInfo() {
-        return toolRegistry.values().stream()
-                .map(tool -> {
-                    String name = tool.getToolDefinition().name();
-                    return new ToolInfo(
-                            name,
-                            tool.getToolDefinition().description(),
-                            tool.getToolDefinition().inputSchema()
-//                            ,toolStatus.getOrDefault(name, false)
-                    );
-                })
+        return toolRegistry.values()
+                .stream()
+                .sorted(Comparator.comparing(ToolEntry::getToolId))
+                .map(entry -> new ToolInfo(
+                        entry.getToolId(),
+                        entry.getName(),
+                        entry.callback.getToolDefinition().description(),
+                        entry.callback.getToolDefinition().inputSchema(),
+                        entry.providerId,
+                        entry.providerType,
+                        entry.enabled
+                ))
                 .collect(Collectors.toList());
+    }
+
+    public List<ToolInfo> getToolsByProvider(String providerId) {
+        Set<String> ids = providerIndex.getOrDefault(providerId, Collections.emptySet());
+        return ids.stream()
+                .map(toolRegistry::get)
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(ToolEntry::getToolId))
+                .map(entry -> new ToolInfo(
+                        entry.getToolId(),
+                        entry.getName(),
+                        entry.callback.getToolDefinition().description(),
+                        entry.callback.getToolDefinition().inputSchema(),
+                        entry.providerId,
+                        entry.providerType,
+                        entry.enabled
+                ))
+                .collect(Collectors.toList());
+    }
+
+    public Collection<String> getProviderIds() {
+        return providerIndex.keySet();
+    }
+
+    public Set<String> getProviderToolIds(String providerId) {
+        return providerIndex.getOrDefault(providerId, Collections.emptySet());
+    }
+
+    private void registerTool(@Nullable String providerId, String providerType, ToolCallback tool, boolean enabled) {
+        String sourceProvider = providerId == null ? LOCAL_PROVIDER : providerId;
+        String name = tool.getToolDefinition().name();
+        String toolId = buildToolId(sourceProvider, name);
+
+        ToolEntry newEntry = new ToolEntry(toolId, name, sourceProvider, providerType, tool, enabled);
+        ToolEntry old = toolRegistry.put(toolId, newEntry);
+
+        if (old != null) {
+            removeFromIndexes(old);
+            log.warn("Tool [{}] overwritten", toolId);
+        }
+
+        nameIndex.computeIfAbsent(name, k -> ConcurrentHashMap.newKeySet()).add(toolId);
+        providerIndex.computeIfAbsent(sourceProvider, k -> ConcurrentHashMap.newKeySet()).add(toolId);
+
+        log.info("Tool registered: [{}] [{}] {}", sourceProvider, name, tool.getToolDefinition().description());
+    }
+
+    private void removeFromIndexes(ToolEntry entry) {
+        Set<String> nameSet = nameIndex.get(entry.name);
+        if (nameSet != null) {
+            nameSet.remove(entry.toolId);
+            if (nameSet.isEmpty()) {
+                nameIndex.remove(entry.name);
+            }
+        }
+        Set<String> providerSet = providerIndex.get(entry.providerId);
+        if (providerSet != null) {
+            providerSet.remove(entry.toolId);
+            if (providerSet.isEmpty()) {
+                providerIndex.remove(entry.providerId);
+            }
+        }
+    }
+
+    private ToolEntry findEntry(String toolNameOrId) {
+        ToolEntry direct = toolRegistry.get(toolNameOrId);
+        if (direct != null) {
+            return direct;
+        }
+        Set<String> ids = nameIndex.get(toolNameOrId);
+        if (ids == null || ids.isEmpty()) {
+            log.debug("Requested tool [{}] not found in registry.", toolNameOrId);
+            return null;
+        }
+        if (ids.size() == 1) {
+            return toolRegistry.get(ids.iterator().next());
+        }
+
+        List<ToolEntry> entries = ids.stream()
+                .map(toolRegistry::get)
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(ToolEntry::getToolId))
+                .collect(Collectors.toList());
+        for (ToolEntry entry : entries) {
+            if (LOCAL_PROVIDER.equals(entry.providerId)) {
+                log.warn("Tool name [{}] is ambiguous, resolved to local tool [{}]", toolNameOrId, entry.toolId);
+                return entry;
+            }
+        }
+        for (ToolEntry entry : entries) {
+            if (entry.enabled) {
+                log.warn("Tool name [{}] is ambiguous, resolved to first enabled tool [{}]", toolNameOrId, entry.toolId);
+                return entry;
+            }
+        }
+        log.warn("Tool name [{}] is ambiguous and all candidates are disabled", toolNameOrId);
+        return entries.get(0);
+    }
+
+    public static String buildToolId(String providerId, String toolName) {
+        return providerId + ":" + toolName;
+    }
+
+    @Getter
+    @AllArgsConstructor
+    private static class ToolEntry {
+        private String toolId;
+        private String name;
+        private String providerId;
+        private String providerType;
+        private ToolCallback callback;
+        private volatile boolean enabled;
     }
 
 }

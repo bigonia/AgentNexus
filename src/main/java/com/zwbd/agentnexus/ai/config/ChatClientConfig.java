@@ -22,6 +22,7 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
@@ -54,7 +55,7 @@ public class ChatClientConfig implements InitializingBean {
     @Autowired
     private CommonTools commonTools;
 
-    @Autowired
+    @Autowired(required = false)
     private SyncMcpToolCallbackProvider toolCallbackProvider;
 
     @Bean
@@ -154,7 +155,7 @@ public class ChatClientConfig implements InitializingBean {
 
                 .build();
 
-        ChatClient chatClient = builder.defaultAdvisors(
+        ChatClient.Builder clientBuilder = builder.defaultAdvisors(
                         // chat-memory advisor
                         MessageChatMemoryAdvisor.builder(chatMemory).build()
                         , retrievalAugmentationAdvisor
@@ -166,10 +167,13 @@ public class ChatClientConfig implements InitializingBean {
 //                                .build()
 //                )
 //                .defaultTools(commonTools)
-                .defaultTools(new CommonTools())
-                .defaultToolCallbacks(toolCallbackProvider)
-                .build();
-        return chatClient;
+                .defaultTools(new CommonTools());
+
+        if (toolCallbackProvider != null) {
+            clientBuilder.defaultToolCallbacks(toolCallbackProvider);
+        }
+
+        return clientBuilder.build();
     }
 
 //    /**

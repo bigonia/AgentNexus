@@ -7,6 +7,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -15,6 +16,7 @@ import java.net.UnknownHostException;
 @SpringBootApplication
 @EnableJpaAuditing
 @EnableAsync
+@EnableScheduling
 public class  DbCrawlerV4Application {
 
     public static void main(String[] args) {

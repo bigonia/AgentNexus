@@ -1,0 +1,183 @@
+{
+  "info": {
+    "name": "SDUI MVP",
+    "_postman_id": "dbd7b8a4-2a66-44f7-9fe0-3a53ab7db1d4",
+    "description": "SDUI MVP API collection for frontend integration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "spaceId",
+      "value": "default"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "appId",
+      "value": ""
+    },
+    {
+      "key": "deviceId",
+      "value": "A1B2C3D4E5F6"
+    },
+    {
+      "key": "assetId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Apps - Generate",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "X-Space-Id", "value": "{{spaceId}}"},
+          {"key": "Authorization", "value": "Bearer {{token}}", "disabled": true}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/apps/generate",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"requirement\": \"生成一个音乐控制卡片，支持播放状态切换\",\n  \"sceneTags\": [\"music\", \"player\"],\n  \"targetDeviceIds\": [\"{{deviceId}}\"]\n}"
+        }
+      }
+    },
+    {
+      "name": "Apps - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/apps"
+      }
+    },
+    {
+      "name": "Apps - Versions",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/apps/{{appId}}/versions"
+      }
+    },
+    {
+      "name": "Apps - Publish",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/apps/{{appId}}/publish",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"versionId\": \"\",\n  \"deviceIds\": [\"{{deviceId}}\"]\n}"
+        }
+      }
+    },
+    {
+      "name": "Assets - Register",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/assets",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileId\": 1,\n  \"assetType\": \"IMAGE_COVER\",\n  \"name\": \"默认封面\",\n  \"tags\": [\"music\", \"cover\"]\n}"
+        }
+      }
+    },
+    {
+      "name": "Assets - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/assets"
+      }
+    },
+    {
+      "name": "Apps - Bind Asset",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/apps/{{appId}}/assets:bind",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assetId\": \"{{assetId}}\",\n  \"usageType\": \"cover\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Devices - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/devices"
+      }
+    },
+    {
+      "name": "Devices - Control (Brightness)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/devices/{{deviceId}}/control",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"command\": \"brightness\",\n  \"value\": 80\n}"
+        }
+      }
+    },
+    {
+      "name": "Devices - Telemetry",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/devices/{{deviceId}}/telemetry"
+      }
+    },
+    {
+      "name": "Runtime - Workers",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/runtime/workers"
+      }
+    },
+    {
+      "name": "Ops - Overview",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "X-Space-Id", "value": "{{spaceId}}"}
+        ],
+        "url": "{{baseUrl}}/api/v1/sdui/ops/overview"
+      }
+    }
+  ]
+}
+

@@ -35,3 +35,10 @@ build/
 .vscode/
 /upload-dir/
 /logs/
+
+**/__pycache__/
+**/assets/
+**/*.wav
+**/*.flac
+**/*.dsf
+**/*.sdui_cache

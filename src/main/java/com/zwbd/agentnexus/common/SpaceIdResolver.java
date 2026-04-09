@@ -15,7 +15,7 @@ public class SpaceIdResolver implements CurrentTenantIdentifierResolver {
     @Override
     public String resolveCurrentTenantIdentifier() {
         String spaceId = GlobalContext.getSpaceId();
-        return (spaceId != null) ? spaceId : "default_space";
+        return (spaceId != null) ? spaceId : GlobalContext.DEFAULT_SPACE_ID;
     }
 
     @Override
