@@ -2,6 +2,8 @@ package com.zwbd.agentnexus.sdui;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.common.web.GlobalContext;
+import com.zwbd.agentnexus.sdui.handler.BinaryFrameHandler;
+import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -23,12 +25,16 @@ public class MessageRouter {
     private final ObjectMapper objectMapper;
     private final SduiDeviceRepository deviceRepository;
     private final List<TopicHandler> handlers;
+    private final List<BinaryFrameHandler> binaryHandlers;
     private final Map<String, TopicHandler> handlerMap = new HashMap<>();
+    private final Map<Integer, BinaryFrameHandler> binaryHandlerMap = new HashMap<>();
 
-    public MessageRouter(ObjectMapper objectMapper, SduiDeviceRepository deviceRepository, List<TopicHandler> handlers) {
+    public MessageRouter(ObjectMapper objectMapper, SduiDeviceRepository deviceRepository,
+                         List<TopicHandler> handlers, List<BinaryFrameHandler> binaryHandlers) {
         this.objectMapper = objectMapper;
         this.deviceRepository = deviceRepository;
         this.handlers = handlers;
+        this.binaryHandlers = binaryHandlers;
     }
 
     @PostConstruct
@@ -36,6 +42,10 @@ public class MessageRouter {
         for (TopicHandler handler : handlers) {
             handlerMap.put(handler.getSupportedTopic(), handler);
             log.info("Registered SDUI route: {} -> {}", handler.getSupportedTopic(), handler.getClass().getSimpleName());
+        }
+        for (BinaryFrameHandler handler : binaryHandlers) {
+            binaryHandlerMap.put(handler.getSupportedMsgType(), handler);
+            log.info("Registered binary frame handler: msgType={} -> {}", handler.getSupportedMsgType(), handler.getClass().getSimpleName());
         }
     }
 
@@ -66,6 +76,20 @@ public class MessageRouter {
             }
         } catch (Exception e) {
             log.error("Failed to route SDUI message. Payload: {}", jsonPayload, e);
+        }
+    }
+
+    public void routeBinaryMessage(WebSocketSession session, byte[] rawFrame) {
+        try {
+            BinaryProtocolCodec.DecodedFrame frame = BinaryProtocolCodec.decode(rawFrame);
+            BinaryFrameHandler handler = binaryHandlerMap.get(frame.msgType());
+            if (handler != null) {
+                handler.handle(session, frame);
+            } else {
+                log.debug("No handler for binary msgType={}", frame.msgType());
+            }
+        } catch (Exception e) {
+            log.error("Failed to route binary frame", e);
         }
     }
 

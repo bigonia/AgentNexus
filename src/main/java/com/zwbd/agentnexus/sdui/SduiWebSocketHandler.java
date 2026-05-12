@@ -3,6 +3,7 @@ package com.zwbd.agentnexus.sdui;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -36,6 +37,13 @@ public class SduiWebSocketHandler extends TextWebSocketHandler {
         String payload = message.getPayload();
         // 将原始 JSON 报文抛给路由器处理
         messageRouter.routeMessage(session, payload);
+    }
+
+    @Override
+    protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
+        byte[] frame = new byte[message.getPayload().remaining()];
+        message.getPayload().get(frame);
+        messageRouter.routeBinaryMessage(session, frame);
     }
 
     @Override
