@@ -2,6 +2,7 @@ package com.zwbd.agentnexus.sdui;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -62,11 +63,34 @@ public class DeviceSessionManager {
         return false;
     }
 
+    public boolean sendBinaryFrame(String deviceId, byte[] frame) {
+        WebSocketSession session = sessionMap.get(deviceId);
+        if (session != null && session.isOpen()) {
+            try {
+                session.sendMessage(new BinaryMessage(frame));
+                return true;
+            } catch (IOException e) {
+                log.error("向设备 {} 发送二进制帧失败", deviceId, e);
+                return false;
+            }
+        }
+        log.warn("设备 {} 不在线或会话已关闭，二进制帧下发失败", deviceId);
+        return false;
+    }
+
     /**
      * 判断设备是否在线
      */
     public boolean isDeviceOnline(String deviceId) {
         WebSocketSession session = sessionMap.get(deviceId);
         return session != null && session.isOpen();
+    }
+
+    public boolean isSameSession(String deviceId, WebSocketSession incomingSession) {
+        if (incomingSession == null) {
+            return false;
+        }
+        WebSocketSession current = sessionMap.get(deviceId);
+        return current != null && incomingSession.getId().equals(current.getId());
     }
 }

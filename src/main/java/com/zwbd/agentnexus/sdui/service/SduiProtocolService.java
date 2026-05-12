@@ -1,9 +1,7 @@
 package com.zwbd.agentnexus.sdui.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.protocol.ProtocolMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,30 +12,30 @@ import org.springframework.stereotype.Service;
 public class SduiProtocolService {
 
     private final DeviceSessionManager sessionManager;
-    private final ObjectMapper objectMapper;
+    private final ProtocolMapper protocolMapper;
 
-    public boolean sendLayout(String deviceId, JsonNode payload) {
-        return sendTopic(deviceId, "ui/layout", payload);
+    public boolean sendSectionScene(String deviceId, String sceneJson) {
+        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapSectionScene(deviceId, sceneJson);
+        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
-    public boolean sendUpdate(String deviceId, JsonNode payload) {
-        return sendTopic(deviceId, "ui/update", payload);
+    public boolean sendSectionPatch(String deviceId, String patchJson) {
+        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapSectionPatch(deviceId, patchJson);
+        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
-    public boolean sendControl(String deviceId, JsonNode payload) {
-        return sendTopic(deviceId, "cmd/control", payload);
+    public boolean sendTemplateScene(String deviceId, String templateId, String payloadJson) {
+        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapTemplateScene(deviceId, templateId, payloadJson);
+        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
-    public boolean sendTopic(String deviceId, String topic, JsonNode payload) {
-        ObjectNode envelope = objectMapper.createObjectNode();
-        envelope.put("topic", topic);
-        envelope.put("device_id", deviceId);
-        envelope.set("payload", payload == null ? objectMapper.createObjectNode() : payload);
-        boolean ok = sessionManager.sendMessage(deviceId, envelope.toString());
-        if (!ok) {
-            log.info("Discarded outgoing message because device offline. deviceId={}, topic={}", deviceId, topic);
-        }
-        return ok;
+    public boolean sendTemplatePatch(String deviceId, String templateId, String patchJson) {
+        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapTemplatePatch(deviceId, templateId, patchJson);
+        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
+    }
+
+    public boolean sendActuatorCmd(String deviceId, String action, String paramsJson) {
+        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapActuatorCmd(deviceId, action, paramsJson);
+        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 }
-
