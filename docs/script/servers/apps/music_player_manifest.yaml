@@ -1,0 +1,16 @@
+﻿app_id: music-player
+version: 1.0.0
+entry_mode: trusted_script
+entrypoint: music_player_server.py
+runtime: python3.11
+health_check: rpc_ping
+topics_in:
+  - telemetry/heartbeat
+  - ui/click
+topics_out:
+  - ui/layout
+  - ui/update
+env_schema:
+  SDUI_MUSIC_DIR:
+    required: false
+    default: "./assets/music_library"

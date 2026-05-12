@@ -1,0 +1,17 @@
+﻿app_id: host-info-swipe
+version: 1.0.0
+entry_mode: trusted_script
+entrypoint: host_info_swipe_server.py
+runtime: python3.11
+health_check: rpc_ping
+topics_in:
+  - telemetry/heartbeat
+  - ui/click
+  - ui/page_changed
+topics_out:
+  - ui/layout
+  - ui/update
+env_schema:
+  SDUI_INFO_PUSH_INTERVAL:
+    required: false
+    default: "2.0"
