@@ -17,7 +17,7 @@ public final class BinaryProtocolCodec {
     public static byte[] encode(int msgType, int seq, byte[] payload) {
         int totalLen = HEADER_SIZE + payload.length;
         byte[] frame = new byte[totalLen];
-        ByteBuffer hdr = ByteBuffer.wrap(frame).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer hdr = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
         hdr.putShort((short) MAGIC);
         hdr.put((byte) VERSION);
         hdr.put((byte) msgType);
@@ -28,16 +28,21 @@ public final class BinaryProtocolCodec {
 
         CRC32 crc = new CRC32();
         crc.update(frame, 0, 12);
+        crc.update(0); // 4 zero bytes placeholder matching terminal protocol
+        crc.update(0);
+        crc.update(0);
+        crc.update(0);
         crc.update(frame, HEADER_SIZE, payload.length);
         int crcVal = (int) crc.getValue();
-        hdr.putInt(12, crcVal);
+        hdr.position(12);
+        hdr.putInt(crcVal);
         return frame;
     }
 
     public static DecodedFrame decode(byte[] frame) {
         if (frame.length < HEADER_SIZE)
             throw new IllegalArgumentException("frame too short: " + frame.length);
-        ByteBuffer hdr = ByteBuffer.wrap(frame, 0, HEADER_SIZE).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer hdr = ByteBuffer.wrap(frame, 0, HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
         int magic = hdr.getShort() & 0xFFFF;
         int version = hdr.get() & 0xFF;
         int msgType = hdr.get() & 0xFF;
@@ -54,6 +59,10 @@ public final class BinaryProtocolCodec {
 
         CRC32 check = new CRC32();
         check.update(frame, 0, 12);
+        check.update(0);
+        check.update(0);
+        check.update(0);
+        check.update(0);
         check.update(frame, HEADER_SIZE, payloadLen);
         if (((int) check.getValue()) != crc)
             throw new IllegalArgumentException("CRC32 mismatch");
@@ -74,7 +83,7 @@ public final class BinaryProtocolCodec {
         List<TlvEntry> tlvs = new ArrayList<>();
         int off = 0;
         while (off + 4 <= payload.length) {
-            ByteBuffer tlvHdr = ByteBuffer.wrap(payload, off, 4).order(ByteOrder.BIG_ENDIAN);
+            ByteBuffer tlvHdr = ByteBuffer.wrap(payload, off, 4).order(ByteOrder.LITTLE_ENDIAN);
             int type = tlvHdr.getShort() & 0xFFFF;
             int len = tlvHdr.getShort() & 0xFFFF;
             off += 4;
@@ -92,10 +101,10 @@ public final class BinaryProtocolCodec {
     public record TlvEntry(int type, byte[] value) {
         public int asU8() { return value[0] & 0xFF; }
         public int asU16() {
-            return ByteBuffer.wrap(value).order(ByteOrder.BIG_ENDIAN).getShort() & 0xFFFF;
+            return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getShort() & 0xFFFF;
         }
         public long asU32() {
-            return ByteBuffer.wrap(value).order(ByteOrder.BIG_ENDIAN).getInt() & 0xFFFFFFFFL;
+            return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getInt() & 0xFFFFFFFFL;
         }
         public String asString() { return new String(value, java.nio.charset.StandardCharsets.UTF_8); }
     }

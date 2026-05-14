@@ -42,7 +42,7 @@ public class SecurityConfig {
         UserDetails guest = User.builder()
                 .username("guest")
                 .password(passwordEncoder().encode("guest123"))
-                .roles("guest")
+                .roles("sdui_only")
                 .build();
         return new InMemoryUserDetailsManager(admin, user,guest);
     }
@@ -65,6 +65,7 @@ public class SecurityConfig {
         http.csrf().disable()
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
+                                "/",
                                 "/api/auth/login",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

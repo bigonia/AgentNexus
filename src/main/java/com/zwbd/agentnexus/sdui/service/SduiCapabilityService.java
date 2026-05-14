@@ -1,88 +1,99 @@
 package com.zwbd.agentnexus.sdui.service;
 
-import com.zwbd.agentnexus.file.KnowledgeFile;
-import com.zwbd.agentnexus.file.KnowledgeFileRepository;
-import com.zwbd.agentnexus.sdui.model.SduiAsset;
-import com.zwbd.agentnexus.sdui.model.SduiAssetBinding;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
-import com.zwbd.agentnexus.sdui.repo.SduiAssetBindingRepository;
+import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
+import com.zwbd.agentnexus.sdui.protocol.CapabilitySnapshotParser;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SduiCapabilityService {
 
     private final SduiDeviceRepository deviceRepository;
-    private final SduiAssetBindingRepository assetBindingRepository;
-    private final KnowledgeFileRepository knowledgeFileRepository;
+    private final ObjectMapper objectMapper;
+    private final Map<String, CapabilitySchema.CapabilitySnapshot> cache = new ConcurrentHashMap<>();
 
-    private final ConcurrentHashMap<String, Map<String, Object>> store = new ConcurrentHashMap<>();
-
-    public Map<String, Object> buildRuntimeContext(String appId, String deviceId) {
-        Map<String, Object> ctx = new HashMap<>();
-        ctx.put("device_id", deviceId);
-        ctx.put("app_id", appId);
-        ctx.put("device_state", deviceState(deviceId));
-        ctx.put("assets", assetsForApp(appId));
-        ctx.put("store", getStore(appId, deviceId));
-        return ctx;
-    }
-
-    public void applyStore(String appId, String deviceId, Map<String, Object> latestStore) {
-        if (latestStore == null) {
-            return;
+    @Transactional
+    public void onCapabilitiesReport(String deviceId, CapabilitySchema.CapabilitySnapshot caps, String rawJson) {
+        cache.put(deviceId, caps);
+        SduiDevice device = deviceRepository.findById(deviceId).orElse(null);
+        if (device != null) {
+            device.setCapabilitiesSnapshot(rawJson);
+            deviceRepository.save(device);
         }
-        store.put(key(appId, deviceId), new HashMap<>(latestStore));
+        log.info("Capabilities stored for device {}, sectionEnabled={}", deviceId,
+                caps.section() != null && caps.section().enabled());
     }
 
-    private Map<String, Object> getStore(String appId, String deviceId) {
-        return new HashMap<>(store.computeIfAbsent(key(appId, deviceId), k -> new HashMap<>()));
+    public Optional<CapabilitySchema.CapabilitySnapshot> getCapabilities(String deviceId) {
+        CapabilitySchema.CapabilitySnapshot cached = cache.get(deviceId);
+        if (cached != null) return Optional.of(cached);
+
+        SduiDevice device = deviceRepository.findById(deviceId).orElse(null);
+        if (device == null || device.getCapabilitiesSnapshot() == null) return Optional.empty();
+        try {
+            CapabilitySchema.CapabilitySnapshot caps = CapabilitySnapshotParser.parse(
+                    device.getCapabilitiesSnapshot(), objectMapper);
+            cache.put(deviceId, caps);
+            return Optional.of(caps);
+        } catch (Exception e) {
+            log.error("Failed to parse capabilities for device {}", deviceId, e);
+            return Optional.empty();
+        }
     }
 
-    private String key(String appId, String deviceId) {
-        return appId + ":" + deviceId;
+    public boolean supportsSectionType(String deviceId, String sectionType) {
+        return getCapabilities(deviceId)
+                .map(CapabilitySchema.CapabilitySnapshot::section)
+                .filter(CapabilitySchema.SectionCapability::enabled)
+                .map(s -> s.supportsType(sectionType))
+                .orElse(false);
     }
 
-    private Map<String, Object> deviceState(String deviceId) {
-        return deviceRepository.findById(deviceId).map(this::toDeviceMap).orElseGet(HashMap::new);
+    public boolean supportsSectionLayout(String deviceId, String layout) {
+        return getCapabilities(deviceId)
+                .map(CapabilitySchema.CapabilitySnapshot::section)
+                .filter(CapabilitySchema.SectionCapability::enabled)
+                .map(s -> s.supportsLayout(layout))
+                .orElse(false);
     }
 
-    private Map<String, Object> toDeviceMap(SduiDevice d) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("device_id", d.getDeviceId());
-        m.put("status", d.getStatus());
-        m.put("current_app_id", d.getCurrentAppId());
-        m.put("current_page_id", d.getCurrentPageId());
-        m.put("last_seen_at", d.getLastSeenAt() == null ? null : d.getLastSeenAt().toString());
-        return m;
+    public int getSectionLimit(String deviceId, String limitKey) {
+        return getCapabilities(deviceId)
+                .map(CapabilitySchema.CapabilitySnapshot::section)
+                .map(s -> s.getLimit(limitKey))
+                .orElse(0);
     }
 
-    private List<Map<String, Object>> assetsForApp(String appId) {
-        List<SduiAssetBinding> bindings = assetBindingRepository.findByApp_Id(appId);
-        return bindings.stream().map(binding -> {
-            SduiAsset asset = binding.getAsset();
-            KnowledgeFile file = knowledgeFileRepository.findById(asset.getFileId()).orElse(null);
-            Map<String, Object> map = new HashMap<>();
-            map.put("asset_id", asset.getId());
-            map.put("asset_type", asset.getAssetType());
-            map.put("usage_type", binding.getUsageType());
-            map.put("name", asset.getName());
-            map.put("tags", asset.getTags());
-            map.put("file_id", asset.getFileId());
-            map.put("processed_status", asset.getProcessedStatus());
-            map.put("processed_payload", asset.getProcessedPayload());
-            if (file != null) {
-                map.put("original_filename", file.getOriginalFilename());
-                map.put("stored_filename", file.getStoredFilename());
-            }
-            return map;
-        }).toList();
+    public Optional<CapabilitySchema.SectionCapability> getSectionCapability(String deviceId) {
+        return getCapabilities(deviceId)
+                .map(CapabilitySchema.CapabilitySnapshot::section)
+                .filter(CapabilitySchema.SectionCapability::enabled);
+    }
+
+    public Set<String> getAvailableCommands(String deviceId) {
+        return getCapabilities(deviceId)
+                .map(caps -> {
+                    Set<String> cmds = new LinkedHashSet<>();
+                    for (CapabilitySchema.OutputCapability o : caps.outputs()) {
+                        if (o.enabled() && o.commands() != null) cmds.addAll(o.commands());
+                    }
+                    return cmds;
+                }).orElse(Collections.emptySet());
+    }
+
+    public CapabilitySchema.DeviceProfile getDeviceProfile(String deviceId) {
+        return getCapabilities(deviceId)
+                .map(CapabilitySchema.CapabilitySnapshot::deviceProfile)
+                .orElse(null);
     }
 }

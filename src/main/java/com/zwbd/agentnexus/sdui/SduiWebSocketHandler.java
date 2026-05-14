@@ -32,6 +32,7 @@ public class SduiWebSocketHandler extends TextWebSocketHandler {
         // 注意：此时还不知道 device_id，需要在收到首条 telemetry/heartbeat 后才正式绑定
     }
 
+    @Deprecated(forRemoval = true)
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();

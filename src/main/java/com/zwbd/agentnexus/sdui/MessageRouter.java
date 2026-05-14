@@ -49,6 +49,7 @@ public class MessageRouter {
         }
     }
 
+    @Deprecated(forRemoval = true)
     public void routeMessage(WebSocketSession session, String jsonPayload) {
         try {
             SduiMessage message = objectMapper.readValue(jsonPayload, SduiMessage.class);

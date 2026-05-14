@@ -166,14 +166,5 @@ file:
   upload-dir: ./upload-dir
 
 sdui:
-  runtime:
-    worker-count: 2
-    python-command: python
-    request-timeout-ms: 800
   command:
     timeout-scan-ms: 3000
-  asset:
-    processed-dir: ./upload-dir/sdui-processed
-    ffmpeg-command: ffmpeg
-    image-max-width: 200
-    image-max-height: 200

@@ -24,16 +24,6 @@ public class SduiProtocolService {
         return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
-    public boolean sendTemplateScene(String deviceId, String templateId, String payloadJson) {
-        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapTemplateScene(deviceId, templateId, payloadJson);
-        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
-    }
-
-    public boolean sendTemplatePatch(String deviceId, String templateId, String patchJson) {
-        ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapTemplatePatch(deviceId, templateId, patchJson);
-        return sessionManager.sendBinaryFrame(deviceId, msg.frame());
-    }
-
     public boolean sendActuatorCmd(String deviceId, String action, String paramsJson) {
         ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapActuatorCmd(deviceId, action, paramsJson);
         return sessionManager.sendBinaryFrame(deviceId, msg.frame());

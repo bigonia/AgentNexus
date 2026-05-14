@@ -22,7 +22,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // 注册终端连接的端点，例如: ws://192.168.x.x:8080/ws/sdui
         // 允许跨域，方便本地测试
-        registry.addHandler(sduiWebSocketHandler, "/ws/sdui")
+        registry.addHandler(sduiWebSocketHandler, "/ws/sdui", "/")
                 .setAllowedOrigins("*");
     }
 }

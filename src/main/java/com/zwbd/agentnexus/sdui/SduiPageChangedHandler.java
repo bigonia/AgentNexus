@@ -1,17 +1,19 @@
 package com.zwbd.agentnexus.sdui;
 
-import com.zwbd.agentnexus.sdui.service.SduiAppRuntimeService;
 import com.zwbd.agentnexus.sdui.service.SduiDeviceService;
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
 
+@Slf4j
 @Component
-@RequiredArgsConstructor
 public class SduiPageChangedHandler implements TopicHandler {
 
-    private final SduiAppRuntimeService runtimeService;
     private final SduiDeviceService deviceService;
+
+    public SduiPageChangedHandler(SduiDeviceService deviceService) {
+        this.deviceService = deviceService;
+    }
 
     @Override
     public String getSupportedTopic() {
@@ -24,7 +26,6 @@ public class SduiPageChangedHandler implements TopicHandler {
         if (page != null) {
             deviceService.updateCurrentPage(message.getDeviceId(), page);
         }
-        runtimeService.handleEvent(message.getDeviceId(), message);
+        log.debug("ui/page_changed from device {}: page={}", message.getDeviceId(), page);
     }
 }
-

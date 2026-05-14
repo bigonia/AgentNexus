@@ -1,9 +1,6 @@
 package com.zwbd.agentnexus.sdui.protocol;
 
 public enum SemanticCommand {
-    // Template
-    DISPLAY_TEMPLATE_RENDER("display.template.render"),
-    DISPLAY_TEMPLATE_PATCH("display.template.patch"),
     // Section
     DISPLAY_SECTION_RENDER("display.section.render"),
     DISPLAY_SECTION_PATCH("display.section.patch"),

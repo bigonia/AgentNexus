@@ -29,7 +29,10 @@ public class DeviceSessionManager {
      * 注册/更新设备会话
      */
     public void registerSession(String deviceId, WebSocketSession session) {
-        sessionMap.put(deviceId, session);
+        WebSocketSession oldSession = sessionMap.put(deviceId, session);
+        if (oldSession != null && !oldSession.getId().equals(session.getId())) {
+            sessionIdToDeviceIdMap.remove(oldSession.getId());
+        }
         sessionIdToDeviceIdMap.put(session.getId(), deviceId);
         log.info("设备已注册上线: {}, 当前在线总数: {}", deviceId, sessionMap.size());
     }
@@ -40,8 +43,14 @@ public class DeviceSessionManager {
     public void removeSession(WebSocketSession session) {
         String deviceId = sessionIdToDeviceIdMap.remove(session.getId());
         if (deviceId != null) {
-            sessionMap.remove(deviceId);
-            log.info("设备已离线: {}, 当前在线总数: {}", deviceId, sessionMap.size());
+            sessionMap.computeIfPresent(deviceId, (key, current) -> {
+                if (current.getId().equals(session.getId())) {
+                    log.info("设备已离线: {}, 当前在线总数: {}", deviceId, sessionMap.size() - 1);
+                    return null;
+                }
+                log.info("设备 {} 已使用新会话重连，保留在线状态", deviceId);
+                return current;
+            });
         }
     }
 
@@ -84,6 +93,10 @@ public class DeviceSessionManager {
     public boolean isDeviceOnline(String deviceId) {
         WebSocketSession session = sessionMap.get(deviceId);
         return session != null && session.isOpen();
+    }
+
+    public String getDeviceIdBySessionId(String sessionId) {
+        return sessionIdToDeviceIdMap.get(sessionId);
     }
 
     public boolean isSameSession(String deviceId, WebSocketSession incomingSession) {

@@ -22,20 +22,6 @@ public class ProtocolMapper {
         return encode(16, deviceId, tlv);
     }
 
-    public MappedBinaryMessage mapTemplateScene(String deviceId, String templateId, String payloadJson) {
-        TlvBuilder tlv = new TlvBuilder()
-                .addString(31, templateId)
-                .addJson(32, payloadJson);
-        return encode(13, deviceId, tlv);
-    }
-
-    public MappedBinaryMessage mapTemplatePatch(String deviceId, String templateId, String patchJson) {
-        TlvBuilder tlv = new TlvBuilder()
-                .addString(31, templateId)
-                .addJson(32, patchJson);
-        return encode(14, deviceId, tlv);
-    }
-
     public MappedBinaryMessage mapActuatorCmd(String deviceId, String action, String paramsJson) {
         TlvBuilder tlv = new TlvBuilder()
                 .addString(31, action)

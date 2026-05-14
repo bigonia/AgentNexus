@@ -54,7 +54,7 @@ class BinaryProtocolCodecTest {
         byte[] frame = BinaryProtocolCodec.encode(10, 0, new byte[0]);
         assertEquals(16, frame.length);
 
-        ByteBuffer hdr = ByteBuffer.wrap(frame).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer hdr = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
         assertEquals(0x5344, hdr.getShort() & 0xFFFF);
         assertEquals(1, hdr.get() & 0xFF);
         assertEquals(10, hdr.get() & 0xFF);

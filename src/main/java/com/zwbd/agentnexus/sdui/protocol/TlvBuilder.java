@@ -17,14 +17,14 @@ public class TlvBuilder {
 
     public TlvBuilder addU16(int type, int value) {
         writeTlvHeader(type, 2);
-        byte[] b = ByteBuffer.allocate(2).order(ByteOrder.BIG_ENDIAN).putShort((short) value).array();
+        byte[] b = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short) value).array();
         try { buf.write(b); } catch (IOException e) { throw new RuntimeException(e); }
         return this;
     }
 
     public TlvBuilder addU32(int type, long value) {
         writeTlvHeader(type, 4);
-        byte[] b = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt((int) value).array();
+        byte[] b = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt((int) value).array();
         try { buf.write(b); } catch (IOException e) { throw new RuntimeException(e); }
         return this;
     }
@@ -44,7 +44,7 @@ public class TlvBuilder {
     }
 
     private void writeTlvHeader(int type, int len) {
-        byte[] h = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+        byte[] h = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) type).putShort((short) len).array();
         try { buf.write(h); } catch (IOException e) { throw new RuntimeException(e); }
     }

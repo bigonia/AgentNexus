@@ -1,8 +1,10 @@
 package com.zwbd.agentnexus.sdui;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
-import com.zwbd.agentnexus.sdui.repo.SduiDeviceAppBindingRepository;
+import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.service.SduiDeviceService;
 import com.zwbd.agentnexus.sdui.service.SduiProtocolService;
 import lombok.extern.slf4j.Slf4j;
@@ -16,16 +18,16 @@ public class HeartbeatHandler implements TopicHandler {
     private final DeviceSessionManager sessionManager;
     private final SduiDeviceService deviceService;
     private final SduiProtocolService protocolService;
-    private final SduiDeviceAppBindingRepository bindingRepository;
+    private final SduiCapabilityService capabilityService;
 
     public HeartbeatHandler(DeviceSessionManager sessionManager,
                             SduiDeviceService deviceService,
                             SduiProtocolService protocolService,
-                            SduiDeviceAppBindingRepository bindingRepository) {
+                            SduiCapabilityService capabilityService) {
         this.sessionManager = sessionManager;
         this.deviceService = deviceService;
         this.protocolService = protocolService;
-        this.bindingRepository = bindingRepository;
+        this.capabilityService = capabilityService;
     }
 
     @Override
@@ -38,14 +40,15 @@ public class HeartbeatHandler implements TopicHandler {
         String deviceId = message.getDeviceId();
         boolean justConnected = false;
 
-        if (!sessionManager.isDeviceOnline(deviceId)) {
+        if (!sessionManager.isDeviceOnline(deviceId) || !sessionManager.isSameSession(deviceId, session)) {
             sessionManager.registerSession(deviceId, session);
             justConnected = true;
         }
 
         JsonNode payload = message.getPayload();
-        if (payload == null) {
-            return;
+        if (payload == null || payload.isNull()) {
+            payload = createEmptyPayload();
+            log.info("Heartbeat payload missing, fallback to empty payload. deviceId={}", deviceId);
         }
 
         int rssi = payload.path("wifi_rssi").asInt(0);
@@ -54,27 +57,24 @@ public class HeartbeatHandler implements TopicHandler {
 
         SduiDevice device = deviceService.onHeartbeat(deviceId, payload);
         if (justConnected) {
-            log.info("Device registration state on first heartbeat. deviceId={}, registrationStatus={}, ownerSpaceId={}, claimedAt={}, claimCodeExpireAt={}",
-                    deviceId,
-                    device.getRegistrationStatus(),
-                    device.getOwnerSpaceId(),
-                    device.getClaimedAt(),
-                    device.getClaimCodeExpireAt());
+            log.info("Device connected. deviceId={}, registrationStatus={}, spaceId={}",
+                    deviceId, device.getRegistrationStatus(), device.getOwnerSpaceId());
         }
         if (!justConnected) {
             return;
         }
 
         if ("UNCLAIMED".equalsIgnoreCase(device.getRegistrationStatus())) {
-            boolean sent = protocolService.sendLayout(deviceId, deviceService.registrationPagePayload(device));
-            log.info("Registration layout dispatch (stage=UNCLAIMED). deviceId={}, sent={}, claimCode={}", deviceId, sent, device.getClaimCode());
+            log.info("Device unclaimed, waiting for claim. deviceId={}, claimCode={}",
+                    deviceId, device.getClaimCode());
             return;
         }
 
-        boolean hasActiveBinding = bindingRepository.findByDeviceIdAndActiveTrue(deviceId).isPresent();
-        if (!hasActiveBinding) {
-            boolean sent = protocolService.sendLayout(deviceId, deviceService.waitingForPublishPagePayload(device));
-            log.info("Waiting layout dispatch (claimed but no app binding). deviceId={}, sent={}", deviceId, sent);
-        }
+        log.info("Device claimed and reconnected. deviceId={}, capabilitiesStored={}",
+                deviceId, device.getCapabilitiesSnapshot() != null);
+    }
+
+    private JsonNode createEmptyPayload() {
+        return new ObjectNode(JsonNodeFactory.instance);
     }
 }

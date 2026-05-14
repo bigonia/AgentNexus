@@ -36,6 +36,9 @@ public class SduiDevice {
     @Column(length = 64)
     private String currentPageId;
 
+    @Column(columnDefinition = "text")
+    private String capabilitiesSnapshot;
+
     @Column(nullable = false, length = 24)
     private String registrationStatus = "UNCLAIMED";
 
