@@ -22,13 +22,6 @@ public class ProtocolMapper {
         return encode(16, deviceId, tlv);
     }
 
-    public MappedBinaryMessage mapActuatorCmd(String deviceId, String action, String paramsJson) {
-        TlvBuilder tlv = new TlvBuilder()
-                .addString(31, action)
-                .addJson(32, paramsJson);
-        return encode(12, deviceId, tlv);
-    }
-
     private MappedBinaryMessage encode(int msgType, String deviceId, TlvBuilder tlv) {
         byte[] frame = BinaryProtocolCodec.encode(msgType, seq.incrementAndGet(), tlv.build());
         return new MappedBinaryMessage(deviceId, frame);

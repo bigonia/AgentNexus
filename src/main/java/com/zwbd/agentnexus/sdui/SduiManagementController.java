@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.common.web.ApiResponse;
 import com.zwbd.agentnexus.sdui.dto.SduiClaimDeviceRequest;
 import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +35,7 @@ public class SduiManagementController {
     private final SduiDeviceService deviceService;
     private final SduiCapabilityService capabilityService;
     private final SduiOpsService opsService;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/devices")
     public ApiResponse<List<SduiDevice>> devices() {
@@ -51,11 +55,13 @@ public class SduiManagementController {
         }
         SduiDevice d = deviceOpt.get();
         CapabilitySchema.DeviceProfile profile = capabilityService.getDeviceProfile(deviceId);
+        String board = extractBoard(d.getCapabilitiesSnapshot());
         SduiDeviceDetailResponse detail = SduiDeviceDetailResponse.builder()
                 .deviceId(d.getDeviceId())
                 .name(d.getName())
                 .status(d.getStatus())
                 .registrationStatus(d.getRegistrationStatus())
+                .board(board)
                 .screenShape(profile != null ? profile.shape() : null)
                 .screenWidth(profile != null ? profile.screenW() : 0)
                 .screenHeight(profile != null ? profile.screenH() : 0)
@@ -84,18 +90,31 @@ public class SduiManagementController {
     public ApiResponse<Map<String, Object>> control(@PathVariable String deviceId,
                                                      @Valid @RequestBody SduiDeviceControlRequest request) {
         SduiControlDispatchResult result = deviceService.controlDevice(deviceId, request);
-        return ApiResponse.ok(Map.of(
-                "sent", result.sent(),
-                "deviceId", deviceId,
-                "command", result.action(),
-                "cmdId", result.cmdId(),
-                "requestedValue", result.requestedValue(),
-                "status", result.status()
-        ));
+        Map<String, Object> data = new HashMap<>();
+        data.put("sent", result.sent());
+        data.put("deviceId", deviceId);
+        data.put("command", result.action());
+        data.put("cmdId", result.cmdId());
+        data.put("requestedValue", result.requestedValue());
+        data.put("status", result.status());
+        return ApiResponse.ok(data);
     }
 
     @GetMapping("/ops/overview")
     public ApiResponse<Map<String, Object>> opsOverview() {
         return ApiResponse.ok(opsService.overview());
+    }
+
+    private String extractBoard(String capabilitiesSnapshot) {
+        if (capabilitiesSnapshot == null || capabilitiesSnapshot.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(capabilitiesSnapshot);
+            JsonNode boardNode = root.path("board");
+            return boardNode.isMissingNode() ? null : boardNode.asText(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

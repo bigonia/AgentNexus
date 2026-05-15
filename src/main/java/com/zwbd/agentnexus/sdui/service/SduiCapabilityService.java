@@ -96,4 +96,62 @@ public class SduiCapabilityService {
                 .map(CapabilitySchema.CapabilitySnapshot::deviceProfile)
                 .orElse(null);
     }
+
+    public record CommandRoute(String topic, String action, boolean bareTopic) {
+        public boolean isActionTopic() { return !bareTopic; }
+    }
+
+    public CommandRoute resolveRoute(String deviceId, String command) {
+        return getCapabilities(deviceId)
+                .map(caps -> resolveFromCapabilities(command, caps))
+                .orElse(new CommandRoute("cmd/control", command, false));
+    }
+
+    private CommandRoute resolveFromCapabilities(String command, CapabilitySchema.CapabilitySnapshot caps) {
+        for (CapabilitySchema.OutputCapability out : caps.outputs()) {
+            if (!out.enabled() || out.commands() == null || !out.commands().contains(command)) {
+                continue;
+            }
+            if (out.legacyTopics() != null && !out.legacyTopics().isEmpty()) {
+                return resolveLegacy(command, out.legacyTopics());
+            }
+            break;
+        }
+        return new CommandRoute("cmd/control", command, false);
+    }
+
+    private CommandRoute resolveLegacy(String command, java.util.List<String> legacyTopics) {
+        String cmdKey = command.replace(".", "").replace("_", "").toLowerCase();
+        String bestAction = null;
+        String bareTopic = null;
+        int bestScore = 0;
+
+        for (String lt : legacyTopics) {
+            int colonIdx = lt.lastIndexOf(':');
+            if (colonIdx > 0 && colonIdx < lt.length() - 1) {
+                String action = lt.substring(colonIdx + 1);
+                String actionKey = action.replace("_", "").toLowerCase();
+                if (cmdKey.equals(actionKey)) {
+                    bestAction = action;
+                    break;
+                }
+                int score = 0;
+                if (cmdKey.contains(actionKey) || actionKey.contains(cmdKey)) score = 1;
+                if (score > bestScore || (score == bestScore && bestAction == null)) {
+                    bestAction = action;
+                    bestScore = score;
+                }
+            } else {
+                if (bareTopic == null) bareTopic = lt;
+            }
+        }
+
+        if (bestAction != null) {
+            return new CommandRoute("cmd/control", bestAction, false);
+        }
+        if (bareTopic != null) {
+            return new CommandRoute(bareTopic, null, true);
+        }
+        return new CommandRoute("cmd/control", command, false);
+    }
 }

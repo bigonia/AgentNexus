@@ -15,7 +15,9 @@ public class TriggerScheduler {
     private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(4);
     private final Map<String, ScheduledFuture<?>> cronTasks = new ConcurrentHashMap<>();
     private final Map<String, List<String>> webhookRoutes = new ConcurrentHashMap<>();
-    private final Map<String, List<String>> deviceEventRoutes = new ConcurrentHashMap<>();
+    private final Map<String, List<DeviceEventRoute>> deviceEventRoutes = new ConcurrentHashMap<>();
+
+    private record DeviceEventRoute(String deviceId, TriggerDef.DeviceEventTrigger trigger) {}
 
     public void registerTriggers(String deviceId, WorkflowDefinition def, WorkflowInstance instance,
                                   ActionExecutor actionExecutor, Map<String, String> env) {
@@ -38,8 +40,10 @@ public class TriggerScheduler {
                 webhookRoutes.computeIfAbsent(w.path(), k -> new ArrayList<>()).add(deviceId);
                 log.info("Webhook trigger registered: {} path={}", taskKey, w.path());
             } else if (trigger instanceof TriggerDef.DeviceEventTrigger d) {
-                deviceEventRoutes.computeIfAbsent(d.event(), k -> new ArrayList<>()).add(deviceId);
-                log.info("Device event trigger registered: {} event={}", taskKey, d.event());
+                deviceEventRoutes.computeIfAbsent(d.event(), k -> new ArrayList<>())
+                        .add(new DeviceEventRoute(deviceId, d));
+                log.info("Device event trigger registered: {} event={} sectionId={} nodeId={}",
+                        taskKey, d.event(), d.sectionId(), d.nodeId());
             } else if (trigger instanceof TriggerDef.ManualTrigger m) {
                 log.info("Manual trigger registered: {}", taskKey);
             }
@@ -56,7 +60,7 @@ public class TriggerScheduler {
         });
         webhookRoutes.values().forEach(list -> list.remove(deviceId));
         webhookRoutes.entrySet().removeIf(e -> e.getValue().isEmpty());
-        deviceEventRoutes.values().forEach(list -> list.remove(deviceId));
+        deviceEventRoutes.values().forEach(list -> list.removeIf(r -> r.deviceId().equals(deviceId)));
         deviceEventRoutes.entrySet().removeIf(e -> e.getValue().isEmpty());
         log.info("All triggers unregistered for device {}", deviceId);
     }
@@ -66,7 +70,34 @@ public class TriggerScheduler {
         return devices != null && !devices.isEmpty() ? devices.get(0) : null;
     }
 
+    /**
+     * Find devices matching an event, with optional sectionId/nodeId filtering.
+     * Returns a list of (deviceId, trigger) pairs that match the event.
+     */
+    public List<Map.Entry<String, TriggerDef.DeviceEventTrigger>> findMatchingTriggers(
+            String eventType, String sectionId, String nodeId) {
+        List<DeviceEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
+        List<Map.Entry<String, TriggerDef.DeviceEventTrigger>> result = new ArrayList<>();
+        for (DeviceEventRoute route : routes) {
+            TriggerDef.DeviceEventTrigger t = route.trigger();
+            if (matchesFilter(t.sectionId(), sectionId) && matchesFilter(t.nodeId(), nodeId)) {
+                result.add(Map.entry(route.deviceId(), t));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @deprecated use findMatchingTriggers(eventType, sectionId, nodeId) instead
+     */
+    @Deprecated
     public List<String> findDeviceEventDevices(String eventType) {
-        return deviceEventRoutes.getOrDefault(eventType, List.of());
+        List<DeviceEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
+        return routes.stream().map(DeviceEventRoute::deviceId).distinct().toList();
+    }
+
+    private boolean matchesFilter(String filterValue, String actualValue) {
+        if (filterValue == null || filterValue.isEmpty()) return true;
+        return filterValue.equals(actualValue);
     }
 }

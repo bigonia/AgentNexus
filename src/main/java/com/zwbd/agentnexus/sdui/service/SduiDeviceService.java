@@ -8,13 +8,17 @@ import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.model.SduiDeviceTelemetry;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySnapshotParser;
+import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
+import com.zwbd.agentnexus.sdui.section.SectionPresets;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SduiDeviceService {
@@ -24,6 +28,7 @@ public class SduiDeviceService {
     private final CommandService commandService;
     private final ClaimService claimService;
     private final SduiCapabilityService capabilityService;
+    private final SectionOrchestrationService orchestrationService;
     private final ObjectMapper objectMapper;
 
     public SduiDevice onHeartbeat(String deviceId, JsonNode payload) {
@@ -80,7 +85,13 @@ public class SduiDeviceService {
     public int markTimedOutCommands() { return commandService.markTimedOutCommands(); }
 
     public SduiDevice claimDevice(String deviceId, String claimCode, String deviceName) {
-        return claimService.claimDevice(deviceId, claimCode, deviceName, currentSpaceId());
+        SduiDevice device = claimService.claimDevice(deviceId, claimCode, deviceName, currentSpaceId());
+        try {
+            orchestrationService.sendScene(deviceId, SectionPresets.claimedSuccessScene());
+        } catch (Exception e) {
+            log.warn("Failed to push claimed success scene to device {}: {}", deviceId, e.getMessage());
+        }
+        return device;
     }
 
     @Transactional

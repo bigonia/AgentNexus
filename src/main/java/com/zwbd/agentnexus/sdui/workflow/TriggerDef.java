@@ -27,7 +27,7 @@ public sealed interface TriggerDef permits TriggerDef.ManualTrigger, TriggerDef.
         public String type() { return "webhook"; }
     }
 
-    record DeviceEventTrigger(String id, String event) implements TriggerDef {
+    record DeviceEventTrigger(String id, String event, String sectionId, String nodeId) implements TriggerDef {
         public String type() { return "device_event"; }
     }
 }

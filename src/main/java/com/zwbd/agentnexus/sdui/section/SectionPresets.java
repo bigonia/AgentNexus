@@ -62,6 +62,31 @@ public final class SectionPresets {
         ));
     }
 
+    public static SectionScene claimCodeScene(String claimCode) {
+        return new SectionScene("claim_code_screen", SectionLayout.FIXED_SINGLE, false, 0, List.of(
+                new SectionEntry(SectionType.HERO, "claim_code_hero",
+                        new SectionData.HeroData(formatClaimCode(claimCode), "认领码",
+                                "请在管理平台输入此码完成设备认领",
+                                "primary", "", -1))
+        ));
+    }
+
+    public static SectionScene claimedSuccessScene() {
+        return new SectionScene("claimed_success", SectionLayout.FIXED_SINGLE, false, 0, List.of(
+                new SectionEntry(SectionType.HERO, "claimed_hero",
+                        new SectionData.HeroData("✓", "认领成功",
+                                "设备已绑定，正在加载业务界面...",
+                                "success", "", -1))
+        ));
+    }
+
+    private static String formatClaimCode(String code) {
+        if (code == null || code.isBlank()) return "------";
+        String upper = code.trim().toUpperCase();
+        if (upper.length() <= 3) return upper;
+        return upper.substring(0, 3) + " " + upper.substring(3);
+    }
+
     public static SectionScene systemOverview() {
         return new SectionScene("system_overview", SectionLayout.VERTICAL_SCROLL, true, 3000, List.of(
                 new SectionEntry(SectionType.HERO, "health_hero",

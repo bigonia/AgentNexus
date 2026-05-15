@@ -168,3 +168,5 @@ file:
 sdui:
   command:
     timeout-scan-ms: 3000
+  tts:
+    ffmpeg-path: ffmpeg

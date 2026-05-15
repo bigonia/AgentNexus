@@ -1,6 +1,5 @@
 package com.zwbd.agentnexus.sdui.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
 import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceCommandRepository;
@@ -12,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -20,30 +18,27 @@ import java.util.UUID;
 public class CommandService {
 
     private final SduiDeviceCommandRepository commandRepository;
-    private final SduiProtocolService protocolService;
-    private final ObjectMapper objectMapper;
+    private final CommandDispatcher dispatcher;
 
     private static final long COMMAND_TIMEOUT_SECONDS = 10L;
 
     @Transactional
     public SduiControlDispatchResult dispatchCommand(String deviceId, String action, Object value) {
-        int v = normalizeValue(value);
-        String cmdId = UUID.randomUUID().toString();
-        String paramsJson = "{\"cmd_id\":\"" + cmdId + "\",\"action\":\"" + action + "\",\"value\":" + v + "}";
-
-        boolean sent = protocolService.sendActuatorCmd(deviceId, action, paramsJson);
+        Integer v = value != null ? normalizeValue(value) : null;
+        CommandDispatcher.DispatchResult result = dispatcher.dispatch(deviceId, action,
+                v != null ? v : value);
 
         SduiDeviceCommand command = new SduiDeviceCommand();
         command.setDeviceId(deviceId);
-        command.setTopic("binary:HW_ACTUATOR_CMD");
-        command.setCmdId(cmdId);
-        command.setAction(action);
+        command.setTopic(result.topic());
+        command.setCmdId(result.cmdId());
+        command.setAction(result.action());
         command.setRequestedValue(v);
-        command.setPayload(paramsJson);
-        command.setStatus(sent ? "SENT" : "FAILED");
+        command.setPayload(result.payload());
+        command.setStatus(result.sent() ? "SENT" : "FAILED");
         commandRepository.save(command);
 
-        return new SduiControlDispatchResult(cmdId, action, v, sent, command.getStatus());
+        return new SduiControlDispatchResult(result.cmdId(), result.action(), v, result.sent(), command.getStatus());
     }
 
     @Transactional

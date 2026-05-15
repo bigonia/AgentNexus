@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn test *)",
+      "Bash(Select-String -Pattern \"Tests run|BUILD|ERROR|FAIL\")",
+      "Skill(superpowers:systematic-debugging)",
+      "Bash(mvn compile *)",
+      "Bash(Select-Object -Last 20)",
+      "PowerShell(mvn compile *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(.\\\\mvnw clean *)",
+      "Bash(Select-Object -Last 30)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1 | Select-Object -Last 40)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1 | Select-Object -Last 15)",
+      "Bash(ffmpeg -version)",
+      "Bash(powershell *)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1 | Select-Object -Last 10)",
+      "Bash(java -jar target/AgentNexus-0.0.1-SNAPSHOT.jar)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/api/v1/sdui/devices)",
+      "PowerShell(.\\\\mvnw clean package -DskipTests 2>&1 | Select-Object -Last 5)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1 | Select-Object -Last 8)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1 | Select-Object -Last 5)",
+      "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1)",
+      "PowerShell(.\\\\mvnw test -Dtest=VariableResolverTest -DfailIfNoTests=false 2>&1)",
+      "PowerShell(.\\\\mvnw test -Dtest=\"VariableResolverTest,WorkflowDefinitionSerializationTest\" -DfailIfNoTests=false 2>&1)",
+      "PowerShell(.\\\\mvnw test -DfailIfNoTests=false 2>&1)"
+    ]
+  }
+}

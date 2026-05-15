@@ -32,7 +32,7 @@ class WorkflowDefinitionSerializationTest {
                         new TriggerDef.CronTrigger("t_refresh", 60, null),
                         new TriggerDef.WebhookTrigger("t_new_mail", "/new-email"),
                         new TriggerDef.ManualTrigger("t_debug"),
-                        new TriggerDef.DeviceEventTrigger("t_btn", "action_click")
+                        new TriggerDef.DeviceEventTrigger("t_btn", "action_click", null, null)
                 ),
                 Map.of(
                         "t_refresh", List.of(

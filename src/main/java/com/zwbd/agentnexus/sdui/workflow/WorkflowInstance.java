@@ -10,6 +10,7 @@ public class WorkflowInstance {
     private final String deviceId;
     private final String workflowId;
     private final Map<String, Object> variables;
+    private final VariableWatcher watcher;
     private String activePage;
     private Status status;
 
@@ -17,12 +18,14 @@ public class WorkflowInstance {
         this.deviceId = deviceId;
         this.workflowId = workflowId;
         this.variables = new LinkedHashMap<>();
+        this.watcher = new VariableWatcher();
         this.status = Status.RUNNING;
     }
 
     public String deviceId() { return deviceId; }
     public String workflowId() { return workflowId; }
     public Map<String, Object> variables() { return variables; }
+    public VariableWatcher watcher() { return watcher; }
     public String activePage() { return activePage; }
     public void activePage(String page) { this.activePage = page; }
     public Status status() { return status; }

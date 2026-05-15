@@ -1,2 +1,0 @@
-﻿# Trusted script runtime executes pure Python logic via stdio bridge.
-# Keep empty unless your platform runtime enables package install.
