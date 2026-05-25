@@ -20,19 +20,26 @@ public final class CapabilitySnapshotParser {
     }
 
     private static CapabilitySchema.CapabilitySnapshot parseRoot(JsonNode root) {
-        if (!root.has("device_profile") && !root.has("inputs") && !root.has("outputs")
-                && (root.has("board") || root.has("screen_w") || root.has("shape"))) {
+        boolean hasStructured = root.has("device_profile") || root.has("inputs") || root.has("outputs");
+        boolean hasFlat = root.has("board") || root.has("screen_w") || root.has("shape");
+
+        if (!hasStructured && hasFlat) {
             return parseFlatDeviceInfo(root);
         }
 
+        CapabilitySchema.CapabilitySnapshot structured = parseStructured(root);
+
+        if (hasFlat) {
+            CapabilitySchema.CapabilitySnapshot flat = parseFlatDeviceInfo(root);
+            return mergeCapabilities(structured, flat);
+        }
+
+        return structured;
+    }
+
+    private static CapabilitySchema.CapabilitySnapshot parseStructured(JsonNode root) {
         JsonNode profile = root.path("device_profile");
-        CapabilitySchema.DeviceProfile deviceProfile = new CapabilitySchema.DeviceProfile(
-                profile.path("shape").asText(null),
-                profile.path("screen_w").asInt(0),
-                profile.path("screen_h").asInt(0),
-                profile.path("input_mode").asText(null),
-                profile.path("auto_sleep_by_inactive").asBoolean(false)
-        );
+        CapabilitySchema.DeviceProfile deviceProfile = parseDeviceProfile(profile);
 
         List<CapabilitySchema.InputCapability> inputs =
                 parseArray(root.path("inputs"), CapabilitySnapshotParser::parseInput);
@@ -43,6 +50,73 @@ public final class CapabilitySnapshotParser {
                 .stream().filter(Objects::nonNull).findFirst().orElse(null);
 
         return new CapabilitySchema.CapabilitySnapshot(deviceProfile, inputs, outputs, section);
+    }
+
+    private static CapabilitySchema.DeviceProfile parseDeviceProfile(JsonNode profile) {
+        if (profile == null || profile.isMissingNode()) {
+            return new CapabilitySchema.DeviceProfile(null, 0, 0, null, false);
+        }
+
+        String shape = profile.path("shape").asText(null);
+        int screenW = profile.path("screen_w").asInt(0);
+        int screenH = profile.path("screen_h").asInt(0);
+        String inputMode = profile.path("input_mode").asText(null);
+
+        // Handle nested screen object: {"screen":{"w":128,"h":128,"shape":"rect"}}
+        JsonNode screen = profile.path("screen");
+        if (!screen.isMissingNode()) {
+            if (shape == null) shape = screen.path("shape").asText(null);
+            if (screenW == 0) screenW = screen.path("w").asInt(0);
+            if (screenH == 0) screenH = screen.path("h").asInt(0);
+        }
+
+        boolean autoSleep = profile.path("auto_sleep_by_inactive").asBoolean(false);
+        return new CapabilitySchema.DeviceProfile(shape, screenW, screenH, inputMode, autoSleep);
+    }
+
+    private static CapabilitySchema.CapabilitySnapshot mergeCapabilities(
+            CapabilitySchema.CapabilitySnapshot structured,
+            CapabilitySchema.CapabilitySnapshot flat) {
+
+        // Collect commands already covered by structured outputs
+        Set<String> coveredCommands = new java.util.LinkedHashSet<>();
+        for (CapabilitySchema.OutputCapability o : structured.outputs()) {
+            if (o.commands() != null) coveredCommands.addAll(o.commands());
+        }
+
+        // Add flat outputs not already covered
+        List<CapabilitySchema.OutputCapability> mergedOutputs = new ArrayList<>(structured.outputs());
+        for (CapabilitySchema.OutputCapability o : flat.outputs()) {
+            if (o.commands() != null && o.commands().stream().noneMatch(coveredCommands::contains)) {
+                mergedOutputs.add(o);
+            }
+        }
+
+        // Merge inputs: add flat inputs not already covered by name
+        Set<String> coveredInputNames = structured.inputs().stream()
+                .map(CapabilitySchema.InputCapability::name)
+                .collect(Collectors.toSet());
+        List<CapabilitySchema.InputCapability> mergedInputs = new ArrayList<>(structured.inputs());
+        for (CapabilitySchema.InputCapability in : flat.inputs()) {
+            if (!coveredInputNames.contains(in.name())) {
+                mergedInputs.add(in);
+            }
+        }
+
+        // Prefer structured section, fall back to flat
+        CapabilitySchema.SectionCapability section = structured.section();
+        if (section == null || !section.enabled()) {
+            section = flat.section();
+        }
+
+        // Prefer flat deviceProfile if structured has no screen dimensions
+        CapabilitySchema.DeviceProfile profile = structured.deviceProfile();
+        if ((profile.screenW() == 0 && profile.screenH() == 0)
+                && (flat.deviceProfile().screenW() > 0 || flat.deviceProfile().screenH() > 0)) {
+            profile = flat.deviceProfile();
+        }
+
+        return new CapabilitySchema.CapabilitySnapshot(profile, mergedInputs, mergedOutputs, section);
     }
 
     /**
@@ -91,28 +165,28 @@ public final class CapabilitySnapshotParser {
             section = new CapabilitySchema.SectionCapability(
                     true, displayCommands, "binary", supportedTypes, supportedLayouts, limits);
             outputs.add(new CapabilitySchema.OutputCapability(
-                    "display", "display.section", "lcd", true, displayCommands, List.of()));
+                    "display", "display.section", "lcd", true, displayCommands, List.of(), null));
         }
 
         if (root.path("audio").asBoolean(false)) {
             outputs.add(new CapabilitySchema.OutputCapability(
                     "audio", "audio.prompt", "i2s", true,
                     List.of("audio.prompt.play", "audio.stream.play", "audio.volume.set"),
-                    List.of()));
+                    List.of(), null));
         }
 
         if (root.path("rgb").asBoolean(false)) {
             outputs.add(new CapabilitySchema.OutputCapability(
                     "rgb", "rgb.effect", "led", true,
                     List.of("rgb.effect.set", "rgb.off"),
-                    List.of()));
+                    List.of(), null));
         }
 
         if (root.path("power").asBoolean(false) && root.path("ext_power_ctrl").asBoolean(false)) {
             outputs.add(new CapabilitySchema.OutputCapability(
                     "power", "device.reboot", "pmu", true,
                     List.of("device.reboot"),
-                    List.of()));
+                    List.of("cmd/control:reboot"), null));
         }
 
         return new CapabilitySchema.CapabilitySnapshot(deviceProfile, inputs, outputs, section);
@@ -159,7 +233,8 @@ public final class CapabilitySnapshotParser {
                 n.path("module").asText(""),
                 n.path("enabled").asBoolean(false),
                 stringList(n.path("commands")),
-                stringList(n.path("legacy_topics"))
+                stringList(n.path("legacy_topics")),
+                n.path("params")
         );
     }
 

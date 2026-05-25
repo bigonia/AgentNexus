@@ -8,8 +8,10 @@ import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
 import com.zwbd.agentnexus.sdui.dto.SduiDeviceControlRequest;
 import com.zwbd.agentnexus.sdui.dto.SduiDeviceDetailResponse;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
+import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
 import com.zwbd.agentnexus.sdui.model.SduiDeviceTelemetry;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
+import com.zwbd.agentnexus.sdui.repo.SduiDeviceCommandRepository;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.service.SduiDeviceService;
 import com.zwbd.agentnexus.sdui.service.SduiOpsService;
@@ -26,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/sdui")
@@ -35,6 +38,7 @@ public class SduiManagementController {
     private final SduiDeviceService deviceService;
     private final SduiCapabilityService capabilityService;
     private final SduiOpsService opsService;
+    private final SduiDeviceCommandRepository commandRepository;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/devices")
@@ -56,6 +60,17 @@ public class SduiManagementController {
         SduiDevice d = deviceOpt.get();
         CapabilitySchema.DeviceProfile profile = capabilityService.getDeviceProfile(deviceId);
         String board = extractBoard(d.getCapabilitiesSnapshot());
+        List<SduiDeviceDetailResponse.RecentCommand> recentCommands =
+                commandRepository.findTop10ByDeviceIdOrderByCreatedAtDesc(deviceId)
+                        .stream().map(c -> SduiDeviceDetailResponse.RecentCommand.builder()
+                                .cmdId(c.getCmdId())
+                                .action(c.getAction())
+                                .status(c.getStatus())
+                                .reason(c.getReason())
+                                .createdAt(c.getCreatedAt())
+                                .build())
+                        .collect(Collectors.toList());
+
         SduiDeviceDetailResponse detail = SduiDeviceDetailResponse.builder()
                 .deviceId(d.getDeviceId())
                 .name(d.getName())
@@ -67,6 +82,7 @@ public class SduiManagementController {
                 .screenHeight(profile != null ? profile.screenH() : 0)
                 .inputMode(profile != null ? profile.inputMode() : null)
                 .availableCommands(capabilityService.getAvailableCommands(deviceId))
+                .recentCommands(recentCommands)
                 .capabilitiesSnapshot(d.getCapabilitiesSnapshot())
                 .lastSeenAt(d.getLastSeenAt())
                 .claimedAt(d.getClaimedAt())

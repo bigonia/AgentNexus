@@ -8,9 +8,11 @@ import com.zwbd.agentnexus.sdui.dto.ConsoleTtsRequest;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.service.AudioService.PlayResult;
 import com.zwbd.agentnexus.sdui.service.CommandDispatcher;
+import com.zwbd.agentnexus.sdui.service.CommandSchemaRegistry;
 import com.zwbd.agentnexus.sdui.service.ConsoleLayoutService;
 import com.zwbd.agentnexus.sdui.service.EventStreamService;
 import com.zwbd.agentnexus.sdui.service.RgbControlService;
+import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -31,6 +34,8 @@ public class DeviceConsoleController {
     private final AudioService audioService;
     private final CommandDispatcher commandDispatcher;
     private final DeviceSessionManager sessionManager;
+    private final SduiCapabilityService capabilityService;
+    private final CommandSchemaRegistry schemaRegistry;
 
     @GetMapping("/layout")
     public ApiResponse<Map<String, Object>> layout(@PathVariable String deviceId) {
@@ -92,12 +97,77 @@ public class DeviceConsoleController {
         if (!sessionManager.isDeviceOnline(deviceId)) {
             return ApiResponse.error(40000, "device is offline");
         }
-        CommandDispatcher.DispatchResult result = commandDispatcher.dispatch(deviceId, "system.reboot", null);
+        CommandDispatcher.DispatchResult result = commandDispatcher.dispatch(deviceId, "device.reboot", null);
         return ApiResponse.ok(Map.of(
                 "sent", result.sent(),
                 "deviceId", deviceId,
                 "cmdId", result.cmdId()
         ));
+    }
+
+    @GetMapping("/debug/commands")
+    public ApiResponse<Map<String, Object>> debugCommands(@PathVariable String deviceId) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("deviceId", deviceId);
+        data.put("online", sessionManager.isDeviceOnline(deviceId));
+        data.put("availableCommands", capabilityService.getAvailableCommands(deviceId));
+        data.put("schemas", schemaRegistry.getAllSchemas(deviceId));
+        return ApiResponse.ok(data);
+    }
+
+    @PostMapping("/debug/command")
+    public ApiResponse<Map<String, Object>> debugCommand(@PathVariable String deviceId,
+                                                         @RequestBody Map<String, Object> body) {
+        if (!sessionManager.isDeviceOnline(deviceId)) {
+            return ApiResponse.error(40000, "device is offline");
+        }
+
+        String command = (String) body.getOrDefault("command", "rgb.off");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> params = (Map<String, Object>) body.get("params");
+        String overrideAction = (String) body.get("action");
+
+        // Apply defaults from schema
+        Map<String, Object> effectiveParams = schemaRegistry.applyDefaults(deviceId, command, params);
+
+        // Validate against schema
+        List<String> validationErrors = schemaRegistry.validate(deviceId, command, effectiveParams);
+
+        CommandDispatcher.DispatchResult result;
+        if (!validationErrors.isEmpty()) {
+            result = null; // Don't send, just show errors
+        } else if (overrideAction != null) {
+            result = commandDispatcher.dispatchWithAction(deviceId, command, overrideAction, effectiveParams);
+        } else {
+            result = commandDispatcher.dispatch(deviceId, command, effectiveParams);
+        }
+
+        SduiCapabilityService.CommandRoute route = capabilityService.resolveRoute(deviceId, command);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sent", result != null && result.sent());
+        response.put("deviceId", deviceId);
+        response.put("online", sessionManager.isDeviceOnline(deviceId));
+        response.put("command", command);
+        response.put("resolvedTopic", route.topic());
+        response.put("resolvedAction", route.action());
+        response.put("effectiveAction", result != null ? result.action() : null);
+        response.put("appliedDefaults", !effectiveParams.equals(params));
+        response.put("validationErrors", validationErrors);
+        response.put("paramsSent", effectiveParams);
+        response.put("payloadSent", result != null ? result.payload() : null);
+        response.put("cmdId", result != null ? result.cmdId() : null);
+        response.put("schema", schemaRegistry.getSchema(deviceId, command).orElse(null));
+        response.put("availableCommands", capabilityService.getAvailableCommands(deviceId));
+
+        if (!validationErrors.isEmpty() && result == null) {
+            response.put("status", "VALIDATION_FAILED");
+        } else if (result != null && result.sent()) {
+            response.put("status", "SENT");
+        } else {
+            response.put("status", "SEND_FAILED");
+        }
+        return ApiResponse.ok(response);
     }
 
     private Map<String, Object> buildPresetResponse(String deviceId, String preset, PlayResult result) {

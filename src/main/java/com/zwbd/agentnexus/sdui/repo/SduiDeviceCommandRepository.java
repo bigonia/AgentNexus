@@ -13,4 +13,6 @@ public interface SduiDeviceCommandRepository extends JpaRepository<SduiDeviceCom
     Optional<SduiDeviceCommand> findFirstByDeviceIdAndCmdIdOrderByCreatedAtDesc(String deviceId, String cmdId);
 
     List<SduiDeviceCommand> findByStatusAndCreatedAtBefore(String status, LocalDateTime time);
+
+    List<SduiDeviceCommand> findTop10ByDeviceIdOrderByCreatedAtDesc(String deviceId);
 }

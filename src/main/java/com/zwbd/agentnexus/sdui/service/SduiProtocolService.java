@@ -16,16 +16,19 @@ public class SduiProtocolService {
 
     public boolean sendSectionScene(String deviceId, String sceneJson) {
         ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapSectionScene(deviceId, sceneJson);
+        log.info("Sending section scene to device={}, frameSize={}", deviceId, msg.frame().length);
         return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
     public boolean sendSectionPatch(String deviceId, String patchJson) {
         ProtocolMapper.MappedBinaryMessage msg = protocolMapper.mapSectionPatch(deviceId, patchJson);
+        log.info("Sending section patch to device={}, frameSize={}", deviceId, msg.frame().length);
         return sessionManager.sendBinaryFrame(deviceId, msg.frame());
     }
 
     public boolean sendControlCommand(String deviceId, String topic, String paramsJson) {
         String message = "{\"topic\":\"" + topic + "\",\"payload\":" + paramsJson + "}";
+        log.info("Sending control command to device={}: {}", deviceId, message);
         return sessionManager.sendMessage(deviceId, message);
     }
 }

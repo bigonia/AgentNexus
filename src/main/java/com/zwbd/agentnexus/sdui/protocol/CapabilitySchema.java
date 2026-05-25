@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui.protocol;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.List;
 import java.util.Map;
 
@@ -35,7 +37,8 @@ public final class CapabilitySchema {
             String module,
             boolean enabled,
             List<String> commands,
-            List<String> legacyTopics
+            List<String> legacyTopics,
+            JsonNode params
     ) {}
 
     public record SectionCapability(

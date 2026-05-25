@@ -20,11 +20,13 @@ public class SduiCapabilityService {
 
     private final SduiDeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
+    private final CommandSchemaRegistry schemaRegistry;
     private final Map<String, CapabilitySchema.CapabilitySnapshot> cache = new ConcurrentHashMap<>();
 
     @Transactional
     public void onCapabilitiesReport(String deviceId, CapabilitySchema.CapabilitySnapshot caps, String rawJson) {
         cache.put(deviceId, caps);
+        schemaRegistry.loadFromCapabilities(deviceId, caps);
         SduiDevice device = deviceRepository.findById(deviceId).orElse(null);
         if (device != null) {
             device.setCapabilitiesSnapshot(rawJson);
@@ -44,6 +46,7 @@ public class SduiCapabilityService {
             CapabilitySchema.CapabilitySnapshot caps = CapabilitySnapshotParser.parse(
                     device.getCapabilitiesSnapshot(), objectMapper);
             cache.put(deviceId, caps);
+            schemaRegistry.loadFromCapabilities(deviceId, caps);
             return Optional.of(caps);
         } catch (Exception e) {
             log.error("Failed to parse capabilities for device {}", deviceId, e);

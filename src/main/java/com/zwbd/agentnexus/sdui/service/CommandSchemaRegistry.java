@@ -1,0 +1,154 @@
+package com.zwbd.agentnexus.sdui.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+@Slf4j
+@Service
+public class CommandSchemaRegistry {
+
+    private final Map<String, Map<String, CommandSchema>> deviceSchemas = new ConcurrentHashMap<>();
+
+    public record CommandSchema(
+            String command,
+            String description,
+            Map<String, FieldDef> fields
+    ) {}
+
+    public record FieldDef(
+            String type,
+            Integer min,
+            Integer max,
+            Object defaultValue,
+            List<String> values,
+            boolean required,
+            String label
+    ) {}
+
+    public void loadFromCapabilities(String deviceId, CapabilitySchema.CapabilitySnapshot caps) {
+        Map<String, CommandSchema> schemas = new LinkedHashMap<>();
+        for (CapabilitySchema.OutputCapability out : caps.outputs()) {
+            if (!out.enabled() || out.commands() == null) continue;
+            JsonNode paramsNode = out.params();
+            if (paramsNode == null || paramsNode.isMissingNode()) continue;
+            for (String cmd : out.commands()) {
+                JsonNode cmdNode = paramsNode.path(cmd);
+                if (!cmdNode.isMissingNode()) {
+                    CommandSchema schema = parseCommandSchema(cmd, cmdNode);
+                    schemas.put(cmd, schema);
+                }
+            }
+        }
+        if (!schemas.isEmpty()) {
+            deviceSchemas.put(deviceId, schemas);
+            log.info("Loaded {} command schemas for device {}", schemas.size(), deviceId);
+        }
+    }
+
+    public Optional<CommandSchema> getSchema(String deviceId, String command) {
+        Map<String, CommandSchema> schemas = deviceSchemas.get(deviceId);
+        if (schemas == null) return Optional.empty();
+        return Optional.ofNullable(schemas.get(command));
+    }
+
+    public Map<String, CommandSchema> getAllSchemas(String deviceId) {
+        return deviceSchemas.getOrDefault(deviceId, Collections.emptyMap());
+    }
+
+    public List<String> validate(String deviceId, String command, Map<String, Object> params) {
+        List<String> errors = new ArrayList<>();
+        Optional<CommandSchema> schemaOpt = getSchema(deviceId, command);
+        if (schemaOpt.isEmpty()) return errors;
+
+        CommandSchema schema = schemaOpt.get();
+        Set<String> provided = params != null ? params.keySet() : Collections.emptySet();
+
+        for (var entry : schema.fields().entrySet()) {
+            String name = entry.getKey();
+            FieldDef field = entry.getValue();
+            Object value = params != null ? params.get(name) : null;
+
+            if (value == null && field.required() && !provided.contains(name)) {
+                errors.add(name + ": required field missing");
+                continue;
+            }
+            if (value == null) continue;
+
+            switch (field.type()) {
+                case "int" -> {
+                    if (!(value instanceof Number)) {
+                        errors.add(name + ": expected int, got " + value.getClass().getSimpleName());
+                    } else {
+                        int v = ((Number) value).intValue();
+                        if (field.min() != null && v < field.min())
+                            errors.add(name + ": min is " + field.min() + ", got " + v);
+                        if (field.max() != null && v > field.max())
+                            errors.add(name + ": max is " + field.max() + ", got " + v);
+                    }
+                }
+                case "enum" -> {
+                    if (field.values() != null && !field.values().contains(String.valueOf(value))) {
+                        errors.add(name + ": expected one of " + field.values() + ", got " + value);
+                    }
+                }
+            }
+        }
+        return errors;
+    }
+
+    public Map<String, Object> applyDefaults(String deviceId, String command, Map<String, Object> params) {
+        Optional<CommandSchema> schemaOpt = getSchema(deviceId, command);
+        if (schemaOpt.isEmpty()) return params != null ? new LinkedHashMap<>(params) : new LinkedHashMap<>();
+
+        Map<String, Object> result = new LinkedHashMap<>(params != null ? params : new LinkedHashMap<>());
+        for (var entry : schemaOpt.get().fields().entrySet()) {
+            String name = entry.getKey();
+            FieldDef field = entry.getValue();
+            if (!result.containsKey(name) && field.defaultValue() != null) {
+                result.put(name, field.defaultValue());
+            }
+        }
+        return result;
+    }
+
+    private CommandSchema parseCommandSchema(String command, JsonNode node) {
+        String description = node.path("description").asText(null);
+        Map<String, FieldDef> fields = new LinkedHashMap<>();
+        JsonNode paramsNode = node.path("params");
+        if (paramsNode.isObject()) {
+            var iter = paramsNode.fields();
+            while (iter.hasNext()) {
+                var entry = iter.next();
+                fields.put(entry.getKey(), parseFieldDef(entry.getValue()));
+            }
+        }
+        return new CommandSchema(command, description, fields);
+    }
+
+    private FieldDef parseFieldDef(JsonNode node) {
+        String type = node.path("type").asText("string");
+        Integer min = node.path("min").isNumber() ? node.path("min").asInt() : null;
+        Integer max = node.path("max").isNumber() ? node.path("max").asInt() : null;
+        Object defaultValue = null;
+        JsonNode defNode = node.path("default");
+        if (!defNode.isMissingNode()) {
+            if (defNode.isNumber()) defaultValue = defNode.asInt();
+            else if (defNode.isBoolean()) defaultValue = defNode.asBoolean();
+            else defaultValue = defNode.asText();
+        }
+        List<String> values = null;
+        JsonNode valsNode = node.path("values");
+        if (valsNode.isArray()) {
+            values = new ArrayList<>();
+            for (JsonNode v : valsNode) values.add(v.asText());
+        }
+        boolean required = node.path("required").asBoolean(true);
+        String label = node.path("label").asText(null);
+        return new FieldDef(type, min, max, defaultValue, values, required, label);
+    }
+}

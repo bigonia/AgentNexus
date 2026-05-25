@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Data
@@ -20,7 +21,18 @@ public class SduiDeviceDetailResponse {
     private String inputMode;
     private Set<String> availableCommands;
     private String capabilitiesSnapshot;
+    private List<RecentCommand> recentCommands;
     private LocalDateTime lastSeenAt;
     private LocalDateTime claimedAt;
     private LocalDateTime createdAt;
+
+    @Data
+    @Builder
+    public static class RecentCommand {
+        private String cmdId;
+        private String action;
+        private String status;
+        private String reason;
+        private LocalDateTime createdAt;
+    }
 }

@@ -29,22 +29,42 @@ public class RgbControlService {
             return buildResponse(deviceId, result, mode, null, null);
         }
 
-        String value = buildCommandValue(mode, color, periodMs);
-        CommandDispatcher.DispatchResult result = dispatcher.dispatch(deviceId, "rgb.effect.set", value);
+        Map<String, Object> params = buildRgbParams(mode, color, periodMs);
+        String action = "solid".equals(mode) ? "rgb_set" : "rgb_policy";
+        CommandDispatcher.DispatchResult result = dispatcher.dispatchWithAction(
+                deviceId, "rgb.effect.set", action, params);
         return buildResponse(deviceId, result, mode, color, periodMs);
     }
 
-    private String buildCommandValue(String mode, String color, Integer periodMs) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(mode);
+    private Map<String, Object> buildRgbParams(String mode, String color, Integer periodMs) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("mode", mode);
+
         if (color != null && !color.isBlank()) {
             String hex = color.startsWith("#") ? color.substring(1) : color;
-            sb.append(':').append(hex);
+            try {
+                int rgb = Integer.parseInt(hex, 16);
+                params.put("r", (rgb >> 16) & 0xFF);
+                params.put("g", (rgb >> 8) & 0xFF);
+                params.put("b", rgb & 0xFF);
+            } catch (NumberFormatException e) {
+                params.put("r", 255);
+                params.put("g", 255);
+                params.put("b", 255);
+            }
+        } else {
+            params.put("r", 255);
+            params.put("g", 255);
+            params.put("b", 255);
         }
-        if (periodMs != null && !"solid".equals(mode) && !"rainbow".equals(mode)) {
-            sb.append(':').append(periodMs);
+
+        if (!"solid".equals(mode) && !"rainbow".equals(mode)) {
+            params.put("period_ms", periodMs != null ? periodMs : 2000);
+        } else if ("rainbow".equals(mode) && periodMs != null) {
+            params.put("period_ms", periodMs);
         }
-        return sb.toString();
+
+        return params;
     }
 
     private Map<String, Object> buildResponse(String deviceId, CommandDispatcher.DispatchResult result,
@@ -53,6 +73,7 @@ public class RgbControlService {
         resp.put("sent", result.sent());
         resp.put("deviceId", deviceId);
         resp.put("cmdId", result.cmdId());
+        resp.put("action", result.action());
         resp.put("mode", mode);
         if (color != null) resp.put("color", color);
         if (periodMs != null) resp.put("periodMs", periodMs);
