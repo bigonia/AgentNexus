@@ -51,7 +51,8 @@ class WorkflowDefinitionSerializationTest {
                         "t_btn", List.of(
                                 new ActionDef.ControlAction("audio.prompt.play", "notification")
                         )
-                )
+                ),
+                null, null, null
         );
 
         String json = mapper.writeValueAsString(def);
@@ -96,7 +97,8 @@ class WorkflowDefinitionSerializationTest {
                 "minimal", "最小工作流", "",
                 List.of(),
                 List.of(new TriggerDef.ManualTrigger("t1")),
-                Map.of("t1", List.of(new ActionDef.UpdatePageAction("main")))
+                Map.of("t1", List.of(new ActionDef.UpdatePageAction("main"))),
+                null, null, null
         );
 
         String json = mapper.writeValueAsString(def);
@@ -105,6 +107,54 @@ class WorkflowDefinitionSerializationTest {
         assertEquals("minimal", parsed.id());
         assertEquals(1, parsed.triggers().size());
         assertEquals(1, parsed.actions().size());
+    }
+
+    @Test
+    void nodeActionDefRoundTrip() throws Exception {
+        WorkflowDefinition def = new WorkflowDefinition(
+                "node_test", "统一节点测试", "",
+                List.of(),
+                List.of(new TriggerDef.ManualTrigger("t1")),
+                Map.of("t1", List.of(
+                        new ActionDef.NodeActionDef("device.control",
+                                Map.of("command", "rgb.effect.set", "value", "#ff0000")),
+                        new ActionDef.NodeActionDef("platform.tts",
+                                Map.of("text", "$data.message"))
+                )),
+                null, null, null
+        );
+
+        String json = mapper.writeValueAsString(def);
+        WorkflowDefinition parsed = mapper.readValue(json, WorkflowDefinition.class);
+
+        assertEquals("node_test", parsed.id());
+        List<ActionDef> actions = parsed.actions().get("t1");
+        assertEquals(2, actions.size());
+
+        ActionDef.NodeActionDef a1 = (ActionDef.NodeActionDef) actions.get(0);
+        assertEquals("device.control", a1.nodeType());
+        assertEquals("rgb.effect.set", a1.params().get("command"));
+
+        ActionDef.NodeActionDef a2 = (ActionDef.NodeActionDef) actions.get(1);
+        assertEquals("platform.tts", a2.nodeType());
+        assertEquals("$data.message", a2.params().get("text"));
+    }
+
+    @Test
+    void nodeActionDefJsonDeserialize() throws Exception {
+        String json = """
+        {
+          "id": "test", "name": "Test", "icon": "",
+          "pages": [],
+          "triggers": [{"id": "t1", "type": "manual"}],
+          "actions": {"t1": [{"type": "node", "nodeType": "device.audio.play", "params": {"preset": "notification"}}]}
+        }""";
+        WorkflowDefinition parsed = mapper.readValue(json, WorkflowDefinition.class);
+        ActionDef action = parsed.actions().get("t1").get(0);
+        assertInstanceOf(ActionDef.NodeActionDef.class, action);
+        ActionDef.NodeActionDef na = (ActionDef.NodeActionDef) action;
+        assertEquals("device.audio.play", na.nodeType());
+        assertEquals("notification", na.params().get("preset"));
     }
 
     @Test

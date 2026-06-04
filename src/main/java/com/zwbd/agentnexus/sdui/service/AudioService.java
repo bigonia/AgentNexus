@@ -1,12 +1,15 @@
 package com.zwbd.agentnexus.sdui.service;
 
+import com.zwbd.agentnexus.sdui.service.audio.AudioRecordHandler;
+import com.zwbd.agentnexus.sdui.service.audio.SttProvider;
+import com.zwbd.agentnexus.sdui.service.audio.TtsProvider;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -14,28 +17,101 @@ import java.util.Map;
 @Service
 public class AudioService {
 
-    private final CommandDispatcher dispatcher;
+    private final SduiProtocolService protocolService;
 
     @Autowired(required = false)
     private TtsProvider ttsProvider;
 
-    private static final int SAMPLE_RATE = 22050;
+    @Autowired(required = false)
+    private SttProvider sttProvider;
 
-    public AudioService(CommandDispatcher dispatcher) {
-        this.dispatcher = dispatcher;
+    @Autowired(required = false)
+    private AudioRecordHandler audioRecordHandler;
+
+    private static final int SAMPLE_RATE = 22050;
+    // Max raw PCM bytes per binary frame. 32 KB = ~1.5 s of audio at 22050 Hz mono 16-bit.
+    // Well under UI3_MAX_BLOB_BYTES (512 KB) and ESP32 PSRAM limits.
+    private static final int PCM_CHUNK_BYTES = 32 * 1024;
+
+    public AudioService(SduiProtocolService protocolService) {
+        this.protocolService = protocolService;
     }
 
     public record PlayResult(String cmdId, int samples, int durationMs, boolean sent) {}
+
+    /**
+     * Wire the AudioRecordHandler's processor callback to our STT pipeline.
+     * Done in @PostConstruct to avoid circular dependency issues.
+     */
+    @PostConstruct
+    public void wireAudioRecordHandler() {
+        if (audioRecordHandler != null) {
+            audioRecordHandler.setProcessor((deviceId, audioBytes, format) -> {
+                String text = transcribeAudio(audioBytes, format);
+                return (text != null && !text.isEmpty()) ? text : null;
+            });
+            log.info("AudioRecordHandler STT processor wired");
+        }
+    }
+
+    // ── STT (Speech-to-Text) ──
+
+    /**
+     * Transcribe audio data to text via the configured STT provider.
+     *
+     * @param audioBytes  raw audio data
+     * @param format      audio format hint (e.g. "wav", "pcm", "opus"); null for auto-detect
+     * @return transcribed text, or null if STT is unavailable or failed
+     */
+    public String transcribeAudio(byte[] audioBytes, String format) {
+        if (sttProvider == null) {
+            log.debug("STT requested but no SttProvider is configured");
+            return null;
+        }
+        String text = sttProvider.transcribe(audioBytes, format);
+        if (text != null && !text.isEmpty()) {
+            log.info("STT transcribed {} chars via {}", text.length(),
+                    sttProvider.getClass().getSimpleName());
+        }
+        return text;
+    }
+
+    /**
+     * Check whether an STT provider is available.
+     */
+    public boolean isSttAvailable() {
+        return sttProvider != null;
+    }
+
+    /**
+     * Send PCM audio as one or more binary frames (msgType=17).
+     * No JSON wrapping, no base64 overhead — raw PCM in binary frames.
+     */
+    private boolean sendAudioChunked(String deviceId, byte[] pcm) {
+        if (pcm == null || pcm.length == 0) return false;
+        boolean allSent = true;
+        int offset = 0;
+        while (offset < pcm.length) {
+            int len = Math.min(PCM_CHUNK_BYTES, pcm.length - offset);
+            byte[] chunk = new byte[len];
+            System.arraycopy(pcm, offset, chunk, 0, len);
+            if (!protocolService.sendAudioPcm(deviceId, chunk)) {
+                allSent = false;
+            }
+            offset += len;
+        }
+        return allSent;
+    }
 
     public PlayResult playPreset(String deviceId, String preset) {
         String name = preset != null && isValidPreset(preset) ? preset : "notification";
         PresetDef def = lookupPreset(name);
         byte[] pcm = generatePresetPcm(def);
-        String b64 = Base64.getEncoder().encodeToString(pcm);
-        CommandDispatcher.DispatchResult dr = dispatcher.dispatch(deviceId, "audio.prompt.play", b64);
-        log.info("Audio preset '{}' sent to device {}: {} samples, {} base64 chars, cmdId={}",
-                name, deviceId, pcm.length / 2, b64.length(), dr.cmdId());
-        return new PlayResult(dr.cmdId(), pcm.length / 2, def.durationMs(), dr.sent());
+        boolean sent = sendAudioChunked(deviceId, pcm);
+        log.info("Audio preset '{}' sent to device {}: {} samples ({} frames), sent={}",
+                name, deviceId, pcm.length / 2,
+                (pcm.length + PCM_CHUNK_BYTES - 1) / PCM_CHUNK_BYTES, sent);
+        return new PlayResult(null, pcm.length / 2, def.durationMs(), sent);
     }
 
     public PlayResult playTts(String deviceId, String text) {
@@ -48,11 +124,11 @@ public class AudioService {
             log.warn("TTS provider returned empty audio for: {}", text);
             return new PlayResult(null, 0, 0, false);
         }
-        String b64 = Base64.getEncoder().encodeToString(pcm);
-        CommandDispatcher.DispatchResult dr = dispatcher.dispatch(deviceId, "audio.prompt.play", b64);
-        log.info("TTS sent to device {}: {} samples, {} base64 chars, cmdId={}",
-                deviceId, pcm.length / 2, b64.length(), dr.cmdId());
-        return new PlayResult(dr.cmdId(), pcm.length / 2, 0, dr.sent());
+        boolean sent = sendAudioChunked(deviceId, pcm);
+        log.info("TTS sent to device {}: {} samples ({} frames), sent={}",
+                deviceId, pcm.length / 2,
+                (pcm.length + PCM_CHUNK_BYTES - 1) / PCM_CHUNK_BYTES, sent);
+        return new PlayResult(null, pcm.length / 2, 0, sent);
     }
 
     public boolean isTtsAvailable() {

@@ -125,6 +125,12 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
 
+        <!-- YAML parsing for capability catalog -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+
         <!-- Swagger UI for API documentation -->
         <dependency>
             <groupId>org.springdoc</groupId>

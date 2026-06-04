@@ -10,26 +10,21 @@ class BinaryProtocolCodecTest {
 
     @Test
     void encodeDecodeRoundTrip() {
-        TlvBuilder b = new TlvBuilder();
-        b.addString(31, "section");
-        b.addString(32, "{\"page_id\":\"test\"}");
-
-        byte[] frame = BinaryProtocolCodec.encode(15, 1, b.build());
+        byte[] payload = "{\"page_id\":\"test\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] frame = BinaryProtocolCodec.encode(
+                BinaryProtocolCodec.MSG_TYPE_SECTION_SCENE, 1, payload);
         BinaryProtocolCodec.DecodedFrame decoded = BinaryProtocolCodec.decode(frame);
 
-        assertEquals(15, decoded.msgType());
+        assertEquals(BinaryProtocolCodec.MSG_TYPE_SECTION_SCENE, decoded.msgType());
         assertEquals(1, decoded.seq());
-        assertEquals(2, decoded.tlvs().size());
-        assertEquals(31, decoded.tlvs().get(0).type());
-        assertEquals("section", decoded.tlvs().get(0).asString());
-        assertEquals(32, decoded.tlvs().get(1).type());
+        assertArrayEquals(payload, decoded.payload());
     }
 
     @Test
     void crc32DetectsCorruption() {
         TlvBuilder b = new TlvBuilder();
         b.addU32(30, 42);
-        byte[] frame = BinaryProtocolCodec.encode(13, 0, b.build());
+        byte[] frame = BinaryProtocolCodec.encode(1, 0, b.build());
         frame[20] ^= 0xFF;
         assertThrows(IllegalArgumentException.class, () -> BinaryProtocolCodec.decode(frame));
     }

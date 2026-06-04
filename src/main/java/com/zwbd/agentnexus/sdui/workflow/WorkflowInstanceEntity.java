@@ -22,6 +22,9 @@ public class WorkflowInstanceEntity {
     @Column(nullable = false, length = 64)
     private String definitionId;
 
+    @Column(length = 100)
+    private String definitionName;
+
     @Column(columnDefinition = "TEXT")
     private String variablesJson;
 
@@ -30,6 +33,8 @@ public class WorkflowInstanceEntity {
 
     @Column(nullable = false, length = 16)
     private String status = "RUNNING";
+
+    private LocalDateTime installedAt;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

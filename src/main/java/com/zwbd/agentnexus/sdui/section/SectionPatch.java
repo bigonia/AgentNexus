@@ -4,7 +4,18 @@ import java.util.List;
 
 public record SectionPatch(
         String pageId,
-        List<PatchEntry> patches
+        List<PatchEntry> patches,
+        SectionRenderMode renderMode
 ) {
-    public record PatchEntry(String sectionId, String op, SectionData data) {}
+    /** Convenience constructor: no explicit render mode (defaults to RICH at serialization time). */
+    public SectionPatch(String pageId, List<PatchEntry> patches) {
+        this(pageId, patches, null);
+    }
+
+    /** Effective render mode, defaulting to RICH when not set. */
+    public SectionRenderMode effectiveRenderMode() {
+        return renderMode != null ? renderMode : SectionRenderMode.RICH;
+    }
+
+    public record PatchEntry(String sectionId, String op, String type, SectionData data) {}
 }

@@ -121,4 +121,27 @@ public class FileStorageService {
     public Path getPath(String storedFilename) {
         return this.fileStorageLocation.resolve(storedFilename).normalize();
     }
+
+    /**
+     * 直接存储字节数组到本地文件
+     *
+     * @param data      字节数组
+     * @param extension 文件扩展名（如 ".png"）
+     * @return 存储在磁盘上的唯一文件名
+     */
+    public String storeBytes(byte[] data, String extension) {
+        if (data == null || data.length == 0) {
+            throw new RuntimeException("无法存储空数据");
+        }
+        String newFileName = UUID.randomUUID().toString() + extension;
+        try {
+            Path targetLocation = this.fileStorageLocation.resolve(newFileName);
+            Files.write(targetLocation, data);
+            log.info("存储 {} 字节数据为文件 {}", data.length, newFileName);
+            return newFileName;
+        } catch (IOException ex) {
+            log.error("无法存储数据到文件 {}", newFileName, ex);
+            throw new RuntimeException("无法存储数据到文件 " + newFileName, ex);
+        }
+    }
 }

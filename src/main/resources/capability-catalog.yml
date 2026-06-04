@@ -1,0 +1,271 @@
+version: "2.0"
+# SDUI Capability Catalog v2 — enriched with display names, descriptions, and payload schemas.
+# This catalog defines the contract between device capabilities and the workflow event system.
+# Event IDs follow the pattern: <category>:<capability>.<specific-event>
+
+inputs:
+  buttons.boot:
+    protocol: ui3_binary
+    eventKind: 4
+    displayName: "BOOT 按钮"
+    description: "设备顶部 BOOT 多功能按钮，支持按下/释放/单击/双击/长按"
+    events:
+      press_down:
+        displayName: "按下"
+      press_up:
+        displayName: "释放"
+      single_click:
+        displayName: "单击"
+      double_click:
+        displayName: "双击"
+      long_press_start:
+        displayName: "长按开始"
+      long_press_up:
+        displayName: "长按释放"
+    payloadSchema:
+      - {name: nodeId, type: string, required: true, description: "按钮标识 (boot)"}
+      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
+      - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
+      - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+
+  buttons.plus:
+    protocol: ui3_binary
+    eventKind: 4
+    displayName: "PLUS 按钮"
+    description: "设备 PLUS 按钮，支持按下/释放/单击/双击/长按"
+    events:
+      press_down:
+        displayName: "按下"
+      press_up:
+        displayName: "释放"
+      single_click:
+        displayName: "单击"
+      double_click:
+        displayName: "双击"
+      long_press_start:
+        displayName: "长按开始"
+      long_press_up:
+        displayName: "长按释放"
+    payloadSchema:
+      - {name: nodeId, type: string, required: true, description: "按钮标识 (plus)"}
+      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
+      - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
+      - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+
+  audio.record:
+    protocol: json_topic
+    topic: audio/record
+    displayName: "音频录制"
+    description: "设备麦克风音频采集和语音识别结果"
+    events:
+      audio.record.data:
+        displayName: "音频数据"
+      audio.stt.result:
+        displayName: "语音识别结果"
+    payloadSchema:
+      - {name: audioData, type: string, required: false, description: "Base64 编码的音频数据"}
+      - {name: format, type: string, required: false, description: "音频格式 (wav/pcm)"}
+      - {name: text, type: string, required: false, description: "语音识别转录文本"}
+      - {name: confidence, type: float, required: false, description: "识别置信度"}
+    commands:
+      audio.stt.transcribe:
+        topic: server
+        displayName: "语音转录"
+        description: "将音频数据转录为文本"
+        params:
+          audioData:
+            type: string
+            required: true
+            label: 音频数据(base64)
+          format:
+            type: string
+            required: false
+            default: wav
+            label: 音频格式
+
+  motion:
+    protocol: json_topic
+    topic: motion
+    displayName: "运动传感器"
+    description: "设备 IMU 运动传感器，支持摇晃/抬腕/翻转检测"
+    events:
+      imu.shake:
+        displayName: "摇晃"
+      imu.wrist_raise:
+        displayName: "抬腕"
+      imu.flip:
+        displayName: "翻转"
+    payloadSchema:
+      - {name: eventName, type: string, required: true, description: "运动事件类型"}
+      - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+      - {name: ax, type: float, required: false, description: "X 轴加速度"}
+      - {name: ay, type: float, required: false, description: "Y 轴加速度"}
+      - {name: az, type: float, required: false, description: "Z 轴加速度"}
+
+outputs:
+  display.brightness:
+    displayName: "屏幕亮度"
+    description: "调节设备屏幕亮度"
+    commands:
+      display.brightness.set:
+        topic: cmd/control
+        action: brightness
+        displayName: "设置亮度"
+        description: "设置屏幕亮度百分比"
+        params:
+          value:
+            type: int
+            required: true
+            min: 0
+            max: 100
+            label: 亮度
+
+  device.reboot:
+    displayName: "设备重启"
+    description: "重启终端设备"
+    commands:
+      device.reboot:
+        topic: cmd/control
+        action: reboot
+        displayName: "重启"
+        description: "远程重启设备"
+        params: {}
+
+  audio.stream:
+    displayName: "音频流"
+    description: "设备音频播放输出"
+    commands:
+      audio.stream.play:
+        topic: ui3_binary
+        binaryMsgType: 17
+        internal: true
+        displayName: "PCM 音频流"
+        description: "发送原始 PCM 音频到设备"
+        params: {}
+      audio.prompt.play:
+        topic: server
+        displayName: "提示音"
+        description: "播放预设提示音"
+        params:
+          preset:
+            type: enum
+            required: true
+            values: [notification, success, error, warning, click, beep]
+            label: 提示音
+      audio.tts.speak:
+        topic: server
+        displayName: "TTS 朗读"
+        description: "将文本合成为语音并播放"
+        params:
+          text:
+            type: string
+            required: true
+            label: TTS 文本
+
+  audio.volume:
+    displayName: "音量控制"
+    description: "调节设备扬声器音量"
+    commands:
+      audio.volume.set:
+        topic: cmd/control
+        action: volume
+        displayName: "设置音量"
+        description: "设置音量百分比"
+        params:
+          value:
+            type: int
+            required: true
+            min: 0
+            max: 100
+            label: 音量
+
+  rgb.effect:
+    displayName: "RGB 灯光"
+    description: "设备 RGB LED 灯光效果控制"
+    commands:
+      rgb.effect.set:
+        topic: cmd/control
+        action: rgb_set
+        displayName: "灯光效果"
+        description: "设置灯光效果模式、颜色和速度"
+        params:
+          mode:
+            type: enum
+            required: true
+            values: [solid, blink, breathe, rainbow, chase]
+          color:
+            type: string
+            required: false
+            description: Hex color (e.g. #FF0000)
+          periodMs:
+            type: int
+            required: false
+            min: 200
+            max: 5000
+            default: 2000
+      rgb.effect.policy:
+        topic: cmd/control
+        action: rgb_policy
+        internal: true
+        displayName: "灯光策略"
+        description: "精细灯光控制 (RGB + 亮度 + 周期)"
+        params:
+          mode:
+            type: enum
+            required: true
+            values: [solid, blink, breathe, rainbow, chase]
+          r:
+            type: int
+            required: true
+            min: 0
+            max: 255
+          g:
+            type: int
+            required: true
+            min: 0
+            max: 255
+          b:
+            type: int
+            required: true
+            min: 0
+            max: 255
+          brightness:
+            type: int
+            min: 0
+            max: 255
+          period_ms:
+            type: int
+            min: 200
+            max: 5000
+          step_ms:
+            type: int
+            min: 10
+            max: 500
+      rgb.off:
+        topic: cmd/control
+        action: rgb_off
+        displayName: "关闭灯光"
+        description: "关闭所有 RGB 灯光"
+        params: {}
+
+display_limits:
+  common:
+    max_sections_per_page: 12
+    max_metrics: 4
+    max_actions: 4
+    max_text_length_hero_label: 30
+  size_classes:
+    small:
+      max_chart_points: 8
+      max_list_items: 6
+      max_toggle_options: 4
+      max_nav_tabs: 4
+      max_text_chars: 40
+      max_overlay_body: 0
+    large:
+      max_chart_points: 32
+      max_list_items: 20
+      max_toggle_options: 8
+      max_nav_tabs: 6
+      max_text_chars: 200
+      max_overlay_body: 300

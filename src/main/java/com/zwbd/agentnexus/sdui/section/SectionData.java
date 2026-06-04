@@ -12,6 +12,7 @@ public sealed interface SectionData {
             String subtitle,
             String tone,
             String iconSrc,
+            String iconSymbol,
             int progress
     ) implements SectionData {
         @Override public SectionType type() { return SectionType.HERO; }
@@ -50,14 +51,14 @@ public sealed interface SectionData {
 
     record OverlayData(
             String title, String body, String tone,
-            int unreadCount, int autoHideMs, boolean visible
+            int unreadCount, int autoHideMs
     ) implements SectionData {
         @Override public SectionType type() { return SectionType.OVERLAY; }
     }
 
     record ListData(List<ListItem> items) implements SectionData {
         @Override public SectionType type() { return SectionType.LIST; }
-        public record ListItem(String id, String title, String subtitle, String tone) {}
+        public record ListItem(String id, String title, String subtitle, String tone, String iconSrc) {}
     }
 
     record ToggleData(List<ToggleOption> options) implements SectionData {

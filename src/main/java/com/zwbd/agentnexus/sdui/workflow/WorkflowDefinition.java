@@ -9,5 +9,8 @@ public record WorkflowDefinition(
         String icon,
         List<PageDef> pages,
         List<TriggerDef> triggers,
-        Map<String, List<ActionDef>> actions
+        Map<String, List<ActionDef>> actions,
+        List<EdgeDef> edges,
+        List<VirtualIO> virtualInputs,
+        List<VirtualIO> virtualOutputs
 ) {}

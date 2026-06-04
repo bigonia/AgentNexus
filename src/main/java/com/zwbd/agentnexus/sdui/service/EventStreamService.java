@@ -54,18 +54,20 @@ public class EventStreamService implements EventInputHandler.EventListener {
     }
 
     @Override
-    public void onEvent(String deviceId, String kind, String nodeId, String sectionId, long ts) {
+    public void onEvent(String deviceId, String event, String nodeId, long ts) {
         SseEmitter emitter = emitters.get(deviceId);
         if (emitter == null) return;
 
         Map<String, Object> data = new java.util.LinkedHashMap<>();
         data.put("ts", ts);
         if (nodeId != null) data.put("nodeId", nodeId);
-        if (sectionId != null) data.put("sectionId", sectionId);
+        if (event != null) data.put("event", event);
+
+        String sseEventName = (event != null && !event.isEmpty()) ? event : "input_event";
 
         try {
             emitter.send(SseEmitter.event()
-                    .name(kind != null ? kind : "unknown")
+                    .name(sseEventName)
                     .data(data));
         } catch (IOException e) {
             emitters.remove(deviceId, emitter);

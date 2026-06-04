@@ -58,7 +58,7 @@ public class HeartbeatHandler implements TopicHandler {
 
         int rssi = payload.path("wifi_rssi").asInt(0);
         int freeHeap = payload.path("free_heap_internal").asInt(0);
-        log.debug("Heartbeat {} -> RSSI: {} dBm, FreeHeap: {} bytes", deviceId, rssi, freeHeap);
+        // log.debug("Heartbeat {} -> RSSI: {} dBm, FreeHeap: {} bytes", deviceId, rssi, freeHeap);
 
         SduiDevice device = deviceService.onHeartbeat(deviceId, payload);
         if (justConnected) {

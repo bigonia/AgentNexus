@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Data
@@ -19,9 +20,25 @@ public class SduiDeviceDetailResponse {
     private int screenWidth;
     private int screenHeight;
     private String inputMode;
+    private String sizeClass;
     private Set<String> availableCommands;
     private String capabilitiesSnapshot;
     private List<RecentCommand> recentCommands;
+
+    // ── Health ──
+    private Integer healthScore;
+    private String healthLevel;
+    private List<String> healthWarnings;
+
+    // ── Latest telemetry summary ──
+    private Map<String, Object> lastTelemetry;
+
+    // ── Connection tracking ──
+    private LocalDateTime connectedAt;
+    private String sessionId;
+    private Integer connectionCount;
+    private Long totalUptimeS;
+
     private LocalDateTime lastSeenAt;
     private LocalDateTime claimedAt;
     private LocalDateTime createdAt;

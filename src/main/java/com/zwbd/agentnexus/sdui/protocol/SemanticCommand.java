@@ -10,7 +10,6 @@ public enum SemanticCommand {
     // Actuator
     DISPLAY_BRIGHTNESS_SET("display.brightness.set"),
     AUDIO_PROMPT_PLAY("audio.prompt.play"),
-    AUDIO_STREAM_PLAY("audio.stream.play"),
     AUDIO_VOLUME_SET("audio.volume.set"),
     RGB_EFFECT_SET("rgb.effect.set"),
     RGB_OFF("rgb.off"),

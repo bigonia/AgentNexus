@@ -84,8 +84,13 @@ graph TD
 2.  **初始化 SQL**: 运行 `docs/sql/init.sql` (如有) 创建基础表结构。
 3.  **编译运行**:
     ```bash
+    # 方式一：直接运行（开发环境推荐）
+    # macOS 需激活 macos profile 以使用兼容的 MCP 命令
+    mvn spring-boot:run -Dspring-boot.run.profiles=macos
+
+    # 方式二：打包后运行
     mvn clean package -DskipTests
-    java -jar target/DBCrawlerV4-0.0.1.jar
+    java -jar target/AgentNexus-0.0.1-SNAPSHOT.jar --spring.profiles.active=macos
     ```
 
 ## 5. 开发计划 (Roadmap)

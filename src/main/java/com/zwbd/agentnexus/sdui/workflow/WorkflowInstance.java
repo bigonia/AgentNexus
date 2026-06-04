@@ -1,22 +1,27 @@
 package com.zwbd.agentnexus.sdui.workflow;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class WorkflowInstance {
 
-    public enum Status { RUNNING, STOPPED }
+    public enum Status { RUNNING, PAUSED, STOPPED }
 
     private final String deviceId;
     private final String workflowId;
+    private final String definitionName;
+    private final Instant installedAt;
     private final Map<String, Object> variables;
     private final VariableWatcher watcher;
     private String activePage;
     private Status status;
 
-    public WorkflowInstance(String deviceId, String workflowId) {
+    public WorkflowInstance(String deviceId, String workflowId, String definitionName) {
         this.deviceId = deviceId;
         this.workflowId = workflowId;
+        this.definitionName = definitionName;
+        this.installedAt = Instant.now();
         this.variables = new LinkedHashMap<>();
         this.watcher = new VariableWatcher();
         this.status = Status.RUNNING;
@@ -24,6 +29,8 @@ public class WorkflowInstance {
 
     public String deviceId() { return deviceId; }
     public String workflowId() { return workflowId; }
+    public String definitionName() { return definitionName; }
+    public Instant installedAt() { return installedAt; }
     public Map<String, Object> variables() { return variables; }
     public VariableWatcher watcher() { return watcher; }
     public String activePage() { return activePage; }

@@ -25,6 +25,29 @@ public class SectionAutoUpdateScheduler {
             "hero_dashboard", "metrics_grid", "chart_trend", "full_dashboard", "system_overview"
     );
 
+    /** Preset metadata for the frontend: name, label, description, layout, section types, section count. */
+    public record PresetMeta(String name, String label, String description,
+                             String layout, int sectionCount, List<String> sectionTypes) {}
+
+    private static final Map<String, PresetMeta> PRESET_METAS = new LinkedHashMap<>();
+    static {
+        PRESET_METAS.put("hero_dashboard", new PresetMeta(
+                "hero_dashboard", "Hero 仪表盘", "单 Hero 卡片展示 CPU 使用率",
+                "vertical_scroll", 1, List.of("hero_section")));
+        PRESET_METAS.put("metrics_grid", new PresetMeta(
+                "metrics_grid", "指标网格", "4 格指标展示内存/磁盘/网络/负载",
+                "vertical_scroll", 1, List.of("metric_section")));
+        PRESET_METAS.put("chart_trend", new PresetMeta(
+                "chart_trend", "趋势图表", "16 点折线图展示 CPU 10 分钟趋势",
+                "vertical_scroll", 1, List.of("chart_section")));
+        PRESET_METAS.put("full_dashboard", new PresetMeta(
+                "full_dashboard", "完整仪表盘", "Hero + 指标网格 + 图表 + 操作按钮，自动轮播",
+                "vertical_scroll", 4, List.of("hero_section", "metric_section", "chart_section", "action_section")));
+        PRESET_METAS.put("system_overview", new PresetMeta(
+                "system_overview", "系统概览", "健康度 + 资源指标 + 备份进度 + 负载图表",
+                "vertical_scroll", 4, List.of("hero_section", "metric_section", "progress_section", "chart_section")));
+    }
+
     public record AutoUpdateStatus(String deviceId, String activePreset, long intervalMs, long startedAt,
                                    boolean running) {}
 
@@ -83,6 +106,21 @@ public class SectionAutoUpdateScheduler {
         return new LinkedHashSet<>(PRESET_NAMES);
     }
 
+    public List<PresetMeta> getPresetDetails() {
+        List<PresetMeta> details = new ArrayList<>();
+        for (String name : PRESET_NAMES) {
+            PresetMeta meta = PRESET_METAS.get(name);
+            if (meta != null) {
+                details.add(meta);
+            }
+        }
+        return details;
+    }
+
+    public Optional<PresetMeta> getPresetMeta(String name) {
+        return Optional.ofNullable(PRESET_METAS.get(name));
+    }
+
     private void tick(String deviceId) {
         AutoUpdateTask task = tasks.get(deviceId);
         if (task == null) return;
@@ -113,7 +151,7 @@ public class SectionAutoUpdateScheduler {
         return new SectionScene("hero_dashboard", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
                 new SectionEntry(SectionType.HERO, "cpu_hero",
                         new SectionData.HeroData(val + "%", "CPU Usage", "Running",
-                                tones[rng.nextInt(tones.length)], "cpu", val))
+                                tones[rng.nextInt(tones.length)], "cpu", null, val))
         ));
     }
 
@@ -146,7 +184,7 @@ public class SectionAutoUpdateScheduler {
         return new SectionScene("full_dashboard_v1", SectionLayout.VERTICAL_SCROLL, true, 3000, List.of(
                 new SectionEntry(SectionType.HERO, "cpu_hero",
                         new SectionData.HeroData(cpuVal + "%", "CPU Usage", "Running Normal",
-                                cpuVal > 85 ? "warning" : "primary", "cpu", cpuVal)),
+                                cpuVal > 85 ? "warning" : "primary", "cpu", null, cpuVal)),
                 new SectionEntry(SectionType.METRIC, "sys_metrics",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("Memory", (40 + rng.nextInt(40)) + "%"),
@@ -170,7 +208,7 @@ public class SectionAutoUpdateScheduler {
         return new SectionScene("system_overview", SectionLayout.VERTICAL_SCROLL, true, 3000, List.of(
                 new SectionEntry(SectionType.HERO, "health_hero",
                         new SectionData.HeroData(health + "%", "System Health", "All systems nominal",
-                                health >= 95 ? "success" : "primary", "start", health)),
+                                health >= 95 ? "success" : "primary", "start", null, health)),
                 new SectionEntry(SectionType.METRIC, "res_metrics",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("CPU", (15 + rng.nextInt(40)) + "%"),

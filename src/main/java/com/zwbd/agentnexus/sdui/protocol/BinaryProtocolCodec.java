@@ -11,6 +11,25 @@ public final class BinaryProtocolCodec {
     public static final int HEADER_SIZE = 16;
     public static final int MAGIC = 0x5344;
     public static final int VERSION = 1;
+    public static final int MSG_TYPE_SECTION_SCENE = 15;
+    public static final int MSG_TYPE_SECTION_PATCH = 16;
+    public static final int MSG_TYPE_AUDIO_PCM = 17;
+
+    // ── Well-known TLV type constants (inbound events, msgType=9) ──
+    /** TLV 120: Numeric event kind (1=UI_CLICK, 2=OVERLAY_CONFIRM, 3=TOGGLE_CHANGE, 4=BUTTON). */
+    public static final int TLV_EVENT_KIND = 120;
+    /** TLV 121: Node / element ID (button ID, list item ID, toggle option ID). */
+    public static final int TLV_NODE_ID = 121;
+    /** TLV 122: Event name string (e.g. "action.click", "press_down"). */
+    public static final int TLV_EVENT_NAME = 122;
+    /** TLV 123: Section ID that emitted the event (NEW — firmware should populate). */
+    public static final int TLV_SECTION_ID = 123;
+    /** TLV 124: Page ID where the event occurred (NEW — firmware should populate). */
+    public static final int TLV_PAGE_ID = 124;
+    /** TLV 125: Timestamp in milliseconds (u32). */
+    public static final int TLV_TS = 125;
+    /** TLV 126: Event-specific value (toggle state, input string, etc.) (NEW). */
+    public static final int TLV_EVENT_VALUE = 126;
 
     private BinaryProtocolCodec() {}
 

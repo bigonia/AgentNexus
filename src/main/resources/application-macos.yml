@@ -1,0 +1,12 @@
+# macOS 环境专用配置：覆盖 MCP stdio 命令为 macOS 兼容形式
+spring:
+  ai:
+    mcp:
+      client:
+        stdio:
+          connections:
+            playwright:
+              command: /bin/zsh
+              args:
+                - -c
+                - npx -y @playwright/mcp@latest

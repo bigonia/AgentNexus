@@ -1,6 +1,7 @@
 package com.zwbd.agentnexus.sdui.service;
 
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ public class ConsoleLayoutService {
     private final SduiCapabilityService capabilityService;
     private final DeviceSessionManager sessionManager;
     private final AudioService audioService;
+    private final CapabilityCatalog catalog;
 
     public Map<String, Object> buildLayout(String deviceId) {
         Optional<CapabilitySchema.CapabilitySnapshot> capsOpt = capabilityService.getCapabilities(deviceId);
@@ -24,23 +26,23 @@ public class ConsoleLayoutService {
 
         if (capsOpt.isPresent()) {
             CapabilitySchema.CapabilitySnapshot caps = capsOpt.get();
-            Set<String> commands = collectCommands(caps.outputs());
-            Set<String> capabilityIds = collectCapabilityIds(caps.outputs());
-            boolean hasInputEvents = hasAnyInputEvents(caps.inputs());
+            Set<String> outputs = new LinkedHashSet<>(caps.outputs());
+            Set<String> allCommands = catalog.getAllCommands(outputs);
+            boolean hasInputs = caps.inputs() != null && !caps.inputs().isEmpty();
 
-            if (commands.contains("display.brightness.set")) {
+            if (allCommands.contains("display.brightness.set")) {
                 panels.add(buildDisplayPanel(order++));
             }
 
-            if (capabilityIds.contains("audio.prompt") || commands.contains("audio.prompt.play")) {
+            if (outputs.contains("audio.stream") || outputs.contains("audio.volume") || allCommands.contains("audio.prompt.play")) {
                 panels.add(buildAudioPanel(order++));
             }
 
-            if (capabilityIds.contains("rgb.effect") || commands.contains("rgb.effect.set")) {
+            if (outputs.contains("rgb.effect") || allCommands.contains("rgb.effect.set")) {
                 panels.add(buildRgbPanel(order++));
             }
 
-            if (hasInputEvents) {
+            if (hasInputs) {
                 panels.add(buildInputEventsPanel(order++));
             }
         }
@@ -52,35 +54,6 @@ public class ConsoleLayoutService {
         layout.put("online", online);
         layout.put("panels", panels);
         return layout;
-    }
-
-    private Set<String> collectCommands(List<CapabilitySchema.OutputCapability> outputs) {
-        Set<String> cmds = new LinkedHashSet<>();
-        for (CapabilitySchema.OutputCapability o : outputs) {
-            if (o.enabled() && o.commands() != null) {
-                cmds.addAll(o.commands());
-            }
-        }
-        return cmds;
-    }
-
-    private Set<String> collectCapabilityIds(List<CapabilitySchema.OutputCapability> outputs) {
-        Set<String> ids = new LinkedHashSet<>();
-        for (CapabilitySchema.OutputCapability o : outputs) {
-            if (o.enabled() && o.capability() != null) {
-                ids.add(o.capability());
-            }
-        }
-        return ids;
-    }
-
-    private boolean hasAnyInputEvents(List<CapabilitySchema.InputCapability> inputs) {
-        for (CapabilitySchema.InputCapability in : inputs) {
-            if (in.enabled() && in.events() != null && !in.events().isEmpty()) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private Map<String, Object> buildDisplayPanel(int order) {

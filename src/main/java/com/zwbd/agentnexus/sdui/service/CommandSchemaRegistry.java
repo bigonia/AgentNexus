@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,7 +12,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class CommandSchemaRegistry {
 
+    private final CapabilityCatalog catalog;
     private final Map<String, Map<String, CommandSchema>> deviceSchemas = new ConcurrentHashMap<>();
+
+    public CommandSchemaRegistry(CapabilityCatalog catalog) {
+        this.catalog = catalog;
+    }
 
     public record CommandSchema(
             String command,
@@ -32,16 +37,20 @@ public class CommandSchemaRegistry {
 
     public void loadFromCapabilities(String deviceId, CapabilitySchema.CapabilitySnapshot caps) {
         Map<String, CommandSchema> schemas = new LinkedHashMap<>();
-        for (CapabilitySchema.OutputCapability out : caps.outputs()) {
-            if (!out.enabled() || out.commands() == null) continue;
-            JsonNode paramsNode = out.params();
-            if (paramsNode == null || paramsNode.isMissingNode()) continue;
-            for (String cmd : out.commands()) {
-                JsonNode cmdNode = paramsNode.path(cmd);
-                if (!cmdNode.isMissingNode()) {
-                    CommandSchema schema = parseCommandSchema(cmd, cmdNode);
-                    schemas.put(cmd, schema);
+        for (String outputName : caps.outputs()) {
+            CapabilityCatalog.OutputDef outputDef = catalog.getOutput(outputName).orElse(null);
+            if (outputDef == null || outputDef.commands() == null) continue;
+            for (CapabilityCatalog.CommandDef cmdDef : outputDef.commands().values()) {
+                if (cmdDef.internal()) continue;
+                Map<String, FieldDef> fields = new LinkedHashMap<>();
+                for (var entry : cmdDef.params().entrySet()) {
+                    CapabilityCatalog.FieldSchema fs = entry.getValue();
+                    fields.put(entry.getKey(), new FieldDef(
+                            fs.type(), fs.min(), fs.max(), fs.defaultValue(),
+                            fs.values(), fs.required(),
+                            fs.label() != null ? fs.label() : entry.getKey()));
                 }
+                schemas.put(cmdDef.command(), new CommandSchema(cmdDef.command(), null, fields));
             }
         }
         if (!schemas.isEmpty()) {
@@ -58,6 +67,11 @@ public class CommandSchemaRegistry {
 
     public Map<String, CommandSchema> getAllSchemas(String deviceId) {
         return deviceSchemas.getOrDefault(deviceId, Collections.emptyMap());
+    }
+
+    public void clearDeviceSchemas(String deviceId) {
+        deviceSchemas.remove(deviceId);
+        log.info("Command schemas cleared for device {}", deviceId);
     }
 
     public List<String> validate(String deviceId, String command, Map<String, Object> params) {
@@ -116,39 +130,4 @@ public class CommandSchemaRegistry {
         return result;
     }
 
-    private CommandSchema parseCommandSchema(String command, JsonNode node) {
-        String description = node.path("description").asText(null);
-        Map<String, FieldDef> fields = new LinkedHashMap<>();
-        JsonNode paramsNode = node.path("params");
-        if (paramsNode.isObject()) {
-            var iter = paramsNode.fields();
-            while (iter.hasNext()) {
-                var entry = iter.next();
-                fields.put(entry.getKey(), parseFieldDef(entry.getValue()));
-            }
-        }
-        return new CommandSchema(command, description, fields);
-    }
-
-    private FieldDef parseFieldDef(JsonNode node) {
-        String type = node.path("type").asText("string");
-        Integer min = node.path("min").isNumber() ? node.path("min").asInt() : null;
-        Integer max = node.path("max").isNumber() ? node.path("max").asInt() : null;
-        Object defaultValue = null;
-        JsonNode defNode = node.path("default");
-        if (!defNode.isMissingNode()) {
-            if (defNode.isNumber()) defaultValue = defNode.asInt();
-            else if (defNode.isBoolean()) defaultValue = defNode.asBoolean();
-            else defaultValue = defNode.asText();
-        }
-        List<String> values = null;
-        JsonNode valsNode = node.path("values");
-        if (valsNode.isArray()) {
-            values = new ArrayList<>();
-            for (JsonNode v : valsNode) values.add(v.asText());
-        }
-        boolean required = node.path("required").asBoolean(true);
-        String label = node.path("label").asText(null);
-        return new FieldDef(type, min, max, defaultValue, values, required, label);
-    }
 }

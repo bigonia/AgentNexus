@@ -165,8 +165,23 @@ jwt:
 file:
   upload-dir: ./upload-dir
 
+# -------------------------------------------------------------------
+# DrawThings 本地文生图配置
+# -------------------------------------------------------------------
+drawthings:
+  enabled: true
+  base-url: http://127.0.0.1:7860
+  timeout: 300000             # 生图超时(ms)，Flux大模型512x512约需2分钟
+  default-width: 512
+  default-height: 512
+  default-steps: 8
+  default-cfg-scale: 7.0
+
 sdui:
   command:
     timeout-scan-ms: 3000
   tts:
     ffmpeg-path: ffmpeg
+  stt:
+    whisper-path: whisper
+    whisper-model: base

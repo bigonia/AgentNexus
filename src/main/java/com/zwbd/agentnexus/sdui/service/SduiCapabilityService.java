@@ -1,12 +1,15 @@
 package com.zwbd.agentnexus.sdui.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
+import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySnapshotParser;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
-import lombok.RequiredArgsConstructor;
+import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,13 +18,29 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class SduiCapabilityService {
 
     private final SduiDeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
     private final CommandSchemaRegistry schemaRegistry;
+    private final CapabilityNodeRegistry nodeRegistry;
+    private final CapabilityRegistry capabilityRegistry;
+    private final CapabilityCatalog catalog;
     private final Map<String, CapabilitySchema.CapabilitySnapshot> cache = new ConcurrentHashMap<>();
+
+    public SduiCapabilityService(SduiDeviceRepository deviceRepository,
+                                  ObjectMapper objectMapper,
+                                  CommandSchemaRegistry schemaRegistry,
+                                  @Lazy CapabilityNodeRegistry nodeRegistry,
+                                  CapabilityRegistry capabilityRegistry,
+                                  CapabilityCatalog catalog) {
+        this.deviceRepository = deviceRepository;
+        this.objectMapper = objectMapper;
+        this.schemaRegistry = schemaRegistry;
+        this.nodeRegistry = nodeRegistry;
+        this.capabilityRegistry = capabilityRegistry;
+        this.catalog = catalog;
+    }
 
     @Transactional
     public void onCapabilitiesReport(String deviceId, CapabilitySchema.CapabilitySnapshot caps, String rawJson) {
@@ -32,8 +51,15 @@ public class SduiCapabilityService {
             device.setCapabilitiesSnapshot(rawJson);
             deviceRepository.save(device);
         }
-        log.info("Capabilities stored for device {}, sectionEnabled={}", deviceId,
-                caps.section() != null && caps.section().enabled());
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> capsMap = objectMapper.readValue(rawJson, Map.class);
+            nodeRegistry.registerDeviceNodes(deviceId, capsMap);
+        } catch (Exception e) {
+            log.warn("Failed to register device nodes for {}: {}", deviceId, e.getMessage());
+        }
+        capabilityRegistry.onDeviceReport(deviceId, caps);
+        log.info("Capabilities stored for device {}, hasDisplay={}", deviceId, caps.display() != null);
     }
 
     public Optional<CapabilitySchema.CapabilitySnapshot> getCapabilities(String deviceId) {
@@ -56,48 +82,44 @@ public class SduiCapabilityService {
 
     public boolean supportsSectionType(String deviceId, String sectionType) {
         return getCapabilities(deviceId)
-                .map(CapabilitySchema.CapabilitySnapshot::section)
-                .filter(CapabilitySchema.SectionCapability::enabled)
-                .map(s -> s.supportsType(sectionType))
+                .map(CapabilitySchema.CapabilitySnapshot::display)
+                .map(d -> d.supportsType(sectionType))
                 .orElse(false);
     }
 
     public boolean supportsSectionLayout(String deviceId, String layout) {
         return getCapabilities(deviceId)
-                .map(CapabilitySchema.CapabilitySnapshot::section)
-                .filter(CapabilitySchema.SectionCapability::enabled)
-                .map(s -> s.supportsLayout(layout))
+                .map(CapabilitySchema.CapabilitySnapshot::display)
+                .map(d -> d.supportsLayout(layout))
                 .orElse(false);
     }
 
     public int getSectionLimit(String deviceId, String limitKey) {
         return getCapabilities(deviceId)
-                .map(CapabilitySchema.CapabilitySnapshot::section)
-                .map(s -> s.getLimit(limitKey))
+                .map(caps -> {
+                    String sizeClass = caps.display() != null ? caps.display().effectiveSizeClass() : "large";
+                    return catalog.getDisplayLimits(sizeClass).getOrDefault(limitKey, 0);
+                })
                 .orElse(0);
     }
 
-    public Optional<CapabilitySchema.SectionCapability> getSectionCapability(String deviceId) {
+    public Optional<CapabilitySchema.DisplayInfo> getSectionCapability(String deviceId) {
         return getCapabilities(deviceId)
-                .map(CapabilitySchema.CapabilitySnapshot::section)
-                .filter(CapabilitySchema.SectionCapability::enabled);
+                .map(CapabilitySchema.CapabilitySnapshot::display);
     }
 
     public Set<String> getAvailableCommands(String deviceId) {
         return getCapabilities(deviceId)
-                .map(caps -> {
-                    Set<String> cmds = new LinkedHashSet<>();
-                    for (CapabilitySchema.OutputCapability o : caps.outputs()) {
-                        if (o.enabled() && o.commands() != null) cmds.addAll(o.commands());
-                    }
-                    return cmds;
-                }).orElse(Collections.emptySet());
+                .map(caps -> catalog.getAllCommands(new LinkedHashSet<>(caps.outputs())))
+                .orElse(Collections.emptySet());
     }
 
-    public CapabilitySchema.DeviceProfile getDeviceProfile(String deviceId) {
-        return getCapabilities(deviceId)
-                .map(CapabilitySchema.CapabilitySnapshot::deviceProfile)
-                .orElse(null);
+    public void clearCapabilitiesCache(String deviceId) {
+        cache.remove(deviceId);
+        schemaRegistry.clearDeviceSchemas(deviceId);
+        nodeRegistry.unregisterDeviceNodes(deviceId);
+        capabilityRegistry.removeDevice(deviceId);
+        log.info("Capabilities cache cleared for device {}", deviceId);
     }
 
     public record CommandRoute(String topic, String action, boolean bareTopic) {
@@ -105,55 +127,9 @@ public class SduiCapabilityService {
     }
 
     public CommandRoute resolveRoute(String deviceId, String command) {
-        return getCapabilities(deviceId)
-                .map(caps -> resolveFromCapabilities(command, caps))
-                .orElse(new CommandRoute("cmd/control", command, false));
-    }
-
-    private CommandRoute resolveFromCapabilities(String command, CapabilitySchema.CapabilitySnapshot caps) {
-        for (CapabilitySchema.OutputCapability out : caps.outputs()) {
-            if (!out.enabled() || out.commands() == null || !out.commands().contains(command)) {
-                continue;
-            }
-            if (out.legacyTopics() != null && !out.legacyTopics().isEmpty()) {
-                return resolveLegacy(command, out.legacyTopics());
-            }
-            break;
-        }
-        return new CommandRoute("cmd/control", command, false);
-    }
-
-    private CommandRoute resolveLegacy(String command, java.util.List<String> legacyTopics) {
-        String cmdKey = command.replace(".", "").replace("_", "").toLowerCase();
-        String bestAction = null;
-        String bareTopic = null;
-        int bestScore = 0;
-
-        for (String lt : legacyTopics) {
-            int colonIdx = lt.lastIndexOf(':');
-            if (colonIdx > 0 && colonIdx < lt.length() - 1) {
-                String action = lt.substring(colonIdx + 1);
-                String actionKey = action.replace("_", "").toLowerCase();
-                if (cmdKey.equals(actionKey)) {
-                    bestAction = action;
-                    break;
-                }
-                int score = 0;
-                if (cmdKey.contains(actionKey) || actionKey.contains(cmdKey)) score = 1;
-                if (score > bestScore || (score == bestScore && bestAction == null)) {
-                    bestAction = action;
-                    bestScore = score;
-                }
-            } else {
-                if (bareTopic == null) bareTopic = lt;
-            }
-        }
-
-        if (bestAction != null) {
-            return new CommandRoute("cmd/control", bestAction, false);
-        }
-        if (bareTopic != null) {
-            return new CommandRoute(bareTopic, null, true);
+        CapabilityCatalog.CommandDef cmdDef = catalog.getCommand(command).orElse(null);
+        if (cmdDef != null) {
+            return new CommandRoute(cmdDef.topic(), cmdDef.action(), cmdDef.action() == null);
         }
         return new CommandRoute("cmd/control", command, false);
     }

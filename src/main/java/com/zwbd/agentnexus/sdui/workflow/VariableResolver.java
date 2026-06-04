@@ -59,6 +59,20 @@ public final class VariableResolver {
         }
     }
 
+    /**
+     * Resolve a value that may be a String expression or a raw value (number, boolean, map, list).
+     * String values are resolved as expressions; non-string values pass through unchanged.
+     */
+    public static Object resolveValue(Object value,
+                                       Map<String, Object> data,
+                                       Map<String, Object> trigger,
+                                       Map<String, String> env) {
+        if (value instanceof String s) {
+            return resolveExpression(s, data, trigger, env);
+        }
+        return value;
+    }
+
     // ── SpEL translation ──
 
     private static String translateExpr(String expr) {

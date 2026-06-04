@@ -10,9 +10,12 @@ import org.springframework.web.socket.WebSocketSession;
 public class CapabilitiesReportHandler implements TopicHandler {
 
     private final SduiDeviceService deviceService;
+    private final DeviceSessionManager sessionManager;
 
-    public CapabilitiesReportHandler(SduiDeviceService deviceService) {
+    public CapabilitiesReportHandler(SduiDeviceService deviceService,
+                                     DeviceSessionManager sessionManager) {
         this.deviceService = deviceService;
+        this.sessionManager = sessionManager;
     }
 
     @Override
@@ -24,6 +27,7 @@ public class CapabilitiesReportHandler implements TopicHandler {
     public void handle(WebSocketSession session, SduiMessage message) {
         String deviceId = message.getDeviceId();
         log.info("Capabilities report received from device {}", deviceId);
+        sessionManager.registerSession(deviceId, session);
         if (message.getPayload() != null) {
             deviceService.handleCapabilitiesReport(deviceId, message.getPayload());
         }

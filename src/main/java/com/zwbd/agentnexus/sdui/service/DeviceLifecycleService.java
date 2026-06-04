@@ -2,7 +2,6 @@ package com.zwbd.agentnexus.sdui.service;
 
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.model.SduiDeviceTelemetry;
-import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec.DecodedFrame;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceTelemetryRepository;
 import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
@@ -26,21 +25,6 @@ public class DeviceLifecycleService {
 
     private static final long OFFLINE_TIMEOUT_SECONDS = 90L;
     private static final long CLAIM_CODE_TTL_MINUTES = 15L;
-
-    @Transactional
-    public void onHello(String deviceId, DecodedFrame frame) {
-        SduiDevice device = deviceRepository.findById(deviceId).orElseGet(() -> {
-            SduiDevice d = new SduiDevice();
-            d.setDeviceId(deviceId);
-            d.setName("device-" + deviceId);
-            d.setOwnerSpaceId("");
-            d.setRegistrationStatus("UNCLAIMED");
-            return d;
-        });
-        device.setStatus("ONLINE");
-        device.setLastSeenAt(LocalDateTime.now());
-        deviceRepository.save(device);
-    }
 
     @Transactional
     public SduiDevice onHeartbeat(String deviceId, SduiHeartbeatData data) {
@@ -75,10 +59,26 @@ public class DeviceLifecycleService {
             SduiDeviceTelemetry telemetry = new SduiDeviceTelemetry();
             telemetry.setDeviceId(deviceId);
             telemetry.setWifiRssi(data.wifiRssi());
+            telemetry.setIp(data.ip());
             telemetry.setTemperature(data.temperature());
             telemetry.setFreeHeapInternal(data.freeHeapInternal());
+            telemetry.setLargestHeapInternal(data.largestHeapInternal());
+            telemetry.setFreeHeapDma(data.freeHeapDma());
+            telemetry.setLargestHeapDma(data.largestHeapDma());
+            telemetry.setFreeHeapPsram(data.freeHeapPsram());
+            telemetry.setLargestHeapPsram(data.largestHeapPsram());
             telemetry.setFreeHeapTotal(data.freeHeapTotal());
+            telemetry.setFragInternalPct(data.fragInternalPct());
+            telemetry.setFragDmaPct(data.fragDmaPct());
+            telemetry.setFragPsramPct(data.fragPsramPct());
             telemetry.setUptimeS(data.uptimeS());
+            telemetry.setPowerSupported(data.powerSupported());
+            telemetry.setBatteryMv(data.batteryMv());
+            telemetry.setBatteryPct(data.batteryPct());
+            telemetry.setCharging(data.charging());
+            telemetry.setExtPowerPresent(data.extPowerPresent());
+            telemetry.setExtPowerCtrl(data.extPowerCtrl());
+            telemetry.setExtPowerOn(data.extPowerOn());
             telemetryRepository.save(telemetry);
         }
         return device;
@@ -92,6 +92,40 @@ public class DeviceLifecycleService {
             if (device.getStatus() == null) device.setStatus("ONLINE");
             deviceRepository.save(device);
         });
+    }
+
+    /**
+     * Update lastSeenAt without full heartbeat processing.
+     * Keeps binary-protocol devices from being marked OFFLINE
+     * by refreshOnlineStatus() after the 90-second threshold.
+     * Also creates the device entity and issues a claim code if
+     * the device is connecting for the first time via binary protocol.
+     */
+    @Transactional
+    public void touchDevice(String deviceId) {
+        SduiDevice device = deviceRepository.findById(deviceId).orElseGet(() -> {
+            SduiDevice d = new SduiDevice();
+            d.setDeviceId(deviceId);
+            d.setName("device-" + deviceId);
+            d.setOwnerSpaceId("");
+            d.setRegistrationStatus("UNCLAIMED");
+            return d;
+        });
+
+        device.setLastSeenAt(LocalDateTime.now());
+        if (!"ONLINE".equals(device.getStatus())) {
+            device.setStatus("ONLINE");
+        }
+
+        // Issue claim code for unclaimed devices if needed
+        if (!isClaimed(device)) {
+            device.setRegistrationStatus("UNCLAIMED");
+            if (device.getClaimCode() == null || isClaimCodeExpired(device)) {
+                issueClaimCode(device);
+            }
+        }
+
+        deviceRepository.save(device);
     }
 
     @Transactional
@@ -111,7 +145,7 @@ public class DeviceLifecycleService {
                 || LocalDateTime.now().isAfter(device.getClaimCodeExpireAt());
     }
 
-    private void pushClaimCodeScene(SduiDevice device) {
+    public void pushClaimCodeScene(SduiDevice device) {
         String code = device.getClaimCode();
         if (code == null || code.isBlank()) return;
         try {
@@ -127,7 +161,24 @@ public class DeviceLifecycleService {
     }
 
     public record SduiHeartbeatData(
-            Integer wifiRssi, Double temperature,
-            Integer freeHeapInternal, Integer freeHeapTotal, Integer uptimeS
+            // Network
+            Integer wifiRssi, String ip,
+            // Temperature
+            Double temperature,
+            // Internal SRAM
+            Integer freeHeapInternal, Integer largestHeapInternal,
+            // DMA
+            Integer freeHeapDma, Integer largestHeapDma,
+            // PSRAM
+            Integer freeHeapPsram, Integer largestHeapPsram,
+            // Aggregate
+            Integer freeHeapTotal,
+            // Fragmentation
+            Integer fragInternalPct, Integer fragDmaPct, Integer fragPsramPct,
+            // Uptime
+            Integer uptimeS,
+            // Power / Battery
+            Boolean powerSupported, Integer batteryMv, Integer batteryPct,
+            Boolean charging, Boolean extPowerPresent, Boolean extPowerCtrl, Boolean extPowerOn
     ) {}
 }

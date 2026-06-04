@@ -1,7 +1,7 @@
 package com.zwbd.agentnexus.sdui.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -9,11 +9,16 @@ import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class CommandDispatcher {
 
     private final SduiCapabilityService capabilityService;
     private final SduiProtocolService protocolService;
+
+    public CommandDispatcher(@Lazy SduiCapabilityService capabilityService,
+                             SduiProtocolService protocolService) {
+        this.capabilityService = capabilityService;
+        this.protocolService = protocolService;
+    }
 
     public DispatchResult dispatch(String deviceId, String semanticCommand, Object value) {
         return dispatchWithAction(deviceId, semanticCommand, null, value);

@@ -39,6 +39,13 @@ public class SduiDevice {
     @Column(columnDefinition = "text")
     private String capabilitiesSnapshot;
 
+    // ── Connection tracking ──
+    private LocalDateTime connectedAt;
+    @Column(length = 128)
+    private String sessionId;
+    private Integer connectionCount = 0;
+    private Long totalUptimeS = 0L;
+
     @Column(nullable = false, length = 24)
     private String registrationStatus = "UNCLAIMED";
 

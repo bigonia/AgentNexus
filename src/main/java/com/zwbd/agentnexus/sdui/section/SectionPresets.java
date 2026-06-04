@@ -15,7 +15,7 @@ public final class SectionPresets {
         return new SectionScene("hero_dashboard", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
                 new SectionEntry(SectionType.HERO, "cpu_hero",
                         new SectionData.HeroData("85%", "CPU Usage", "Running Normal",
-                                "primary", "cpu", 85))
+                                "primary", "cpu", null, 85))
         ));
     }
 
@@ -43,7 +43,7 @@ public final class SectionPresets {
         return new SectionScene("full_dashboard_v1", SectionLayout.VERTICAL_SCROLL, true, 3000, List.of(
                 new SectionEntry(SectionType.HERO, "cpu_hero",
                         new SectionData.HeroData("85%", "CPU Usage", "Running Normal",
-                                "primary", "cpu", 85)),
+                                "primary", "cpu", null, 85)),
                 new SectionEntry(SectionType.METRIC, "sys_metrics",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("Memory", "62%"),
@@ -67,7 +67,7 @@ public final class SectionPresets {
                 new SectionEntry(SectionType.HERO, "claim_code_hero",
                         new SectionData.HeroData(formatClaimCode(claimCode), "认领码",
                                 "请在管理平台输入此码完成设备认领",
-                                "primary", "", -1))
+                                "primary", "", null, -1))
         ));
     }
 
@@ -76,7 +76,7 @@ public final class SectionPresets {
                 new SectionEntry(SectionType.HERO, "claimed_hero",
                         new SectionData.HeroData("✓", "认领成功",
                                 "设备已绑定，正在加载业务界面...",
-                                "success", "", -1))
+                                "success", "", null, -1))
         ));
     }
 
@@ -91,7 +91,7 @@ public final class SectionPresets {
         return new SectionScene("system_overview", SectionLayout.VERTICAL_SCROLL, true, 3000, List.of(
                 new SectionEntry(SectionType.HERO, "health_hero",
                         new SectionData.HeroData("98%", "System Health", "All systems nominal",
-                                "success", "start", 98)),
+                                "success", "start", null, 98)),
                 new SectionEntry(SectionType.METRIC, "res_metrics",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("CPU", "23%"),
