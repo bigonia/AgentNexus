@@ -113,27 +113,6 @@ spring:
 
 
 # -------------------------------------------------------------------
-# Database Timeout Configuration
-# -------------------------------------------------------------------
-app:
-  database:
-    timeout:
-      # Connection timeout in seconds for establishing database connections
-      connection-timeout: 30
-      # Socket timeout in seconds for network operations
-      socket-timeout: 60
-      # Query timeout in seconds for connection test operations
-      connection-test-timeout: 10
-      # Query timeout in seconds for table metadata queries
-      metadata-query-timeout: 30
-      # Query timeout in seconds for metrics calculation queries
-      metrics-calculation-timeout: 120
-      # Overall task timeout in minutes for metadata collection tasks
-      task-timeout-minutes: 60
-      # Maximum concurrent tasks for parallel processing
-      max-concurrent-tasks: 5
-
-# -------------------------------------------------------------------
 # (可选) Logging Configuration
 # -------------------------------------------------------------------
 logging:
@@ -159,9 +138,6 @@ management:
 jwt:
   secret: "ThisIsMyVeryLongAndSecureSecretKeyForTestingPurposesOnly123"
   expiration: 86400 # Token有效期（秒），这里是24小时
-
-file:
-  upload-dir: ./upload-dir
 
 # -------------------------------------------------------------------
 # DrawThings 本地文生图（独立模块，不影响 SDUI）

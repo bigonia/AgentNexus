@@ -23,7 +23,31 @@
       "PowerShell(.\\\\mvnw clean compile -DskipTests 2>&1)",
       "PowerShell(.\\\\mvnw test -Dtest=VariableResolverTest -DfailIfNoTests=false 2>&1)",
       "PowerShell(.\\\\mvnw test -Dtest=\"VariableResolverTest,WorkflowDefinitionSerializationTest\" -DfailIfNoTests=false 2>&1)",
-      "PowerShell(.\\\\mvnw test -DfailIfNoTests=false 2>&1)"
+      "PowerShell(.\\\\mvnw test -DfailIfNoTests=false 2>&1)",
+      "Bash(mvn --version)",
+      "Bash(chmod +x *)",
+      "Bash(psql *)",
+      "Bash(npx --version)",
+      "Bash(npx *)",
+      "Bash(./mvnw compile *)",
+      "Bash(git *)",
+      "Bash(mvnw compile *)",
+      "Read(//Users/nazaria/**)",
+      "Bash(./mvnw clean *)",
+      "Bash(mvnw clean *)",
+      "Bash(mvn clean *)",
+      "Bash(mvnw test *)",
+      "Bash(./mvnw test *)",
+      "Bash(jar tf *)",
+      "Bash(xargs -I{} sh -c 'jar tf {} 2>/dev/null | grep -l \"ChatOptions\" && echo \"Found in: {}\"')",
+      "Bash(xargs -I{} sh -c 'jar tf {} 2>/dev/null | grep \"ChatOptions\" && echo \"Found in: {}\"')",
+      "Bash(javap *)",
+      "Bash(timeout 25 mvn spring-boot:run -Dspring-boot.run.profiles=macos -DskipTests)",
+      "Bash(rm -v src/main/java/com/zwbd/agentnexus/ai/service/DocumentManagementService.java)",
+      "Bash(rm -v src/main/java/com/zwbd/agentnexus/ai/web/controller/DocumentManagementController.java)",
+      "Bash(rm -v src/main/java/com/zwbd/agentnexus/ai/repository/RAGDocumentRepository.java)",
+      "Bash(rm -rfv src/main/java/com/zwbd/agentnexus/ai/dto/document/)",
+      "Bash(rm -rfv src/main/java/com/zwbd/agentnexus/ai/custom/)"
     ]
   }
 }

@@ -3,7 +3,6 @@ package com.zwbd.agentnexus.drawthings;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.drawthings.dto.Txt2ImgRequest;
 import com.zwbd.agentnexus.drawthings.dto.Txt2ImgResponse;
-import com.zwbd.agentnexus.file.FileStorageService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,11 +13,16 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Core service for text-to-image generation via local DrawThings API.
@@ -32,7 +36,6 @@ import java.util.Map;
 @ConditionalOnProperty(prefix = "drawthings", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class ImageGenService {
 
-    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
     @Value("${drawthings.base-url:http://127.0.0.1:7860}")
@@ -53,10 +56,12 @@ public class ImageGenService {
     @Value("${drawthings.default-cfg-scale:7.0}")
     private double defaultCfgScale;
 
+    @Value("${drawthings.image-dir:./drawthings-images}")
+    private String imageDir;
+
     private RestTemplate restTemplate;
 
-    public ImageGenService(FileStorageService fileStorageService, ObjectMapper objectMapper) {
-        this.fileStorageService = fileStorageService;
+    public ImageGenService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
@@ -153,7 +158,7 @@ public class ImageGenService {
             rawBase64.add(b64);
             try {
                 byte[] pngBytes = Base64.getDecoder().decode(b64);
-                String filename = fileStorageService.storeBytes(pngBytes, ".png");
+                String filename = storeImage(pngBytes);
                 String imageUrl = "/api/v1/drawthings/image/view/" + filename;
                 savedUrls.add(imageUrl);
                 log.info("Image {} saved as {} ({} bytes)", i + 1, filename, pngBytes.length);
@@ -166,6 +171,27 @@ public class ImageGenService {
         response.setImages(rawBase64);
         response.setImageUrls(savedUrls);
         return response;
+    }
+
+    /**
+     * Persist image bytes to the configured image directory.
+     */
+    public String storeImage(byte[] bytes) throws IOException {
+        Path dir = Paths.get(imageDir);
+        if (!Files.exists(dir)) {
+            Files.createDirectories(dir);
+        }
+        String filename = UUID.randomUUID() + ".png";
+        Path filePath = dir.resolve(filename);
+        Files.write(filePath, bytes);
+        return filename;
+    }
+
+    /**
+     * Load a previously stored image as a filesystem resource path.
+     */
+    public Path getImagePath(String filename) {
+        return Paths.get(imageDir).resolve(filename);
     }
 
     private static String truncate(String s, int maxLen) {

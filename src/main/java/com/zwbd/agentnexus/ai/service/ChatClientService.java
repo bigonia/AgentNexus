@@ -10,7 +10,6 @@ import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryReposito
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
@@ -40,9 +39,6 @@ public class ChatClientService {
     @Qualifier("ragClient")
     @Autowired
     private ChatClient chatClient;
-
-    @Autowired
-    private PromptTemplate promptTemplate;
 
     @Autowired
     private ChatMemory chatMemory;

@@ -2,17 +2,18 @@ package com.zwbd.agentnexus.drawthings;
 
 import com.zwbd.agentnexus.common.web.ApiResponse;
 import com.zwbd.agentnexus.drawthings.dto.Txt2ImgResponse;
-import com.zwbd.agentnexus.file.FileStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 /**
@@ -27,7 +28,6 @@ import java.util.Map;
 public class ImageGenController {
 
     private final ImageGenService imageGenService;
-    private final FileStorageService fileStorageService;
 
     @PostMapping("/generate")
     @Operation(summary = "文生图", description = "使用本地 DrawThings 将文本提示词生成为图片")
@@ -60,7 +60,11 @@ public class ImageGenController {
     @Operation(summary = "查看生成的图片")
     public ResponseEntity<Resource> viewImage(@PathVariable String filename) {
         try {
-            Resource resource = fileStorageService.loadFileAsResource(filename);
+            Path imagePath = imageGenService.getImagePath(filename);
+            if (!imagePath.toFile().exists()) {
+                return ResponseEntity.notFound().build();
+            }
+            Resource resource = new FileSystemResource(imagePath);
             return ResponseEntity.ok()
                     .contentType(MediaType.IMAGE_PNG)
                     .body(resource);

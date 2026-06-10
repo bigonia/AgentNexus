@@ -1,7 +1,6 @@
 package com.zwbd.agentnexus.ai.config;
 
 import com.zwbd.agentnexus.ai.tools.CommonTools;
-import com.zwbd.agentnexus.document.etl.processor.DatabaseMetaDataProcessor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -9,8 +8,6 @@ import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.rag.advisor.RetrievalAugmentationAdvisor;
 import org.springframework.ai.rag.generation.augmentation.ContextualQueryAugmenter;
@@ -18,17 +15,9 @@ import org.springframework.ai.rag.preretrieval.query.expansion.MultiQueryExpande
 import org.springframework.ai.rag.preretrieval.query.transformation.RewriteQueryTransformer;
 import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.io.Resource;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 /**
  * @Author: wnli
@@ -37,7 +26,7 @@ import java.nio.charset.StandardCharsets;
  */
 @Slf4j
 @Configuration
-public class ChatClientConfig implements InitializingBean {
+public class ChatClientConfig {
 
     @Autowired
     VectorStore vectorStore;
@@ -47,51 +36,10 @@ public class ChatClientConfig implements InitializingBean {
     JdbcChatMemoryRepository chatMemoryRepository;
 
     @Autowired
-    DatabaseMetaDataProcessor databaseMetaDataProcessor;
-
-    @Value("classpath:/prompts/system-prompt.st")
-    Resource systemPromptResource;
-
-    @Autowired
     private CommonTools commonTools;
 
     @Autowired(required = false)
     private SyncMcpToolCallbackProvider toolCallbackProvider;
-
-    @Bean
-    public PromptTemplate ragSystemPromptTemplate(@Value("classpath:/prompts/system-prompt.st") Resource systemPromptResource) throws IOException {
-        PromptTemplate ragSystemPromptTemplate = new PromptTemplate(systemPromptResource.getContentAsString(StandardCharsets.UTF_8));
-        return ragSystemPromptTemplate;
-    }
-
-
-    @Bean("pythonCoder")
-    public ChatClient initCommonChatClient(@Qualifier("deepseekChatModel") ChatModel model) {
-        ChatClient.Builder builder = ChatClient.builder(model);
-        ChatClient customChatClient = builder
-//                .defaultSystem("> \"为用户编写一个 Python 数据处理脚本，用于 Java GraalVM 环境下的流式文档清洗系统。\n" +
-//                        "\n" +
-//                        " **代码要求：**\n" +
-//                        "\n" +
-//                        " 1.  **函数定义**：必须包含函数 `def process(doc):`。\n" +
-//                        " 2.  **输入对象**：`doc` 是一个 Java `Document` 对象。\n" +
-//                        "       - 使用 `doc.getContent()` 获取文本内容 (String)。\n" +
-//                        "       - 使用 `doc.getMetadata()` 获取元数据 (Map)。\n" +
-//                        " 3.  **输出要求**：必须返回一个文档列表 `list`。\n" +
-//                        "       - `[doc]`: 修改后返回（一对一）。\n" +
-//                        "       - `[]`: 返回空列表以过滤掉该文档（过滤）。\n" +
-//                        "       - `[doc1, doc2]`: 返回多个文档（拆分）。\n" +
-//                        " 4.  **操作方法**：\n" +
-//                        "       - 修改内容：`doc.setContent(\"new content\")`。\n" +
-//                        "       - 修改元数据：`doc.getMetadata().put(\"key\", \"value\")`。\n" +
-//                        "       - 复制对象：如果需要拆分，使用 `doc.clone()` (假设存在) 或创建新对象。\n" +
-//                        " 5.  **限制条件**：\n" +
-//                        "       - 不要使用任何 I/O 操作（文件读写、网络请求）。\n" +
-//                        "       - 不要创建线程。\n" +
-//                        "       - 仅使用 Python 标准库（如 `json`, `re`）。")
-                .build();
-        return customChatClient;
-    }
 
     @Bean
     public ChatMemory chatMemory() {
@@ -240,8 +188,4 @@ public class ChatClientConfig implements InitializingBean {
 //
 //        return chatModel;
 //    }
-    @Override
-    public void afterPropertiesSet() throws Exception {
-
-    }
 }
