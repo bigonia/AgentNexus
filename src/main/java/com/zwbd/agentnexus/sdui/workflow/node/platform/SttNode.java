@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui.workflow.node.platform;
 
+import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
+import com.zwbd.agentnexus.sdui.protocol.SduiRuntimeHandlers;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.workflow.VariableResolver;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNode;
@@ -40,7 +42,7 @@ public class SttNode implements CapabilityNode {
                 List.of(
                         new NodeSchema.ParamDef("transcription", "string", false, null, "转录文本结果")
                 ),
-                false, 20000);
+                false, 20000, null, "platform", SduiProtocolConstants.NodeProtocols.SERVER_AUDIO, SduiRuntimeHandlers.PLATFORM_AUDIO_STT, Map.of());
     }
 
     @Override

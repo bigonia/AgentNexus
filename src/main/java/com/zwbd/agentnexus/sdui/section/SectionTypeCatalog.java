@@ -305,6 +305,27 @@ public final class SectionTypeCatalog {
         return fieldsToMaps(fields, SectionRenderMode.RICH, Set.of());
     }
 
+    public static Map<String, Object> defaultFieldValues(List<SectionFieldDef> fields) {
+        Map<String, Object> defaults = new LinkedHashMap<>();
+        for (SectionFieldDef field : fields) {
+            defaults.put(field.name(), defaultValueFor(field));
+        }
+        return defaults;
+    }
+
+    public static Map<String, Object> defaultFieldValues(String sectionType) {
+        SectionTypeDef def = getOrThrow(sectionType);
+        return defaultFieldValues(def.displayFields());
+    }
+
+    public static Map<String, Object> sampleFieldValues(List<SectionFieldDef> fields) {
+        Map<String, Object> sample = new LinkedHashMap<>();
+        for (SectionFieldDef field : fields) {
+            sample.put(field.name(), sampleValueFor(field));
+        }
+        return sample;
+    }
+
     /**
      * Serialize fields to frontend-friendly maps, filtering out compact-hidden fields
      * when the render mode is COMPACT.
@@ -368,6 +389,52 @@ public final class SectionTypeCatalog {
             result.add(m);
         }
         return result;
+    }
+
+    private static Object defaultValueFor(SectionFieldDef field) {
+        if ("array".equals(field.type())) {
+            return List.of();
+        }
+        if ("object".equals(field.type())) {
+            return field.children() != null ? defaultFieldValues(field.children()) : Map.of();
+        }
+        if (field.defaultValue() != null) {
+            return field.defaultValue();
+        }
+        return switch (field.type()) {
+            case "string", "color", "enum" -> "";
+            case "int" -> 0;
+            case "boolean" -> false;
+            default -> null;
+        };
+    }
+
+    private static Object sampleValueFor(SectionFieldDef field) {
+        if ("array".equals(field.type())) {
+            if (field.children() == null || field.children().isEmpty()) {
+                return List.of();
+            }
+            return List.of(sampleFieldValues(field.children()));
+        }
+        if ("object".equals(field.type())) {
+            return field.children() != null ? sampleFieldValues(field.children()) : Map.of();
+        }
+        if ("enum".equals(field.type()) && field.options() != null && !field.options().isEmpty()) {
+            return field.options().get(0);
+        }
+        if ("string".equals(field.type()) || "color".equals(field.type())) {
+            return field.label() + "示例";
+        }
+        if ("int".equals(field.type())) {
+            if (field.defaultValue() instanceof Number n) {
+                return n.intValue();
+            }
+            return field.min() != null ? field.min() : 1;
+        }
+        if ("boolean".equals(field.type())) {
+            return Boolean.TRUE.equals(field.defaultValue()) ? Boolean.TRUE : Boolean.FALSE;
+        }
+        return defaultValueFor(field);
     }
 
     /** All interaction event IDs across all section types. */

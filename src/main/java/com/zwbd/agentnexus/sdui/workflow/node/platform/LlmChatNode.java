@@ -42,7 +42,7 @@ public class LlmChatNode implements CapabilityNode {
                         new NodeSchema.ParamDef("model", "string", false, null, "使用的模型"),
                         new NodeSchema.ParamDef("tokenUsage", "object", false, null, "token 使用统计")
                 ),
-                false, 30000);
+                false, 30000, null, "platform", "llm_chat", "platform.llm.chat", Map.of());
     }
 
     @Override

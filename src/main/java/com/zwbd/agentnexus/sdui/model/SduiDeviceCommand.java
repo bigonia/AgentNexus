@@ -36,6 +36,9 @@ public class SduiDeviceCommand {
     @Column(nullable = false, length = 64)
     private String cmdId;
 
+    @Column(length = 64, columnDefinition = "varchar(64) default ''")
+    private String command;
+
     @Column(nullable = false, length = 32)
     private String action;
 

@@ -13,10 +13,10 @@ import java.util.Map;
  * <h3>Event ID naming convention</h3>
  * All event IDs follow: {@code <category>:<capability>.<specific-event>}
  * <pre>
- *   section:action.click        — action_section button click
- *   hardware:buttons.boot.single_click
- *   sensor:motion.imu.shake
- *   audio:record.data
+ *   ui:action.click             — action_section button click
+ *   input:buttons.pwr.single_click
+ *   input:motion.imu.shake
+ *   input:audio.record.audio.record.data
  *   display:brightness.set
  *   rgb:effect.set
  * </pre>
@@ -32,7 +32,7 @@ import java.util.Map;
  * workflow editor and organized lookup in {@link EventRegistry}.
  */
 public record EventDefinition(
-        /** Globally unique, namespaced event ID (e.g. "section:action.click"). */
+        /** Globally unique, namespaced event ID (e.g. "ui:action.click"). */
         String eventId,
 
         /** Direction of event flow. */
@@ -48,7 +48,7 @@ public record EventDefinition(
         String description,
 
         /** Capability name this event originates from or targets
-         *  (e.g. "buttons.boot", "action_section", "rgb.effect"). */
+         *  (e.g. "buttons.pwr", "action_section", "rgb.effect"). */
         String sourceCapability,
 
         /** How this event travels over the wire. */
@@ -71,7 +71,7 @@ public record EventDefinition(
     }
 
     public enum EventCategory {
-        /** Physical button events (boot, plus, etc.) */
+        /** Physical button events (pwr, plus, etc.) */
         HARDWARE_BUTTON("物理按钮"),
         /** IMU / motion sensor events */
         HARDWARE_SENSOR("运动传感器"),

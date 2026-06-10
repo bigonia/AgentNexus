@@ -91,7 +91,7 @@ public class EventRegistry {
             EventDefinition.TransportInfo transport = EventDefinition.TransportInfo.ui3Binary(9, 1);
 
             for (SectionTypeCatalog.InteractionEvent ievt : typeDef.interactionEvents()) {
-                String eventId = "section:" + ievt.eventId(); // e.g. "section:action.click"
+                String eventId = "ui:" + ievt.eventId();
 
                 List<EventDefinition.ParamDef> payloadSchema = new ArrayList<>();
                 // Always present in section interaction events
@@ -209,10 +209,10 @@ public class EventRegistry {
 
     private String namespacedId(EventDefinition.EventCategory category, String inputName, String eventName) {
         return switch (category) {
-            case HARDWARE_BUTTON -> "hardware:" + inputName + "." + eventName;
-            case HARDWARE_SENSOR -> "sensor:motion." + eventName;
-            case AUDIO_INPUT -> "audio:" + eventName;
-            default -> eventName; // fallback for unknown categories
+            case HARDWARE_BUTTON -> "input:" + inputName + "." + eventName;
+            case HARDWARE_SENSOR -> "input:motion." + eventName;
+            case AUDIO_INPUT -> "input:" + inputName + "." + eventName;
+            default -> "input:" + inputName + "." + eventName;
         };
     }
 
@@ -236,30 +236,27 @@ public class EventRegistry {
     private String legacyNameFrom(EventDefinition def) {
         // Map namespaced ID back to the legacy name that firmware sends
         String id = def.eventId();
-        if (id.startsWith("hardware:buttons.")) {
-            // "hardware:buttons.boot.single_click" → "single_click"
+        if (id.startsWith("input:buttons.")) {
             int lastDot = id.lastIndexOf('.');
             return lastDot >= 0 ? id.substring(lastDot + 1) : id;
         }
-        if (id.startsWith("section:")) {
-            // "section:action.click" → "action.click"
-            return id.substring("section:".length());
+        if (id.startsWith("ui:")) {
+            return id.substring("ui:".length());
         }
-        if (id.startsWith("sensor:motion.")) {
-            // "sensor:motion.imu.shake" → "imu.shake"
-            return id.substring("sensor:motion.".length());
+        if (id.startsWith("input:motion.")) {
+            return id.substring("input:motion.".length());
         }
-        if (id.startsWith("audio:")) {
-            // "audio:record.data" → "audio.record.data"
-            return id.substring("audio:".length());
+        if (id.startsWith("input:audio.record.")) {
+            return id.substring("input:audio.record.".length());
         }
         return id;
     }
 
     private EventDefinition.TransportInfo buildTransport(CapabilityCatalog.InputDef input) {
         if ("ui3_binary".equals(input.protocol())) {
-            return EventDefinition.TransportInfo.ui3Binary(9,
-                    input.eventKind() != null ? input.eventKind() : 0);
+            return input.eventKind() != null
+                    ? EventDefinition.TransportInfo.ui3Binary(9, input.eventKind())
+                    : EventDefinition.TransportInfo.ui3Binary(9);
         } else if ("json_topic".equals(input.protocol()) && input.topic() != null) {
             return EventDefinition.TransportInfo.jsonTopic(input.topic());
         }
@@ -353,10 +350,10 @@ public class EventRegistry {
      *     "label": "物理按钮",
      *     "capabilities": [
      *       {
-     *         "capability": "buttons.boot",
+     *         "capability": "buttons.pwr",
      *         "label": "BOOT 按钮",
      *         "events": [
-     *           { "eventId": "hardware:buttons.boot.single_click", "displayName": "单击", ... }
+     *           { "eventId": "input:buttons.pwr.single_click", "displayName": "单击", ... }
      *         ]
      *       }
      *     ]
@@ -389,8 +386,7 @@ public class EventRegistry {
 
                 Map<String, Object> capNode = new LinkedHashMap<>();
                 capNode.put("capability", capName);
-                capNode.put("label", eventDefs.isEmpty() ? capName
-                        : eventDefs.get(0).sourceCapability());
+                capNode.put("label", inboundCapabilityLabel(capName));
                 capNode.put("events", eventDefs.stream()
                         .map(EventDefinition::toMap)
                         .toList());
@@ -426,11 +422,11 @@ public class EventRegistry {
 
             List<Map<String, Object>> capabilities = new ArrayList<>();
             for (var capEntry : catEntry.getValue().entrySet()) {
+                String capabilityName = capEntry.getKey();
                 List<EventDefinition> eventDefs = capEntry.getValue();
                 Map<String, Object> capNode = new LinkedHashMap<>();
-                capNode.put("capability", capEntry.getKey());
-                capNode.put("label", eventDefs.isEmpty() ? capEntry.getKey()
-                        : eventDefs.get(0).displayName());
+                capNode.put("capability", capabilityName);
+                capNode.put("label", outboundCapabilityLabel(capabilityName));
                 capNode.put("commands", eventDefs.stream()
                         .map(EventDefinition::toMap)
                         .toList());
@@ -440,6 +436,20 @@ public class EventRegistry {
             tree.add(catNode);
         }
         return tree;
+    }
+
+    public String inboundCapabilityLabel(String capabilityName) {
+        return catalog.getInput(capabilityName)
+                .map(CapabilityCatalog.InputDef::displayName)
+                .filter(label -> label != null && !label.isBlank())
+                .orElse(capabilityName);
+    }
+
+    public String outboundCapabilityLabel(String capabilityName) {
+        return catalog.getOutput(capabilityName)
+                .map(CapabilityCatalog.OutputDef::displayName)
+                .filter(label -> label != null && !label.isBlank())
+                .orElse(capabilityName);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.zwbd.agentnexus.sdui;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
 import com.zwbd.agentnexus.sdui.service.SduiDeviceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +17,7 @@ public class SduiControlAckHandler implements TopicHandler {
 
     @Override
     public String getSupportedTopic() {
-        return "cmd/control_ack";
+        return SduiProtocolConstants.Topics.COMMAND_CONTROL_ACK;
     }
 
     @Override

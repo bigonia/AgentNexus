@@ -58,7 +58,9 @@ public class SectionSceneBuilder {
             if (p.type() != null) {
                 pn.put("type", p.type());
             }
-            pn.set("data", buildDataNode(p.data(), p.type(), mode));
+            if (p.data() != null) {
+                pn.set("data", buildDataNode(p.data(), p.type(), mode));
+            }
             patches.add(pn);
         }
         return root.toString();

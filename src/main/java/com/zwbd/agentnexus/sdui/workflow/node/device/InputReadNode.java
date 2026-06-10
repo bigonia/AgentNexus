@@ -42,7 +42,7 @@ public class InputReadNode implements CapabilityNode {
     @Override
     public NodeSchema schema() {
         return new NodeSchema(type(), "读取输入", "从设备事件中读取输入数据并存储为变量",
-                "device", "mouse-pointer-click",
+                "flow_control", "mouse-pointer-click",
                 List.of(
                         new NodeSchema.ParamDef("virtualInputId", "string", true, null,
                                 "虚拟输入 ID，对应终端上报的 input module"),
@@ -54,7 +54,7 @@ public class InputReadNode implements CapabilityNode {
                                 "默认值（事件数据不存在时使用）")
                 ),
                 List.of(new NodeSchema.ParamDef("value", "object", false, null, "读取到的值")),
-                false, 3000);
+                false, 3000, null, "workflow", "event_payload", "workflow.input.read", Map.of());
     }
 
     @Override

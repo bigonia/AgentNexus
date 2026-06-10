@@ -32,7 +32,14 @@ public class DagExecutor {
             // Legacy mode: execute actions sequentially by triggerId
             List<ActionDef> actions = def.actions() != null ? def.actions().get(triggerId) : null;
             if (actions != null) {
-                actionExecutor.execute(actions, instance, triggerPayload, env);
+                ActionExecutor.ExecutionReport report = actionExecutor.execute(actions, instance, triggerPayload, env);
+                return Map.of(
+                        "mode", "sequential",
+                        "executed", actions.size(),
+                        "nodeResults", report.nodeResults(),
+                        "failedNode", report.failedNode(),
+                        "failureReason", report.failureReason()
+                );
             }
             return Map.of("mode", "sequential", "executed", actions != null ? actions.size() : 0);
         }
@@ -49,6 +56,7 @@ public class DagExecutor {
                 dag.topologicalOrder(), dag.adjacency());
 
         Map<String, Map<String, Object>> nodeOutputs = new ConcurrentHashMap<>();
+        List<Map<String, Object>> nodeResults = new CopyOnWriteArrayList<>();
         AtomicInteger executed = new AtomicInteger(0);
 
         // Execute level by level, with nodes in each level running in parallel
@@ -56,7 +64,7 @@ public class DagExecutor {
             if (level.size() == 1) {
                 String nodeId = level.get(0);
                 Map<String, Object> output = executeNode(nodeId, def, instance,
-                        triggerPayload, env, nodeOutputs);
+                        triggerPayload, env, nodeOutputs, nodeResults);
                 if (output != null) {
                     nodeOutputs.put(nodeId, output);
                     executed.incrementAndGet();
@@ -67,7 +75,7 @@ public class DagExecutor {
                 for (String nodeId : level) {
                     futures.add(parallelPool.submit(() -> {
                         Map<String, Object> output = executeNode(nodeId, def, instance,
-                                triggerPayload, env, nodeOutputs);
+                                triggerPayload, env, nodeOutputs, nodeResults);
                         return output != null ? Map.entry(nodeId, output) : null;
                     }));
                 }
@@ -88,14 +96,16 @@ public class DagExecutor {
         log.info("DAG execution complete: {} / {} nodes executed", executed.get(), dag.topologicalOrder().size());
         return Map.of("mode", "dag", "executed", executed.get(),
                 "total", dag.topologicalOrder().size(),
-                "order", dag.topologicalOrder());
+                "order", dag.topologicalOrder(),
+                "nodeResults", nodeResults);
     }
 
     private Map<String, Object> executeNode(String nodeId, WorkflowDefinition def,
                                              WorkflowInstance instance,
                                              Map<String, Object> triggerPayload,
                                              Map<String, String> env,
-                                             Map<String, Map<String, Object>> nodeOutputs) {
+                                             Map<String, Map<String, Object>> nodeOutputs,
+                                             List<Map<String, Object>> nodeResults) {
         List<ActionDef> actions = def.actions() != null ? def.actions().get(nodeId) : null;
         if (actions == null || actions.isEmpty()) {
             // Could be a trigger-only node (entry point)
@@ -111,7 +121,14 @@ public class DagExecutor {
             }
         }
 
-        actionExecutor.execute(actions, instance, enrichedPayload, env);
-        return Map.of("status", "completed");
+        ActionExecutor.ExecutionReport report = actionExecutor.execute(actions, instance, enrichedPayload, env);
+        nodeResults.add(Map.of(
+                "nodeId", nodeId,
+                "status", report.failedNode() == null ? "COMPLETED" : "ERROR",
+                "results", report.nodeResults(),
+                "failedNode", report.failedNode(),
+                "failureReason", report.failureReason()
+        ));
+        return Map.of("status", report.failedNode() == null ? "completed" : "error");
     }
 }

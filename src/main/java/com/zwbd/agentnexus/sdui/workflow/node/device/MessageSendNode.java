@@ -28,14 +28,14 @@ public class MessageSendNode implements CapabilityNode {
     @Override
     public NodeSchema schema() {
         return new NodeSchema(type(), "发送消息", "向目标设备发送消息，触发其 device_message 工作流",
-                "device", "send",
+                "platform", "send",
                 List.of(
                         new NodeSchema.ParamDef("target", "string", true, null, "目标设备 ID"),
                         new NodeSchema.ParamDef("messageType", "string", false, "text", "消息类型: text | voice | alert | command"),
                         new NodeSchema.ParamDef("payload", "object", false, null, "消息内容，支持 $data.xxx / $trigger.xxx")
                 ),
                 List.of(),
-                false, 5000);
+                false, 5000, null, "platform", "workflow_message", "platform.device.message", Map.of());
     }
 
     @SuppressWarnings("unchecked")

@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui.workflow.node.device;
 
+import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
+import com.zwbd.agentnexus.sdui.protocol.SduiRuntimeHandlers;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.workflow.VariableResolver;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNode;
@@ -19,19 +21,19 @@ public class PlayAudioNode implements CapabilityNode {
     private final AudioService audioService;
 
     @Override
-    public String type() { return "device.audio.play"; }
+    public String type() { return "platform.audio.play"; }
 
     @Override
     public NodeSchema schema() {
         return new NodeSchema(type(), "播放音频", "在设备上播放预设音频",
-                "device", "volume-2",
+                "platform", "volume-2",
                 List.of(
                         new NodeSchema.ParamDef("preset", "string", false, null,
                                 "预设音: notification/success/error/warning/click/beep"),
                         new NodeSchema.ParamDef("text", "string", false, null, "TTS 文本（用于朗读）")
                 ),
                 List.of(),
-                false, 10000);
+                false, 10000, null, "platform", SduiProtocolConstants.NodeProtocols.SERVER_AUDIO, SduiRuntimeHandlers.PLATFORM_AUDIO_PLAY, Map.of());
     }
 
     @Override

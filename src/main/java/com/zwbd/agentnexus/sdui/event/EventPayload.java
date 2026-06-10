@@ -23,12 +23,13 @@ import java.util.function.Function;
  * </ul>
  *
  * <h3>Factory methods</h3>
- * Use {@link #fromBinaryInput} for UI3 binary events (msgType=9).
- * Use {@link #fromJsonTopic} for JSON-topic events (motion, audio).
+ * Use {@link #fromBinaryInput} for UI3 binary events (msgType=9), including
+ * section interaction, hardware button, and motion sensor events.
+ * Use {@link #fromJsonTopic} for JSON-topic events such as audio.
  * Use {@link #minimal} when only deviceId and eventId are known.
  */
 public record EventPayload(
-        /** The namespaced event ID (e.g. "section:action.click"). May be null for legacy events. */
+        /** The namespaced event ID (e.g. "ui:action.click"). May be null for legacy events. */
         String eventId,
 
         /** Device that produced this event. */
@@ -99,7 +100,7 @@ public record EventPayload(
         if (eventName != null) rawFields.put("eventName", eventName);
 
         return new EventPayload(
-                resolveEventId(eventName),
+                resolveBinaryEventId(kind, nodeId, eventName),
                 deviceId,
                 pageId != null ? pageId : "",
                 sectionId != null ? sectionId : "",
@@ -213,14 +214,41 @@ public record EventPayload(
         if (eventName.contains(":")) return eventName;
         // Section interaction events
         if (eventName.startsWith("action.") || eventName.startsWith("list.")
-                || eventName.startsWith("toggle.") || eventName.startsWith("overlay.")) {
-            return "section:" + eventName;
+                || eventName.startsWith("toggle.") || eventName.startsWith("overlay.")
+                || eventName.startsWith("nav.")) {
+            return "ui:" + eventName;
         }
         // Known hardware events
-        if (eventName.startsWith("imu.")) return "sensor:motion." + eventName;
-        if (eventName.startsWith("audio.")) return "audio:" + eventName.substring("audio.".length());
+        if (eventName.startsWith("imu.")) return "input:motion." + eventName;
+        if (eventName.startsWith("audio.")) return "input:audio.record." + eventName;
         // Default: treat as-is for backward compat
         return eventName;
+    }
+
+    private static String resolveBinaryEventId(int kind, String nodeId, String eventName) {
+        if (kind == 4 && nodeId != null && !nodeId.isBlank() && eventName != null && !eventName.isBlank()) {
+            if ("motion".equals(nodeId)) {
+                return "input:motion." + eventName;
+            }
+            return "input:buttons." + normalizeButtonNodeId(nodeId) + "." + normalizeButtonEventName(eventName);
+        }
+        return resolveEventId(eventName);
+    }
+
+    private static String normalizeButtonNodeId(String nodeId) {
+        return switch (nodeId) {
+            case "boot" -> "pwr";
+            default -> nodeId;
+        };
+    }
+
+    private static String normalizeButtonEventName(String eventName) {
+        return switch (eventName) {
+            case "short_press" -> "single_click";
+            case "long_press", "long_press_start" -> "long_press_start";
+            case "long_press_end" -> "long_press_up";
+            default -> eventName;
+        };
     }
 
     private static int findTlvInt(DecodedFrame frame, int type, int defaultValue) {

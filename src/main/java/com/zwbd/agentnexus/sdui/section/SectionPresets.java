@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.section;
 
-import java.util.List;
+import java.util.*;
 
 /**
  * Ready-to-use section scene presets matching the firmware test server catalog.
@@ -8,6 +8,46 @@ import java.util.List;
 public final class SectionPresets {
 
     private SectionPresets() {}
+
+    // ── Preset metadata ──
+
+    private static final Map<String, PresetMeta> PRESET_METAS = new LinkedHashMap<>();
+    static {
+        PRESET_METAS.put("hero_dashboard", new PresetMeta("hero_dashboard", "Hero 仪表盘",
+                "单 Hero 卡片展示 CPU 使用率", "vertical_scroll", 1, List.of("hero_section")));
+        PRESET_METAS.put("metrics_grid", new PresetMeta("metrics_grid", "指标网格",
+                "4 格指标展示内存/磁盘/网络/负载", "vertical_scroll", 1, List.of("metric_section")));
+        PRESET_METAS.put("chart_trend", new PresetMeta("chart_trend", "趋势图表",
+                "16 点折线图展示 CPU 10 分钟趋势", "vertical_scroll", 1, List.of("chart_section")));
+        PRESET_METAS.put("full_dashboard", new PresetMeta("full_dashboard", "完整仪表盘",
+                "Hero + 指标网格 + 图表 + 操作按钮", "vertical_scroll", 4,
+                List.of("hero_section", "metric_section", "chart_section", "action_section")));
+        PRESET_METAS.put("system_overview", new PresetMeta("system_overview", "系统概览",
+                "健康度 + 资源指标 + 备份进度 + 负载图表", "vertical_scroll", 4,
+                List.of("hero_section", "metric_section", "progress_section", "chart_section")));
+    }
+
+    public record PresetMeta(String name, String label, String description,
+                             String layout, int sectionCount, List<String> sectionTypes) {}
+
+    public static Set<String> availablePresetNames() {
+        return PRESET_METAS.keySet();
+    }
+
+    public static List<Map<String, Object>> getPresetMetas() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (PresetMeta meta : PRESET_METAS.values()) {
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("name", meta.name());
+            p.put("label", meta.label());
+            p.put("description", meta.description());
+            p.put("layout", meta.layout());
+            p.put("sectionCount", meta.sectionCount());
+            p.put("sectionTypes", meta.sectionTypes());
+            result.add(p);
+        }
+        return result;
+    }
 
     // ---- Single-section presets ----
 

@@ -65,7 +65,7 @@ class CapabilitySnapshotParserTest {
           "board": "ESP32-C3-Mini",
           "screen": {"w": 0, "h": 0, "shape": null},
           "input_mode": null,
-          "inputs": ["buttons.boot"],
+          "inputs": ["buttons.pwr"],
           "outputs": ["device.reboot"]
         }""";
 
@@ -74,7 +74,7 @@ class CapabilitySnapshotParserTest {
         assertEquals("ESP32-C3-Mini", caps.board());
         assertEquals(0, caps.screen().w());
         assertEquals(1, caps.inputs().size());
-        assertTrue(caps.inputs().contains("buttons.boot"));
+        assertTrue(caps.inputs().contains("buttons.pwr"));
         assertEquals(1, caps.outputs().size());
     }
 
@@ -87,7 +87,7 @@ class CapabilitySnapshotParserTest {
           "board": "ESP32-S3-LCD-0.85",
           "screen": {"w": 128, "h": 128, "shape": "rect"},
           "input_mode": "keys",
-          "inputs": ["buttons.boot", "buttons.plus", "audio.record"],
+          "inputs": ["buttons.pwr", "buttons.plus", "audio.record"],
           "outputs": ["display.brightness", "device.reboot", "audio.stream", "audio.volume", "rgb.effect"],
           "display": {
             "transport": "ui3_binary:SECTION_SCENE",
@@ -105,7 +105,7 @@ class CapabilitySnapshotParserTest {
         assertEquals("rect", caps.screen().shape());
         assertEquals(3, caps.inputs().size());
         assertEquals(5, caps.outputs().size());
-        assertTrue(caps.inputs().contains("buttons.boot"));
+        assertTrue(caps.inputs().contains("buttons.pwr"));
         assertTrue(caps.outputs().contains("rgb.effect"));
     }
 }

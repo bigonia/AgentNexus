@@ -39,6 +39,12 @@ public class ExecutionRecordEntity {
     @Column(columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Column(length = 128)
+    private String failedNode;
+
+    @Column(columnDefinition = "TEXT")
+    private String nodeResultsJson;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 }

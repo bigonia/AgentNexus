@@ -1,6 +1,7 @@
 package com.zwbd.agentnexus.sdui.capability;
 
 import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
+import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import java.util.*;
 public class CapabilityValidator {
 
     private final CapabilityRegistry registry;
+    private final DeviceCapabilityProjection capabilityProjection;
 
     public enum CheckType { EVENT, COMMAND, SECTION }
 
@@ -67,11 +69,12 @@ public class CapabilityValidator {
      * Validate that a device supports a specific input event.
      */
     public ValidationResult validateEvent(String deviceId, String eventId) {
-        boolean supported = registry.supportsEvent(deviceId, eventId);
+        boolean supported = capabilityProjection.events(deviceId).stream()
+                .anyMatch(event -> event.id().equals(eventId));
         if (!supported) {
             // Also check if it's a valid interaction event from SectionTypeCatalog
             // that this device's section types could support
-            boolean isKnownInteractionEvent = SectionTypeCatalog.allInteractionEventIds().contains(eventId);
+            boolean isKnownInteractionEvent = eventId != null && eventId.startsWith("ui:");
             String issue;
             if (isKnownInteractionEvent) {
                 List<String> requiredSectionTypes = SectionTypeCatalog.getSectionTypesForEvent(eventId);
@@ -235,7 +238,7 @@ public class CapabilityValidator {
      * This will be called by WorkflowService.loadWorkflow() for pre-deployment validation.
      */
     public ValidationResult validateTrigger(String deviceId, String triggerType, String eventOrCommand) {
-        if ("device_event".equals(triggerType)) {
+        if ("device.ui.event".equals(triggerType)) {
             return validateEvent(deviceId, eventOrCommand);
         }
         if ("device_command".equals(triggerType)) {

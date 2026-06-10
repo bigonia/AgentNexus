@@ -1,5 +1,6 @@
 package com.zwbd.agentnexus.sdui.workflow;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -10,12 +11,13 @@ import java.util.List;
         @JsonSubTypes.Type(value = TriggerDef.ManualTrigger.class, name = "manual"),
         @JsonSubTypes.Type(value = TriggerDef.CronTrigger.class, name = "cron"),
         @JsonSubTypes.Type(value = TriggerDef.WebhookTrigger.class, name = "webhook"),
-        @JsonSubTypes.Type(value = TriggerDef.DeviceEventTrigger.class, name = "device_event"),
+        @JsonSubTypes.Type(value = TriggerDef.DeviceUiEventTrigger.class, name = "device_event"),
+        @JsonSubTypes.Type(value = TriggerDef.DeviceUiEventTrigger.class, name = "device.ui.event"),
         @JsonSubTypes.Type(value = TriggerDef.DeviceMessageTrigger.class, name = "device_message"),
         @JsonSubTypes.Type(value = TriggerDef.DeviceCommandTrigger.class, name = "device_command")
 })
 public sealed interface TriggerDef permits TriggerDef.ManualTrigger, TriggerDef.CronTrigger,
-        TriggerDef.WebhookTrigger, TriggerDef.DeviceEventTrigger,
+        TriggerDef.WebhookTrigger, TriggerDef.DeviceUiEventTrigger,
         TriggerDef.DeviceMessageTrigger, TriggerDef.DeviceCommandTrigger {
 
     String id();
@@ -32,13 +34,13 @@ public sealed interface TriggerDef permits TriggerDef.ManualTrigger, TriggerDef.
         public String type() { return "webhook"; }
     }
 
-    record DeviceEventTrigger(String id, String event, String sectionId, String nodeId,
+    record DeviceUiEventTrigger(String id, @JsonAlias("event") String eventType,
+                              String pageId, String sectionId, String nodeId,
                               boolean optional) implements TriggerDef {
-        public String type() { return "device_event"; }
+        public String type() { return "device.ui.event"; }
 
-        /** Backward-compatible constructor: optional defaults to false. */
-        public DeviceEventTrigger(String id, String event, String sectionId, String nodeId) {
-            this(id, event, sectionId, nodeId, false);
+        public DeviceUiEventTrigger(String id, String eventType, String pageId, String sectionId, String nodeId) {
+            this(id, eventType, pageId, sectionId, nodeId, false);
         }
     }
 

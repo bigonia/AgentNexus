@@ -2,9 +2,7 @@ package com.zwbd.agentnexus.sdui.workflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
-import com.zwbd.agentnexus.sdui.section.*;
-import com.zwbd.agentnexus.sdui.service.AudioService;
-import com.zwbd.agentnexus.sdui.service.CommandDispatcher;
+import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNode;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import com.zwbd.agentnexus.sdui.workflow.node.NodeContext;
@@ -23,12 +21,18 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ActionExecutor {
 
-    private final SectionOrchestrationService sectionService;
-    private final CommandDispatcher dispatcher;
-    private final AudioService audioService;
+    public record ExecutionReport(
+            int actionCount,
+            List<Map<String, Object>> nodeResults,
+            String failedNode,
+            String failureReason
+    ) {}
+
     private final ObjectMapper objectMapper;
     private final ExecutionStateStore stateStore;
     private final CapabilityNodeRegistry nodeRegistry;
+    private final WorkflowPageRuntimeService pageRuntimeService;
+    private final SduiCapabilityService capabilityService;
 
     private final RestTemplate restTemplate = createRestTemplate();
 
@@ -39,22 +43,36 @@ public class ActionExecutor {
         return new RestTemplate(factory);
     }
 
-    public void execute(List<ActionDef> actions, WorkflowInstance instance,
+    public ExecutionReport execute(List<ActionDef> actions, WorkflowInstance instance,
                         Map<String, Object> triggerPayload, Map<String, String> env) {
-        execute(actions, instance, triggerPayload, env, null);
+        return execute(actions, instance, triggerPayload, env, null);
     }
 
-    public void execute(List<ActionDef> actions, WorkflowInstance instance,
+    public ExecutionReport execute(List<ActionDef> actions, WorkflowInstance instance,
                         Map<String, Object> triggerPayload, Map<String, String> env,
                         EventPayload eventPayload) {
         boolean variablesChanged = false;
+        List<Map<String, Object>> nodeResults = new ArrayList<>();
+        String failedNode = null;
+        String failureReason = null;
         for (ActionDef action : actions) {
             Set<String> changedVars = new LinkedHashSet<>();
             try {
-                dispatch(action, instance, triggerPayload, env, changedVars, eventPayload);
+                Map<String, Object> result = dispatch(action, instance, triggerPayload, env, changedVars, eventPayload);
+                if (result != null) {
+                    nodeResults.add(result);
+                    if ("ERROR".equals(result.get("status")) && failedNode == null) {
+                        failedNode = String.valueOf(result.getOrDefault("nodeType", result.getOrDefault("actionType", "unknown")));
+                        failureReason = String.valueOf(result.getOrDefault("error", "execution_failed"));
+                    }
+                }
             } catch (Exception e) {
                 log.error("Action execution failed for device {}: action type={}, error={}",
                         instance.deviceId(), action.getClass().getSimpleName(), e.getMessage());
+                if (failedNode == null) {
+                    failedNode = action.getClass().getSimpleName();
+                    failureReason = e.getMessage();
+                }
             }
             if (!changedVars.isEmpty()) {
                 variablesChanged = true;
@@ -66,6 +84,7 @@ public class ActionExecutor {
         if (variablesChanged) {
             persistVariables(instance);
         }
+        return new ExecutionReport(actions != null ? actions.size() : 0, nodeResults, failedNode, failureReason);
     }
 
     private void persistVariables(WorkflowInstance instance) {
@@ -77,13 +96,13 @@ public class ActionExecutor {
         }
     }
 
-    private void dispatch(ActionDef action, WorkflowInstance instance,
+    private Map<String, Object> dispatch(ActionDef action, WorkflowInstance instance,
                           Map<String, Object> triggerPayload, Map<String, String> env,
                           Set<String> changedVars) {
-        dispatch(action, instance, triggerPayload, env, changedVars, null);
+        return dispatch(action, instance, triggerPayload, env, changedVars, null);
     }
 
-    private void dispatch(ActionDef action, WorkflowInstance instance,
+    private Map<String, Object> dispatch(ActionDef action, WorkflowInstance instance,
                           Map<String, Object> triggerPayload, Map<String, String> env,
                           Set<String> changedVars, EventPayload eventPayload) {
         if (action instanceof ActionDef.FetchAction a) {
@@ -96,8 +115,10 @@ public class ActionExecutor {
                 changedVars.add(a.save());
                 log.info("Fetch saved to $data.{}: {} bytes", a.save(),
                         response != null ? response.length() : 0);
+                return Map.of("actionType", "fetch", "status", "COMPLETED", "save", a.save());
             } catch (Exception e) {
                 log.error("Fetch failed for {}: {}", url, e.getMessage());
+                return Map.of("actionType", "fetch", "status", "ERROR", "error", e.getMessage());
             }
         } else if (action instanceof ActionDef.SetVariableAction a) {
             String varName = a.variable();
@@ -106,6 +127,7 @@ public class ActionExecutor {
             instance.putVariable(varName, resolved);
             changedVars.add(varName);
             log.info("SetVariable: $data.{} = {}", varName, resolved);
+            return Map.of("actionType", "set_variable", "status", "COMPLETED", "variable", varName);
         } else if (action instanceof ActionDef.ConditionAction a) {
             Object cond = VariableResolver.resolveExpression(a.variable(),
                     instance.variablesAsMap(), triggerPayload, env);
@@ -118,45 +140,16 @@ public class ActionExecutor {
             for (ActionDef sub : branch) {
                 dispatch(sub, instance, triggerPayload, env, changedVars, eventPayload);
             }
+            return Map.of("actionType", "condition", "status", "COMPLETED", "matched", match);
         } else if (action instanceof ActionDef.SequenceAction a) {
             for (ActionDef step : a.steps()) {
                 dispatch(step, instance, triggerPayload, env, changedVars, eventPayload);
             }
+            return Map.of("actionType", "sequence", "status", "COMPLETED", "steps", a.steps().size());
         } else if (action instanceof ActionDef.NodeActionDef a) {
-            dispatchNode(a, instance, triggerPayload, env, changedVars, eventPayload);
-        } else if (action instanceof ActionDef.UpdatePageAction a) {
-            instance.activePage(a.page());
-        } else if (action instanceof ActionDef.PatchSectionAction a) {
-            Map<String, String> bind = new LinkedHashMap<>();
-            bind.put("data", a.bind());
-            SectionData data = buildSectionData("hero_section",
-                    VariableResolver.resolve(bind, instance.variablesAsMap(), triggerPayload, env));
-            SectionPatch patch = new SectionPatch(instance.workflowId(), List.of(
-                    new SectionPatch.PatchEntry(a.sectionId(), "update", null, data)));
-            sectionService.sendPatch(instance.deviceId(), patch);
-        } else if (action instanceof ActionDef.PlayAudioAction a) {
-            audioService.playPreset(instance.deviceId(), a.preset());
-        } else if (action instanceof ActionDef.TtsAction a) {
-            String text = resolveString(a.text(), triggerPayload, instance.variablesAsMap(), env);
-            audioService.playTts(instance.deviceId(), text);
-        } else if (action instanceof ActionDef.SttAction a) {
-            String audioDataB64 = resolveString(a.audioData(), triggerPayload, instance.variablesAsMap(), env);
-            String format = a.format() != null ? a.format() : "wav";
-            if (audioDataB64 != null && !audioDataB64.isBlank()) {
-                byte[] audioBytes = java.util.Base64.getDecoder().decode(audioDataB64);
-                String transcription = audioService.transcribeAudio(audioBytes, format);
-                if (transcription != null && a.save() != null) {
-                    instance.putVariable(a.save(), transcription);
-                    changedVars.add(a.save());
-                    log.info("STT action saved to $data.{}: {} chars", a.save(), transcription.length());
-                }
-            }
-        } else if (action instanceof ActionDef.SwitchPageAction a) {
-            instance.activePage(a.page());
-        } else if (action instanceof ActionDef.ControlAction a) {
-            String value = resolveString(a.value(), triggerPayload, instance.variablesAsMap(), env);
-            dispatcher.dispatch(instance.deviceId(), a.command(), value);
+            return dispatchNode(a, instance, triggerPayload, env, changedVars, eventPayload);
         }
+        return null;
     }
 
     /**
@@ -164,14 +157,14 @@ public class ActionExecutor {
      * Resolves the node type from CapabilityNodeRegistry, resolves variable
      * references in params, builds a NodeContext, and executes the node.
      */
-    private void dispatchNode(ActionDef.NodeActionDef a, WorkflowInstance instance,
+    private Map<String, Object> dispatchNode(ActionDef.NodeActionDef a, WorkflowInstance instance,
                               Map<String, Object> triggerPayload, Map<String, String> env,
                               Set<String> changedVars, EventPayload eventPayload) {
         String nodeType = a.nodeType();
         CapabilityNode node = nodeRegistry.resolve(instance.deviceId(), nodeType);
         if (node == null) {
             log.error("Unknown node type '{}' for device {}", nodeType, instance.deviceId());
-            return;
+            return Map.of("nodeType", nodeType, "status", "ERROR", "error", "Unknown node type");
         }
 
         // Resolve variable references in params
@@ -185,7 +178,7 @@ public class ActionExecutor {
         }
 
         // Build execution context (capability snapshot may be null if device not connected)
-        var capsOpt = sectionService.getSectionCapability(instance.deviceId());
+        var capsOpt = capabilityService.getSectionCapability(instance.deviceId());
         Map<String, Object> capabilitySnapshot = capsOpt.map(caps -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("sectionEnabled", true);
@@ -237,6 +230,16 @@ public class ActionExecutor {
 
         log.info("NodeAction {} executed for device {}: status={}",
                 nodeType, instance.deviceId(), result.status());
+        Map<String, Object> nodeResult = new LinkedHashMap<>();
+        nodeResult.put("nodeType", nodeType);
+        nodeResult.put("status", result.status().name());
+        if (result.error() != null) {
+            nodeResult.put("error", result.error());
+        }
+        if (result.outputs() != null && !result.outputs().isEmpty()) {
+            nodeResult.put("outputs", result.outputs());
+        }
+        return nodeResult;
     }
 
     // ── Auto-rebinding: when variables change, re-resolve dependent sections ──
@@ -250,38 +253,15 @@ public class ActionExecutor {
         }
         if (allSections.isEmpty()) return;
 
-        Map<String, Object> vars = instance.variablesAsMap();
         for (String sectionId : allSections) {
-            Map<String, String> bindings = watcher.getBindings(sectionId);
-            if (bindings.isEmpty()) continue;
-            Map<String, Object> resolved = VariableResolver.resolve(bindings, vars, triggerPayload, env);
-            // Infer section type from the binding content or stored metadata
-            String sectionType = inferSectionType(resolved);
-            if (sectionType == null) continue;
-            SectionData data = buildSectionData(sectionType, resolved);
-            if (data == null) continue;
-            SectionPatch patch = new SectionPatch(instance.workflowId(), List.of(
-                    new SectionPatch.PatchEntry(sectionId, "update", null, data)));
-            sectionService.sendPatch(instance.deviceId(), patch);
-            log.debug("Auto-rebound section {} for device {}", sectionId, instance.deviceId());
+            VariableWatcher.SectionBinding binding = watcher.getSectionBinding(sectionId);
+            if (binding == null) continue;
+            boolean patched = pageRuntimeService.patchBoundSection(
+                    instance.deviceId(), instance, binding, triggerPayload, env);
+            if (patched) {
+                log.debug("Auto-rebound section {} for device {}", sectionId, instance.deviceId());
+            }
         }
-    }
-
-    private String inferSectionType(Map<String, Object> vals) {
-        // based on the binding field patterns, infer the section type
-        if (vals.containsKey("actions")) return "action_section";
-        if (vals.containsKey("metrics")) return "metric_section";
-        if (vals.containsKey("options")) return "toggle_section";
-        if (vals.containsKey("tabs")) return "nav_section";
-        if (vals.containsKey("progress") && vals.containsKey("title")) return "progress_section";
-        if (vals.containsKey("items")) return "list_section";
-        if (vals.containsKey("points")) return "chart_section";
-        if (vals.containsKey("iconSrc")) return "image_section";
-        if (vals.containsKey("body") && vals.containsKey("title")) return "overlay_section";
-        if (vals.containsKey("value") && vals.containsKey("label")) return "hero_section";
-        if (vals.containsKey("body")) return "text_section";
-        if (vals.containsKey("elapsedMs")) return "timer_section";
-        return null;
     }
 
     // ── Condition evaluation ──
@@ -327,167 +307,10 @@ public class ActionExecutor {
         };
     }
 
-    // ── Page building ──
-
-    public SectionScene buildPageScene(PageDef page, Map<String, Object> data,
-                                        Map<String, Object> triggerPayload, Map<String, String> env) {
-        List<SectionEntry> entries = new ArrayList<>();
-        for (SectionBindDef s : page.sections()) {
-            Map<String, Object> resolved = VariableResolver.resolve(s.bind(), data, triggerPayload, env);
-            SectionData sectionData = buildSectionData(s.type(), resolved);
-            if (sectionData == null) {
-                log.warn("Cannot build section data for type={} id={}", s.type(), s.id());
-                continue;
-            }
-            SectionType type = SectionType.fromWireName(s.type());
-            if (type == null) {
-                log.warn("Unknown section type: {}", s.type());
-                continue;
-            }
-            entries.add(new SectionEntry(type, s.id(), sectionData));
-        }
-        SectionLayout layout = SectionLayout.fromWireName(page.layout());
-        return new SectionScene(page.id(), layout, page.autoScroll(), page.autoScrollMs(), entries);
-    }
-
-    /**
-     * Build page scene AND register section bindings for VariableWatcher.
-     */
-    public SectionScene buildPageSceneWithBindings(PageDef page, Map<String, Object> data,
-                                                    Map<String, Object> triggerPayload, Map<String, String> env,
-                                                    VariableWatcher watcher) {
-        if (watcher != null) {
-            watcher.registerPage(page);
-        }
-        return buildPageScene(page, data, triggerPayload, env);
-    }
-
-    // ── Section data builders ──
-
-    @SuppressWarnings("unchecked")
-    private SectionData buildSectionData(String type, Map<String, Object> vals) {
-        return switch (type) {
-            case "hero_section" -> new SectionData.HeroData(
-                    str(vals, "value", ""), str(vals, "label", ""), str(vals, "subtitle", ""),
-                    str(vals, "tone", "primary"), str(vals, "iconSrc", ""), str(vals, "iconSymbol", null),
-                    num(vals, "progress", 0));
-            case "metric_section" -> {
-                List<SectionData.MetricData.MetricEntry> metrics = new ArrayList<>();
-                Object m = vals.get("metrics");
-                if (m instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Map<?, ?> entry) {
-                            metrics.add(new SectionData.MetricData.MetricEntry(
-                                    str((Map<String, Object>) entry, "label", ""),
-                                    str((Map<String, Object>) entry, "value", "")));
-                        }
-                    }
-                }
-                yield new SectionData.MetricData(metrics);
-            }
-            case "chart_section" -> {
-                List<Integer> points = new ArrayList<>();
-                Object p = vals.get("points");
-                if (p instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Number n) points.add(n.intValue());
-                    }
-                }
-                yield new SectionData.ChartData(str(vals, "title", ""), points, num(vals, "progress", 0));
-            }
-            case "progress_section" -> new SectionData.ProgressData(
-                    str(vals, "title", ""), num(vals, "progress", 0), str(vals, "progressText", ""));
-            case "text_section" -> new SectionData.TextData(str(vals, "title", ""), str(vals, "body", ""));
-            case "list_section" -> {
-                List<SectionData.ListData.ListItem> items = new ArrayList<>();
-                Object l = vals.get("items");
-                if (l instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Map<?, ?> entry) {
-                            Map<String, Object> e = (Map<String, Object>) entry;
-                            items.add(new SectionData.ListData.ListItem(
-                                    str(e, "id", ""), str(e, "title", ""),
-                                    str(e, "subtitle", ""), str(e, "tone", "primary"),
-                                    str(e, "iconSrc", null)));
-                        }
-                    }
-                }
-                yield new SectionData.ListData(items);
-            }
-            case "action_section" -> {
-                List<SectionData.ActionData.ActionButton> buttons = new ArrayList<>();
-                Object a = vals.get("actions");
-                if (a instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Map<?, ?> entry) {
-                            Map<String, Object> e = (Map<String, Object>) entry;
-                            buttons.add(new SectionData.ActionData.ActionButton(
-                                    str(e, "id", ""), str(e, "label", ""),
-                                    str(e, "tone", "primary"), true));
-                        }
-                    }
-                }
-                yield new SectionData.ActionData(buttons);
-            }
-            case "timer_section" -> new SectionData.TimerData(str(vals, "title", ""), num(vals, "progress", 0),
-                    new SectionData.TimerData.Timer(((Number) vals.getOrDefault("elapsedMs", 0)).longValue(),
-                            Boolean.TRUE.equals(vals.get("running"))));
-            case "image_section" -> new SectionData.ImageData(
-                    str(vals, "iconSrc", ""), str(vals, "title", ""), str(vals, "subtitle", ""));
-            case "toggle_section" -> {
-                List<SectionData.ToggleData.ToggleOption> options = new ArrayList<>();
-                Object t = vals.get("options");
-                if (t instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Map<?, ?> entry) {
-                            Map<String, Object> e = (Map<String, Object>) entry;
-                            options.add(new SectionData.ToggleData.ToggleOption(
-                                    str(e, "id", ""), str(e, "label", ""),
-                                    Boolean.TRUE.equals(e.get("active"))));
-                        }
-                    }
-                }
-                yield new SectionData.ToggleData(options);
-            }
-            case "nav_section" -> {
-                List<SectionData.NavData.NavTab> tabs = new ArrayList<>();
-                Object n = vals.get("tabs");
-                if (n instanceof List<?> list) {
-                    for (Object item : list) {
-                        if (item instanceof Map<?, ?> entry) {
-                            Map<String, Object> e = (Map<String, Object>) entry;
-                            tabs.add(new SectionData.NavData.NavTab(str(e, "id", ""), str(e, "label", "")));
-                        }
-                    }
-                }
-                yield new SectionData.NavData(tabs, num(vals, "activeTab", 0));
-            }
-            case "overlay_section" -> new SectionData.OverlayData(
-                    str(vals, "title", ""), str(vals, "body", ""),
-                    str(vals, "tone", "primary"), num(vals, "unreadCount", 0),
-                    num(vals, "autoHideMs", 5000));
-            default -> null;
-        };
-    }
-
     private String resolveString(String expr, Map<String, Object> trigger,
                                   Map<String, Object> data, Map<String, String> env) {
         if (expr == null) return null;
         Object resolved = VariableResolver.resolveExpression(expr, data, trigger, env);
         return resolved != null ? resolved.toString() : expr;
-    }
-
-    private static String str(Map<String, Object> m, String key, String def) {
-        Object v = m.get(key);
-        return v != null ? v.toString() : def;
-    }
-
-    private static int num(Map<String, Object> m, String key, int def) {
-        Object v = m.get(key);
-        if (v instanceof Number n) return n.intValue();
-        if (v instanceof String s) {
-            try { return Integer.parseInt(s); } catch (NumberFormatException ignored) {}
-        }
-        return def;
     }
 }

@@ -1,6 +1,8 @@
 package com.zwbd.agentnexus.sdui.repo;
 
 import com.zwbd.agentnexus.sdui.model.SduiDeviceTelemetry;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -9,7 +11,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SduiDeviceTelemetryRepository extends JpaRepository<SduiDeviceTelemetry, Long> {
-    List<SduiDeviceTelemetry> findTop50ByDeviceIdOrderByCreatedAtDesc(String deviceId);
+    Page<SduiDeviceTelemetry> findByDeviceIdOrderByCreatedAtDesc(String deviceId, Pageable pageable);
 
 
     List<SduiDeviceTelemetry> findByDeviceIdAndCreatedAtBetweenOrderByCreatedAtAsc(
@@ -18,6 +20,8 @@ public interface SduiDeviceTelemetryRepository extends JpaRepository<SduiDeviceT
     SduiDeviceTelemetry findFirstByDeviceIdOrderByCreatedAtDesc(String deviceId);
 
     void deleteByDeviceId(String deviceId);
+
+    long deleteByCreatedAtBefore(LocalDateTime cutoff);
 
     /** Hourly bucket aggregation returning (bucket, count, avgWifiRssi, avgTemperature,
      *  avgFreeHeapInternal, avgFreeHeapTotal, avgFragInternalPct, avgBatteryPct). */
@@ -72,4 +76,3 @@ public interface SduiDeviceTelemetryRepository extends JpaRepository<SduiDeviceT
                                       @Param("end") LocalDateTime end,
                                       @Param("bucketSec") int bucketSeconds);
 }
-

@@ -14,13 +14,15 @@ import java.util.*;
  */
 public class VariableWatcher {
 
-    private final Map<String, Map<String, String>> sectionBindings = new LinkedHashMap<>();
+    public record SectionBinding(String pageId, String sectionId, String sectionType, Map<String, String> bindings) {}
+
+    private final Map<String, SectionBinding> sectionBindings = new LinkedHashMap<>();
     private final Map<String, Set<String>> variableIndex = new LinkedHashMap<>();
 
-    public void registerSection(String sectionId, Map<String, String> bindings) {
+    public void registerSection(String pageId, String sectionId, String sectionType, Map<String, String> bindings) {
         if (bindings == null || bindings.isEmpty()) return;
 
-        sectionBindings.put(sectionId, new LinkedHashMap<>(bindings));
+        sectionBindings.put(sectionId, new SectionBinding(pageId, sectionId, sectionType, new LinkedHashMap<>(bindings)));
 
         for (String expr : bindings.values()) {
             Set<String> vars = extractVariables(expr);
@@ -34,7 +36,7 @@ public class VariableWatcher {
         if (page == null || page.sections() == null) return;
         for (SectionBindDef s : page.sections()) {
             if (s.bind() != null) {
-                registerSection(s.id(), s.bind());
+                registerSection(page.id(), s.id(), s.type(), s.bind());
             }
         }
     }
@@ -55,8 +57,12 @@ public class VariableWatcher {
     }
 
     public Map<String, String> getBindings(String sectionId) {
-        Map<String, String> bindings = sectionBindings.get(sectionId);
-        return bindings != null ? bindings : Map.of();
+        SectionBinding binding = sectionBindings.get(sectionId);
+        return binding != null ? binding.bindings() : Map.of();
+    }
+
+    public SectionBinding getSectionBinding(String sectionId) {
+        return sectionBindings.get(sectionId);
     }
 
     public void unregisterAll() {

@@ -16,7 +16,7 @@ public final class BinaryProtocolCodec {
     public static final int MSG_TYPE_AUDIO_PCM = 17;
 
     // ── Well-known TLV type constants (inbound events, msgType=9) ──
-    /** TLV 120: Numeric event kind (1=UI_CLICK, 2=OVERLAY_CONFIRM, 3=TOGGLE_CHANGE, 4=BUTTON). */
+    /** TLV 120: Numeric event kind (1=UI_CLICK, 2=OVERLAY_CONFIRM, 3=TOGGLE_CHANGE, 4=BUTTON; higher values reserved for device-defined inputs such as sensors). */
     public static final int TLV_EVENT_KIND = 120;
     /** TLV 121: Node / element ID (button ID, list item ID, toggle option ID). */
     public static final int TLV_NODE_ID = 121;

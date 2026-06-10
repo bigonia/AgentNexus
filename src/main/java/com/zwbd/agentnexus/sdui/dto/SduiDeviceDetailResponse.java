@@ -1,5 +1,6 @@
 package com.zwbd.agentnexus.sdui.dto;
 
+import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
 import lombok.Builder;
 import lombok.Data;
 
@@ -13,6 +14,7 @@ import java.util.Set;
 public class SduiDeviceDetailResponse {
     private String deviceId;
     private String name;
+    private String notes;
     private String status;
     private String registrationStatus;
     private String board;
@@ -23,12 +25,10 @@ public class SduiDeviceDetailResponse {
     private String sizeClass;
     private Set<String> availableCommands;
     private String capabilitiesSnapshot;
+    private Map<String, Object> capabilitiesSummary;
+    private CapabilityContract capabilityContract;
+    private Map<String, Object> capabilityDebugMetadata;
     private List<RecentCommand> recentCommands;
-
-    // ── Health ──
-    private Integer healthScore;
-    private String healthLevel;
-    private List<String> healthWarnings;
 
     // ── Latest telemetry summary ──
     private Map<String, Object> lastTelemetry;

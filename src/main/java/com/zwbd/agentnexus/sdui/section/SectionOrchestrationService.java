@@ -4,7 +4,6 @@ import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.service.SduiProtocolService;
 import com.zwbd.agentnexus.sdui.workflow.PageDef;
-import com.zwbd.agentnexus.sdui.workflow.SectionSlot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,171 +21,13 @@ public class SectionOrchestrationService {
     private final SduiCapabilityService capabilityService;
     private final SectionSceneBuilder sceneBuilder;
     private final SectionCapabilityAdapter adapter;
+    private final SectionDataCodec sectionDataCodec;
     private final List<SectionTriggerHook> hooks = new CopyOnWriteArrayList<>();
 
-    // Per-device SectionSlot registry: deviceId -> (slotKey -> SectionSlot)
-    private final Map<String, Map<String, SectionSlot>> deviceSlots = new ConcurrentHashMap<>();
+    private final Map<String, DeviceSectionState> deviceStates = new ConcurrentHashMap<>();
 
-    // ── Section Slot Management ──
-
-    /**
-     * Register available Section slots from device's section capability.
-     */
-    public void registerDeviceSlots(String deviceId, CapabilitySchema.DisplayInfo displayInfo,
-                                     List<PageDef> pages) {
-        Map<String, SectionSlot> slots = new LinkedHashMap<>();
-        if (pages != null) {
-            for (var page : pages) {
-                if (page.sections() == null) continue;
-                for (var section : page.sections()) {
-                    String key = page.id() + "/" + section.id();
-                    slots.put(key, new SectionSlot(section.id(), page.id(), section.type()));
-                }
-            }
-        }
-        deviceSlots.put(deviceId, slots);
-        log.info("Registered {} section slots for device {}", slots.size(), deviceId);
-    }
-
-    /**
-     * Initialize default slots based on device capability.
-     */
-    public void initDefaultSlots(String deviceId, CapabilitySchema.DisplayInfo displayInfo) {
-        Map<String, SectionSlot> slots = new LinkedHashMap<>();
-        if (displayInfo != null && displayInfo.sectionTypes() != null) {
-            int idx = 0;
-            for (String type : displayInfo.sectionTypes()) {
-                String slotId = type.replace("_section", "") + "_" + (idx++);
-                slots.put("home/" + slotId, new SectionSlot(slotId, "home", type));
-            }
-        }
-        if (!slots.isEmpty()) {
-            deviceSlots.put(deviceId, slots);
-            log.info("Initialized {} default slots for device {}", slots.size(), deviceId);
-        }
-    }
-
-    public Map<String, SectionSlot> getDeviceSlots(String deviceId) {
-        return deviceSlots.getOrDefault(deviceId, Map.of());
-    }
-
-    public void unregisterDeviceSlots(String deviceId) {
-        deviceSlots.remove(deviceId);
-        log.info("Unregistered all slots for device {}", deviceId);
-    }
-
-    /**
-     * Allocate a SectionSlot to a workflow. Returns false if already exclusively bound.
-     */
-    public boolean allocateSlot(String deviceId, String pageId, String sectionId,
-                                 String workflowId, String definitionName, String outputName) {
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) return false;
-
-        String key = pageId + "/" + sectionId;
-        SectionSlot slot = slots.get(key);
-        if (slot == null) return false;
-
-        return slot.bind(workflowId, definitionName, outputName);
-    }
-
-    /**
-     * Free a SectionSlot from a workflow binding.
-     */
-    public boolean freeSlot(String deviceId, String pageId, String sectionId) {
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) return false;
-
-        String key = pageId + "/" + sectionId;
-        SectionSlot slot = slots.get(key);
-        if (slot == null) return false;
-
-        slot.unbind();
-        return true;
-    }
-
-    /**
-     * Free all slots owned by a specific workflow on a device.
-     */
-    public void freeWorkflowSlots(String deviceId, String workflowId) {
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) return;
-
-        for (SectionSlot slot : slots.values()) {
-            if (slot.binding() != null && slot.binding().workflowId().equals(workflowId)) {
-                slot.unbind();
-            }
-        }
-    }
-
-    /**
-     * Get all slots bound to a specific workflow on a device.
-     */
-    public List<Map<String, String>> getWorkflowSlots(String deviceId, String workflowId) {
-        List<Map<String, String>> result = new ArrayList<>();
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) return result;
-
-        for (var entry : slots.entrySet()) {
-            SectionSlot slot = entry.getValue();
-            if (slot.binding() != null && slot.binding().workflowId().equals(workflowId)) {
-                result.add(Map.of(
-                        "slotKey", entry.getKey(),
-                        "sectionType", slot.sectionType(),
-                        "outputName", slot.binding().outputName()
-                ));
-            }
-        }
-        return result;
-    }
-
-    /**
-     * Detect conflicts between proposed slots and existing bindings.
-     */
-    public List<Map<String, String>> detectSlotConflicts(String deviceId,
-                                                          Map<String, String> proposedSlots) {
-        List<Map<String, String>> conflicts = new ArrayList<>();
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) return conflicts;
-
-        for (var entry : proposedSlots.entrySet()) {
-            SectionSlot slot = slots.get(entry.getKey());
-            if (slot != null && !slot.isFree()) {
-                conflicts.add(Map.of(
-                        "slot", entry.getKey(),
-                        "sectionType", slot.sectionType(),
-                        "ownedBy", slot.binding().workflowId(),
-                        "ownedByName", slot.binding().definitionName()
-                ));
-            }
-        }
-        return conflicts;
-    }
-
-    public Map<String, Object> getSlotStatus(String deviceId) {
-        Map<String, SectionSlot> slots = deviceSlots.get(deviceId);
-        if (slots == null) {
-            return Map.of("deviceId", deviceId, "slots", List.of());
-        }
-
-        List<Map<String, Object>> slotList = new ArrayList<>();
-        for (var entry : slots.entrySet()) {
-            SectionSlot slot = entry.getValue();
-            Map<String, Object> info = new LinkedHashMap<>();
-            info.put("slotKey", entry.getKey());
-            info.put("pageId", slot.pageId());
-            info.put("sectionType", slot.sectionType());
-            info.put("free", slot.isFree());
-            if (slot.binding() != null) {
-                info.put("boundTo", Map.of(
-                        "workflowId", slot.binding().workflowId(),
-                        "name", slot.binding().definitionName(),
-                        "outputName", slot.binding().outputName()
-                ));
-            }
-            slotList.add(info);
-        }
-        return Map.of("deviceId", deviceId, "slots", slotList);
+    public Map<String, Object> getPageState(String deviceId) {
+        return getSectionState(deviceId);
     }
 
     // ── Scene/Patch sending (existing) ──
@@ -216,6 +57,7 @@ public class SectionOrchestrationService {
                 deviceId, scene.pageId(), scene.sections().size(), scene.layout());
         boolean sent = protocolService.sendSectionScene(deviceId, json);
         if (sent) {
+            rememberScene(deviceId, scene);
             notifyHooks(deviceId, scene.pageId(), SectionTriggerHook.TriggerType.SCENE, json);
         }
         return sent;
@@ -227,9 +69,158 @@ public class SectionOrchestrationService {
                 deviceId, patch.pageId(), patch.patches().size());
         boolean sent = protocolService.sendSectionPatch(deviceId, json);
         if (sent) {
+            rememberPatch(deviceId, patch);
             notifyHooks(deviceId, patch.pageId(), SectionTriggerHook.TriggerType.PATCH, json);
         }
         return sent;
+    }
+
+    public Map<String, Object> getSectionState(String deviceId) {
+        DeviceSectionState state = deviceStates.get(deviceId);
+        if (state == null) {
+            return Map.of(
+                    "deviceId", deviceId,
+                    "activePageId", null,
+                    "pages", List.of()
+            );
+        }
+
+        List<Map<String, Object>> pages = new ArrayList<>();
+        for (PageState page : state.pages.values()) {
+            List<Map<String, Object>> sections = new ArrayList<>();
+            for (SectionState section : page.sections.values()) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("sectionId", section.sectionId);
+                entry.put("sectionType", section.sectionType);
+                entry.put("fields", section.fields);
+                entry.put("updatedAt", section.updatedAt);
+                sections.add(entry);
+            }
+
+            Map<String, Object> pageEntry = new LinkedHashMap<>();
+            pageEntry.put("pageId", page.pageId);
+            pageEntry.put("layout", page.layout);
+            pageEntry.put("autoScroll", page.autoScroll);
+            pageEntry.put("autoScrollMs", page.autoScrollMs);
+            pageEntry.put("sections", sections);
+            pageEntry.put("updatedAt", page.updatedAt);
+            pages.add(pageEntry);
+        }
+
+        return Map.of(
+                "deviceId", deviceId,
+                "activePageId", state.activePageId,
+                "pages", pages
+        );
+    }
+
+    public String findSectionType(String deviceId, String pageId, String sectionId) {
+        DeviceSectionState deviceState = deviceStates.get(deviceId);
+        if (deviceState == null) {
+            return null;
+        }
+        PageState pageState = deviceState.pages.get(pageId);
+        if (pageState == null) {
+            return null;
+        }
+        SectionState sectionState = pageState.sections.get(sectionId);
+        return sectionState != null ? sectionState.sectionType : null;
+    }
+
+    private void rememberScene(String deviceId, SectionScene scene) {
+        DeviceSectionState deviceState = deviceStates.computeIfAbsent(deviceId, ignored -> new DeviceSectionState());
+        PageState pageState = new PageState(scene.pageId());
+        pageState.layout = scene.layout().wireName();
+        pageState.autoScroll = scene.autoScroll();
+        pageState.autoScrollMs = scene.autoScrollMs();
+        pageState.updatedAt = System.currentTimeMillis();
+
+        for (SectionEntry entry : scene.sections()) {
+            SectionState sectionState = new SectionState(
+                    entry.sectionId(),
+                    entry.type().wireName(),
+                    new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
+                    System.currentTimeMillis()
+            );
+            pageState.sections.put(sectionState.sectionId, sectionState);
+        }
+
+        deviceState.activePageId = scene.pageId();
+        deviceState.pages.put(scene.pageId(), pageState);
+    }
+
+    private void rememberPatch(String deviceId, SectionPatch patch) {
+        DeviceSectionState deviceState = deviceStates.computeIfAbsent(deviceId, ignored -> new DeviceSectionState());
+        PageState pageState = deviceState.pages.computeIfAbsent(patch.pageId(), PageState::new);
+        if (deviceState.activePageId == null || deviceState.activePageId.isBlank()) {
+            deviceState.activePageId = patch.pageId();
+        }
+
+        long now = System.currentTimeMillis();
+        for (SectionPatch.PatchEntry entry : patch.patches()) {
+            String op = entry.op() != null ? entry.op() : "update";
+            switch (op) {
+                case "remove" -> pageState.sections.remove(entry.sectionId());
+                case "add" -> {
+                    if (entry.data() == null || entry.type() == null) {
+                        continue;
+                    }
+                    pageState.sections.put(entry.sectionId(), new SectionState(
+                            entry.sectionId(),
+                            entry.type(),
+                            new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
+                            now
+                    ));
+                }
+                default -> {
+                    if (entry.data() == null) {
+                        continue;
+                    }
+                    Map<String, Object> fields = new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data()));
+                    SectionState existing = pageState.sections.get(entry.sectionId());
+                    if (existing == null) {
+                        String type = entry.type() != null ? entry.type() : "unknown";
+                        pageState.sections.put(entry.sectionId(), new SectionState(entry.sectionId(), type, fields, now));
+                    } else {
+                        existing.fields.putAll(fields);
+                        existing.updatedAt = now;
+                    }
+                }
+            }
+        }
+        pageState.updatedAt = now;
+    }
+
+    private static final class DeviceSectionState {
+        private String activePageId;
+        private final Map<String, PageState> pages = new LinkedHashMap<>();
+    }
+
+    private static final class PageState {
+        private final String pageId;
+        private String layout = "vertical_scroll";
+        private boolean autoScroll;
+        private int autoScrollMs;
+        private long updatedAt;
+        private final Map<String, SectionState> sections = new LinkedHashMap<>();
+
+        private PageState(String pageId) {
+            this.pageId = pageId;
+        }
+    }
+
+    private static final class SectionState {
+        private final String sectionId;
+        private final String sectionType;
+        private final Map<String, Object> fields;
+        private long updatedAt;
+
+        private SectionState(String sectionId, String sectionType, Map<String, Object> fields, long updatedAt) {
+            this.sectionId = sectionId;
+            this.sectionType = sectionType;
+            this.fields = fields;
+            this.updatedAt = updatedAt;
+        }
     }
 
     private void notifyHooks(String deviceId, String pageId, SectionTriggerHook.TriggerType type, String json) {

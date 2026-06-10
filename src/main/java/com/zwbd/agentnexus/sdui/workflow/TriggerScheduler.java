@@ -16,9 +16,9 @@ public class TriggerScheduler {
     private final Map<String, ScheduledFuture<?>> cronTasks = new ConcurrentHashMap<>();
     private final Map<String, List<String>> webhookRoutes = new ConcurrentHashMap<>();
     private final Map<String, Boolean> cronRunning = new ConcurrentHashMap<>();
-    private final Map<String, List<DeviceEventRoute>> deviceEventRoutes = new ConcurrentHashMap<>();
+    private final Map<String, List<DeviceUiEventRoute>> deviceEventRoutes = new ConcurrentHashMap<>();
 
-    private record DeviceEventRoute(String deviceId, String definitionId, TriggerDef.DeviceEventTrigger trigger) {}
+    private record DeviceUiEventRoute(String deviceId, String definitionId, TriggerDef.DeviceUiEventTrigger trigger) {}
 
     public void registerTriggers(String deviceId, WorkflowDefinition def, WorkflowInstance instance,
                                   ActionExecutor actionExecutor, Map<String, String> env) {
@@ -51,11 +51,11 @@ public class TriggerScheduler {
                 webhookRoutes.computeIfAbsent(w.path(), k -> new ArrayList<>())
                         .add(deviceId + ":" + def.id());
                 log.info("Webhook trigger registered: {} path={}", taskKey, w.path());
-            } else if (trigger instanceof TriggerDef.DeviceEventTrigger d) {
-                deviceEventRoutes.computeIfAbsent(d.event(), k -> new ArrayList<>())
-                        .add(new DeviceEventRoute(deviceId, def.id(), d));
-                log.info("Device event trigger registered: {} event={} sectionId={} nodeId={}",
-                        taskKey, d.event(), d.sectionId(), d.nodeId());
+            } else if (trigger instanceof TriggerDef.DeviceUiEventTrigger d) {
+                deviceEventRoutes.computeIfAbsent(d.eventType(), k -> new ArrayList<>())
+                        .add(new DeviceUiEventRoute(deviceId, def.id(), d));
+                log.info("UI event trigger registered: {} eventType={} pageId={} sectionId={} nodeId={}",
+                        taskKey, d.eventType(), d.pageId(), d.sectionId(), d.nodeId());
             } else if (trigger instanceof TriggerDef.ManualTrigger m) {
                 log.info("Manual trigger registered: {}", taskKey);
             }
@@ -112,13 +112,15 @@ public class TriggerScheduler {
      * Find devices matching an event, with optional sectionId/nodeId filtering.
      * Returns a list of (deviceId, trigger) pairs that match the event.
      */
-    public List<Map.Entry<String, TriggerDef.DeviceEventTrigger>> findMatchingTriggers(
-            String eventType, String sectionId, String nodeId) {
-        List<DeviceEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
-        List<Map.Entry<String, TriggerDef.DeviceEventTrigger>> result = new ArrayList<>();
-        for (DeviceEventRoute route : routes) {
-            TriggerDef.DeviceEventTrigger t = route.trigger();
-            if (matchesFilter(t.sectionId(), sectionId) && matchesFilter(t.nodeId(), nodeId)) {
+    public List<Map.Entry<String, TriggerDef.DeviceUiEventTrigger>> findMatchingTriggers(
+            String eventType, String pageId, String sectionId, String nodeId) {
+        List<DeviceUiEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
+        List<Map.Entry<String, TriggerDef.DeviceUiEventTrigger>> result = new ArrayList<>();
+        for (DeviceUiEventRoute route : routes) {
+            TriggerDef.DeviceUiEventTrigger t = route.trigger();
+            if (matchesFilter(t.pageId(), pageId)
+                    && matchesFilter(t.sectionId(), sectionId)
+                    && matchesFilter(t.nodeId(), nodeId)) {
                 result.add(Map.entry(route.deviceId(), t));
             }
         }
@@ -126,12 +128,12 @@ public class TriggerScheduler {
     }
 
     /**
-     * @deprecated use findMatchingTriggers(eventType, sectionId, nodeId) instead
+     * @deprecated use findMatchingTriggers(eventType, pageId, sectionId, nodeId) instead
      */
     @Deprecated
     public List<String> findDeviceEventDevices(String eventType) {
-        List<DeviceEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
-        return routes.stream().map(DeviceEventRoute::deviceId).distinct().toList();
+        List<DeviceUiEventRoute> routes = deviceEventRoutes.getOrDefault(eventType, List.of());
+        return routes.stream().map(DeviceUiEventRoute::deviceId).distinct().toList();
     }
 
     private boolean matchesFilter(String filterValue, String actualValue) {
@@ -177,12 +179,13 @@ public class TriggerScheduler {
                     List<String> entries = webhookRoutes.get(w.path());
                     boolean registered = entries != null && entries.contains(key);
                     status.put("registered", registered);
-                } else if (trigger instanceof TriggerDef.DeviceEventTrigger d) {
-                    status.put("type", "device_event");
-                    status.put("event", d.event());
+                } else if (trigger instanceof TriggerDef.DeviceUiEventTrigger d) {
+                    status.put("type", "device.ui.event");
+                    status.put("eventType", d.eventType());
+                    status.put("pageId", d.pageId());
                     status.put("sectionId", d.sectionId());
                     status.put("nodeId", d.nodeId());
-                    List<DeviceEventRoute> routes = deviceEventRoutes.get(d.event());
+                    List<DeviceUiEventRoute> routes = deviceEventRoutes.get(d.eventType());
                     boolean registered = routes != null && routes.stream()
                             .anyMatch(r -> r.deviceId().equals(deviceId) && r.definitionId().equals(definitionId));
                     status.put("registered", registered);

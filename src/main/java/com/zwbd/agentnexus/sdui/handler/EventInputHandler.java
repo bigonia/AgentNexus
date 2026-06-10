@@ -2,7 +2,6 @@ package com.zwbd.agentnexus.sdui.handler;
 
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
-import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec.DecodedFrame;
 import com.zwbd.agentnexus.sdui.service.DeviceLifecycleService;
@@ -38,15 +37,13 @@ public class EventInputHandler implements BinaryFrameHandler {
     private final DeviceSessionManager sessionManager;
     private final WorkflowService workflowService;
     private final DeviceLifecycleService lifecycleService;
-    private final EventRegistry eventRegistry;
     private final List<EventListener> listeners = new CopyOnWriteArrayList<>();
 
     public EventInputHandler(DeviceSessionManager sessionManager, WorkflowService workflowService,
-                             DeviceLifecycleService lifecycleService, EventRegistry eventRegistry) {
+                             DeviceLifecycleService lifecycleService) {
         this.sessionManager = sessionManager;
         this.workflowService = workflowService;
         this.lifecycleService = lifecycleService;
-        this.eventRegistry = eventRegistry;
     }
 
     public interface EventListener {

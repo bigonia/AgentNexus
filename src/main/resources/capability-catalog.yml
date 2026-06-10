@@ -4,24 +4,32 @@ version: "2.0"
 # Event IDs follow the pattern: <category>:<capability>.<specific-event>
 
 inputs:
+  buttons.pwr:
+    protocol: ui3_binary
+    eventKind: 4
+    displayName: "PWR 按钮"
+    description: "设备电源按键，对外仅暴露短按与长按事件"
+    events:
+      single_click:
+        displayName: "单击"
+      long_press_start:
+        displayName: "长按开始"
+    payloadSchema:
+      - {name: nodeId, type: string, required: true, description: "按钮标识 (pwr)"}
+      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
+      - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
+      - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+
   buttons.boot:
     protocol: ui3_binary
     eventKind: 4
     displayName: "BOOT 按钮"
-    description: "设备顶部 BOOT 多功能按钮，支持按下/释放/单击/双击/长按"
+    description: "设备顶部 BOOT 多功能按钮，对外仅暴露短按与长按事件"
     events:
-      press_down:
-        displayName: "按下"
-      press_up:
-        displayName: "释放"
       single_click:
         displayName: "单击"
-      double_click:
-        displayName: "双击"
       long_press_start:
         displayName: "长按开始"
-      long_press_up:
-        displayName: "长按释放"
     payloadSchema:
       - {name: nodeId, type: string, required: true, description: "按钮标识 (boot)"}
       - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
@@ -32,20 +40,12 @@ inputs:
     protocol: ui3_binary
     eventKind: 4
     displayName: "PLUS 按钮"
-    description: "设备 PLUS 按钮，支持按下/释放/单击/双击/长按"
+    description: "设备 PLUS 按钮，对外仅暴露短按与长按事件"
     events:
-      press_down:
-        displayName: "按下"
-      press_up:
-        displayName: "释放"
       single_click:
         displayName: "单击"
-      double_click:
-        displayName: "双击"
       long_press_start:
         displayName: "长按开始"
-      long_press_up:
-        displayName: "长按释放"
     payloadSchema:
       - {name: nodeId, type: string, required: true, description: "按钮标识 (plus)"}
       - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
@@ -84,8 +84,7 @@ inputs:
             label: 音频格式
 
   motion:
-    protocol: json_topic
-    topic: motion
+    protocol: ui3_binary
     displayName: "运动传感器"
     description: "设备 IMU 运动传感器，支持摇晃/抬腕/翻转检测"
     events:
@@ -97,6 +96,7 @@ inputs:
         displayName: "翻转"
     payloadSchema:
       - {name: eventName, type: string, required: true, description: "运动事件类型"}
+      - {name: kind, type: int, required: false, description: "事件类型编码（二进制 EVENT_INPUT TLV 120）"}
       - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
       - {name: ax, type: float, required: false, description: "X 轴加速度"}
       - {name: ay, type: float, required: false, description: "Y 轴加速度"}
@@ -187,22 +187,53 @@ outputs:
         topic: cmd/control
         action: rgb_set
         displayName: "灯光效果"
-        description: "设置灯光效果模式、颜色和速度"
+        description: "设置 RGB 固定色或动态灯效"
         params:
           mode:
             type: enum
-            required: true
-            values: [solid, blink, breathe, rainbow, chase]
-          color:
-            type: string
             required: false
-            description: Hex color (e.g. #FF0000)
-          periodMs:
+            values: [solid, blink, breathe, rainbow, chase]
+            default: solid
+            label: 模式
+          r:
+            type: int
+            required: true
+            min: 0
+            max: 255
+            label: 红色
+          g:
+            type: int
+            required: true
+            min: 0
+            max: 255
+            label: 绿色
+          b:
+            type: int
+            required: true
+            min: 0
+            max: 255
+            label: 蓝色
+          brightness:
+            type: int
+            required: false
+            min: 0
+            max: 255
+            default: 120
+            label: 亮度
+          period_ms:
             type: int
             required: false
             min: 200
             max: 5000
-            default: 2000
+            default: 1200
+            label: 周期(ms)
+          step_ms:
+            type: int
+            required: false
+            min: 10
+            max: 500
+            default: 40
+            label: 步进(ms)
       rgb.effect.policy:
         topic: cmd/control
         action: rgb_policy

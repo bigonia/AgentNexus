@@ -23,6 +23,12 @@ ALTER TABLE sdui_device_telemetry
   ADD COLUMN IF NOT EXISTS ext_power_ctrl BOOLEAN,
   ADD COLUMN IF NOT EXISTS ext_power_on BOOLEAN;
 
+CREATE INDEX IF NOT EXISTS idx_tel_device_created_at
+  ON sdui_device_telemetry(device_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tel_created_at
+  ON sdui_device_telemetry(created_at);
+
 -- 2. Extend sdui_device with connection tracking fields
 ALTER TABLE sdui_device
   ADD COLUMN IF NOT EXISTS connected_at TIMESTAMP,

@@ -2,13 +2,11 @@ package com.zwbd.agentnexus.sdui.workflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
+import com.zwbd.agentnexus.sdui.capability.CapabilityInvocationValidator;
 import com.zwbd.agentnexus.sdui.capability.CapabilityValidator;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
-import com.zwbd.agentnexus.sdui.event.EventRegistry;
-import com.zwbd.agentnexus.sdui.section.SectionScene;
+import com.zwbd.agentnexus.sdui.section.DebugSectionWorkspaceService;
 import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
-import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import com.zwbd.agentnexus.sdui.workflow.node.NodeSchema;
@@ -33,12 +31,14 @@ public class WorkflowService {
     private final ActionExecutor actionExecutor;
     private final TriggerScheduler triggerScheduler;
     private final SectionOrchestrationService sectionService;
+    private final DebugSectionWorkspaceService workspaceService;
+    private final WorkflowPageRuntimeService pageRuntimeService;
     private final DagExecutor dagExecutor;
     private final SduiCapabilityService capabilityService;
-    private final CapabilityRegistry capabilityRegistry;
     private final CapabilityNodeRegistry nodeRegistry;
     private final CapabilityValidator capabilityValidator;
-    private final EventRegistry eventRegistry;
+    private final CapabilityInvocationValidator invocationValidator;
+    private final WorkflowDefinitionNormalizer definitionNormalizer;
     private final ObjectMapper objectMapper;
 
     // key = "deviceId:definitionId"
@@ -61,7 +61,8 @@ public class WorkflowService {
                     instanceRepo.save(ie);
                     continue;
                 }
-                WorkflowDefinition def = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
+                WorkflowDefinition def = definitionNormalizer.normalize(
+                        objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class));
                 WorkflowInstance instance = new WorkflowInstance(
                         ie.getDeviceId(), ie.getDefinitionId(), entity.getName());
                 instance.activePage(ie.getActivePage());
@@ -98,6 +99,14 @@ public class WorkflowService {
 
     @Transactional
     public WorkflowDefinitionEntity saveDefinition(WorkflowDefinitionEntity entity) {
+        if (entity.getDefinitionJson() != null && !entity.getDefinitionJson().isBlank()) {
+            try {
+                WorkflowDefinition definition = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
+                entity.setDefinitionJson(objectMapper.writeValueAsString(definitionNormalizer.normalize(definition)));
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException("Failed to normalize workflow definition JSON", e);
+            }
+        }
         return definitionRepo.save(entity);
     }
 
@@ -110,7 +119,7 @@ public class WorkflowService {
 
     /**
      * Load a workflow onto a device. Supports multiple workflows per device.
-     * Rejects if any Section slots conflict with already-running workflows.
+     * Rejects if any page/section bindings conflict with already-running workflows.
      * Default mode is "strict" — all required capabilities must match.
      */
     @Transactional
@@ -132,7 +141,8 @@ public class WorkflowService {
 
         WorkflowDefinition def;
         try {
-            def = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
+            def = definitionNormalizer.normalize(
+                    objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Failed to parse workflow definition JSON", e);
         }
@@ -152,7 +162,7 @@ public class WorkflowService {
             return Map.of("status", "capability_mismatch", "deviceId", deviceId,
                     "definitionId", definitionId, "mode", mode,
                     "issues", capabilityIssues,
-                    "hint", "工作流引用了设备不支持的能力。连接设备后可调用 GET /console/capabilities 查看设备能力。");
+                    "hint", "工作流引用了设备不支持的能力。可调用 GET /api/v1/sdui/capabilities/" + deviceId + " 查看设备能力。");
         }
 
         // Section conflict detection
@@ -174,7 +184,7 @@ public class WorkflowService {
         if (def.pages() != null && !def.pages().isEmpty()) {
             PageDef firstPage = def.pages().get(0);
             instance.activePage(firstPage.id());
-            sendPageToDevice(deviceId, firstPage, instance, Map.of(), env);
+            pageRuntimeService.sendPageToDevice(deviceId, firstPage, instance, Map.of(), env);
         }
 
         WorkflowInstanceEntity ie = new WorkflowInstanceEntity();
@@ -281,13 +291,20 @@ public class WorkflowService {
         for (var entry : runningInstances.entrySet()) {
             if (entry.getKey().startsWith(prefix)) {
                 WorkflowInstance inst = entry.getValue();
-                result.add(Map.of(
-                        "definitionId", inst.workflowId(),
-                        "name", inst.definitionName(),
-                        "status", inst.status().name(),
-                        "activePage", inst.activePage() != null ? inst.activePage() : "",
-                        "installedAt", inst.installedAt().toString()
-                ));
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("definitionId", inst.workflowId());
+                item.put("name", inst.definitionName());
+                item.put("status", inst.status().name());
+                item.put("activePage", inst.activePage() != null ? inst.activePage() : "");
+                item.put("installedAt", inst.installedAt().toString());
+                item.put("variables", new LinkedHashMap<>(inst.variablesAsMap()));
+                item.put("pageState", workspaceService.getWorkflowState(deviceId));
+                ExecutionRecordEntity lastExecution = executionRecordRepo.findByDeviceIdAndDefinitionIdOrderByStartTimeDesc(
+                        deviceId, inst.workflowId(), PageRequest.of(0, 1)).stream().findFirst().orElse(null);
+                if (lastExecution != null) {
+                    item.put("lastExecution", toExecutionRecordView(lastExecution));
+                }
+                result.add(item);
             }
         }
         return result;
@@ -307,12 +324,15 @@ public class WorkflowService {
                 "status", instance.status().name(),
                 "activePage", instance.activePage() != null ? instance.activePage() : "",
                 "installedAt", instance.installedAt().toString(),
-                "triggers", def != null ? def.triggers().size() : 0
+                "triggers", def != null ? def.triggers().size() : 0,
+                "variables", new LinkedHashMap<>(instance.variablesAsMap()),
+                "pageState", workspaceService.getWorkflowState(deviceId),
+                "recentExecutions", getExecutionRecords(deviceId, definitionId, 10)
         );
     }
 
-    public Map<String, Object> getSlotStatus(String deviceId) {
-        return sectionService.getSlotStatus(deviceId);
+    public Map<String, Object> getPageState(String deviceId) {
+        return workspaceService.getWorkflowState(deviceId);
     }
 
     public Map<String, Object> getDeviceStatus(String deviceId) {
@@ -320,19 +340,25 @@ public class WorkflowService {
         if (workflows.isEmpty()) {
             return Map.of("deviceId", deviceId, "status", "no_workflow", "workflows", List.of());
         }
-        return Map.of("deviceId", deviceId, "status", "active", "workflows", workflows);
+        return Map.of(
+                "deviceId", deviceId,
+                "status", "active",
+                "workflows", workflows,
+                "pageState", getPageState(deviceId),
+                "recentExecutions", getExecutionRecords(deviceId, 20)
+        );
     }
 
     // ── Execution records ──
 
-    public List<ExecutionRecordEntity> getExecutionRecords(String deviceId, int limit) {
+    public List<Map<String, Object>> getExecutionRecords(String deviceId, int limit) {
         return executionRecordRepo.findByDeviceIdOrderByStartTimeDesc(
-                deviceId, PageRequest.of(0, limit));
+                deviceId, PageRequest.of(0, limit)).stream().map(this::toExecutionRecordView).toList();
     }
 
-    public List<ExecutionRecordEntity> getExecutionRecords(String deviceId, String definitionId, int limit) {
+    public List<Map<String, Object>> getExecutionRecords(String deviceId, String definitionId, int limit) {
         return executionRecordRepo.findByDeviceIdAndDefinitionIdOrderByStartTimeDesc(
-                deviceId, definitionId, PageRequest.of(0, limit));
+                deviceId, definitionId, PageRequest.of(0, limit)).stream().map(this::toExecutionRecordView).toList();
     }
 
     // ── Variables ──
@@ -363,15 +389,15 @@ public class WorkflowService {
 
         if (def.triggers() != null) {
             for (TriggerDef trigger : def.triggers()) {
-                if (trigger instanceof TriggerDef.DeviceEventTrigger t) {
-                    var result = capabilityValidator.validateEvent(deviceId, t.event());
+                if (trigger instanceof TriggerDef.DeviceUiEventTrigger t) {
+                    var result = capabilityValidator.validateEvent(deviceId, t.eventType());
                     if (!result.valid()) {
                         String severity = t.optional() ? "warning" : "error";
                         issues.add(Map.of(
                                 "element", "trigger",
-                                "triggerType", "device_event",
+                                "triggerType", "device.ui.event",
                                 "triggerId", t.id(),
-                                "capability", t.event(),
+                                "capability", t.eventType(),
                                 "issue", result.issue(),
                                 "severity", severity,
                                 "optional", t.optional(),
@@ -399,34 +425,7 @@ public class WorkflowService {
 
         if (def.actions() != null) {
             for (var entry : def.actions().entrySet()) {
-                for (ActionDef action : entry.getValue()) {
-                    if (action instanceof ActionDef.ControlAction a) {
-                        var result = capabilityValidator.validateCommand(deviceId, a.command());
-                        if (!result.valid()) {
-                            issues.add(Map.of(
-                                    "element", "action",
-                                    "actionType", "control",
-                                    "actionGroup", entry.getKey(),
-                                    "capability", a.command(),
-                                    "issue", result.issue(),
-                                    "severity", "error",
-                                    "suggestions", result.suggestions()
-                            ));
-                        }
-                    } else if (action instanceof ActionDef.NodeActionDef a) {
-                        // NodeActionDef references a node type — check if it's resolvable
-                        if (nodeRegistry.resolve(deviceId, a.nodeType()) == null) {
-                            issues.add(Map.of(
-                                    "element", "action",
-                                    "actionType", "node",
-                                    "actionGroup", entry.getKey(),
-                                    "capability", a.nodeType(),
-                                    "issue", "Unknown node type: " + a.nodeType(),
-                                    "severity", "error"
-                            ));
-                        }
-                    }
-                }
+                validateActionsForDevice(deviceId, entry.getKey(), entry.getValue(), issues);
             }
         }
 
@@ -446,7 +445,8 @@ public class WorkflowService {
                 .orElseThrow(() -> new IllegalArgumentException("Workflow definition not found: " + definitionId));
         WorkflowDefinition def;
         try {
-            def = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
+            def = definitionNormalizer.normalize(
+                    objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class));
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Failed to parse workflow definition JSON", e);
         }
@@ -474,10 +474,16 @@ public class WorkflowService {
     public Map<String, Object> validateDefinition(WorkflowDefinitionEntity entity) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        List<Map<String, Object>> triggerIssues = new ArrayList<>();
+        List<Map<String, Object>> nodeIssues = new ArrayList<>();
+        List<Map<String, Object>> pageIssues = new ArrayList<>();
+        List<Map<String, Object>> bindingIssues = new ArrayList<>();
+        List<Map<String, Object>> graphIssues = new ArrayList<>();
 
         WorkflowDefinition def;
         try {
-            def = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
+            def = definitionNormalizer.normalize(
+                    objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class));
         } catch (JsonProcessingException e) {
             return Map.of("valid", false, "errors", List.of("Invalid JSON: " + e.getMessage()), "warnings", List.of());
         }
@@ -486,12 +492,32 @@ public class WorkflowService {
             errors.add("Workflow name is required.");
         }
 
+        if (def.triggers() == null || def.triggers().isEmpty()) {
+            Map<String, Object> issue = Map.of("issue", "Workflow has no triggers.");
+            triggerIssues.add(issue);
+            warnings.add("Workflow has no triggers.");
+        }
+
+        if (def.actions() != null) {
+            for (var entry : def.actions().entrySet()) {
+                validateActionDefinitions(entry.getKey(), entry.getValue(), errors);
+                if (entry.getValue() != null) {
+                    for (ActionDef action : entry.getValue()) {
+                        if (action instanceof ActionDef.NodeActionDef nodeAction) {
+                            nodeIssues.addAll(validateNodeDefinitionStructure(entry.getKey(), nodeAction));
+                        }
+                    }
+                }
+            }
+        }
+
         // Validate DAG structure
         if (def.actions() != null && def.triggers() != null) {
             DagValidator.DagResult dagResult = DagValidator.buildAndValidate(
                     def.actions(), def.edges(), def.triggers());
             if (!dagResult.isValid() && dagResult.error() != null) {
                 errors.add(dagResult.error());
+                graphIssues.add(Map.of("issue", dagResult.error()));
             }
         }
 
@@ -519,19 +545,188 @@ public class WorkflowService {
             for (EdgeDef edge : def.edges()) {
                 if (!nodeIds.contains(edge.from())) {
                     errors.add("Edge references unknown source node: " + edge.from());
+                    graphIssues.add(Map.of("issue", "Unknown edge source", "edge", edge));
                 }
                 if (!nodeIds.contains(edge.to())) {
                     errors.add("Edge references unknown target node: " + edge.to());
+                    graphIssues.add(Map.of("issue", "Unknown edge target", "edge", edge));
                 }
             }
         }
 
         if (def.pages() == null || def.pages().isEmpty()) {
             warnings.add("Workflow has no pages defined. No UI will be shown on load.");
+            pageIssues.add(Map.of("issue", "Workflow has no pages defined."));
+        } else {
+            pageIssues.addAll(validatePageDefinitions(def.pages()));
         }
 
         boolean valid = errors.isEmpty();
-        return Map.of("valid", valid, "errors", errors, "warnings", warnings);
+        return Map.of(
+                "valid", valid,
+                "errors", errors,
+                "warnings", warnings,
+                "triggerIssues", triggerIssues,
+                "nodeIssues", nodeIssues,
+                "pageIssues", pageIssues,
+                "bindingIssues", bindingIssues,
+                "graphIssues", graphIssues
+        );
+    }
+
+    private List<Map<String, Object>> validateNodeDefinitionStructure(String actionGroup,
+                                                                      ActionDef.NodeActionDef action) {
+        List<Map<String, Object>> issues = new ArrayList<>();
+        if (action.nodeType() == null || action.nodeType().isBlank()) {
+            issues.add(Map.of(
+                    "actionGroup", actionGroup,
+                    "nodeType", "",
+                    "issue", "nodeType is required"
+            ));
+        }
+        if (action.params() == null) {
+            issues.add(Map.of(
+                    "actionGroup", actionGroup,
+                    "nodeType", action.nodeType(),
+                    "issue", "params should be provided as an object"
+            ));
+        }
+        return issues;
+    }
+
+    private List<Map<String, Object>> validatePageDefinitions(List<PageDef> pages) {
+        List<Map<String, Object>> issues = new ArrayList<>();
+        Set<String> pageIds = new LinkedHashSet<>();
+        for (PageDef page : pages) {
+            if (!pageIds.add(page.id())) {
+                issues.add(Map.of("pageId", page.id(), "issue", "duplicate page id"));
+            }
+            if (page.sections() == null || page.sections().isEmpty()) {
+                issues.add(Map.of("pageId", page.id(), "issue", "page has no sections"));
+                continue;
+            }
+            Set<String> sectionIds = new LinkedHashSet<>();
+            for (SectionBindDef section : page.sections()) {
+                if (!sectionIds.add(section.id())) {
+                    issues.add(Map.of(
+                            "pageId", page.id(),
+                            "sectionId", section.id(),
+                            "issue", "duplicate section id"
+                    ));
+                }
+                if (section.type() == null || section.type().isBlank()) {
+                    issues.add(Map.of(
+                            "pageId", page.id(),
+                            "sectionId", section.id(),
+                            "issue", "section.type is required"
+                    ));
+                }
+            }
+        }
+        return issues;
+    }
+
+    private Map<String, Object> toExecutionRecordView(ExecutionRecordEntity record) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", record.getId());
+        view.put("deviceId", record.getDeviceId());
+        view.put("definitionId", record.getDefinitionId());
+        view.put("definitionName", record.getDefinitionName());
+        view.put("triggerId", record.getTriggerId());
+        view.put("startedAt", record.getStartTime() != null ? record.getStartTime().toString() : null);
+        view.put("endedAt", record.getEndTime() != null ? record.getEndTime().toString() : null);
+        view.put("status", record.getStatus());
+        view.put("failedNode", record.getFailedNode());
+        view.put("failureReason", record.getErrorMessage());
+        view.put("nodeResults", parseNodeResults(record.getNodeResultsJson()));
+        return view;
+    }
+
+    private Object parseNodeResults(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            return json;
+        }
+    }
+
+    private void validateActionDefinitions(String actionGroup, List<ActionDef> actions, List<String> errors) {
+        if (actions == null) {
+            return;
+        }
+        for (ActionDef action : actions) {
+            if (action instanceof ActionDef.NodeActionDef nodeAction) {
+                validateNodeActionDefinition(actionGroup, nodeAction, errors);
+            } else if (action instanceof ActionDef.ConditionAction conditionAction) {
+                validateActionDefinitions(actionGroup + ".then", conditionAction.thenActions(), errors);
+                validateActionDefinitions(actionGroup + ".else", conditionAction.elseActions(), errors);
+            } else if (action instanceof ActionDef.SequenceAction sequenceAction) {
+                validateActionDefinitions(actionGroup + ".sequence", sequenceAction.steps(), errors);
+            }
+        }
+    }
+
+    private void validateNodeActionDefinition(String actionGroup, ActionDef.NodeActionDef action, List<String> errors) {
+        if (action.nodeType() == null || action.nodeType().isBlank()) {
+            errors.add("Action group '" + actionGroup + "' contains node action with empty nodeType.");
+            return;
+        }
+
+        CapabilityInvocationValidator.ValidationResult validation =
+                invocationValidator.validateNodeAction("", action.nodeType(), action.params());
+        for (String error : validation.errors()) {
+            errors.add("Action group '" + actionGroup + "': " + error);
+        }
+    }
+
+    private void validateActionsForDevice(String deviceId, String actionGroup, List<ActionDef> actions,
+                                          List<Map<String, Object>> issues) {
+        if (actions == null) {
+            return;
+        }
+        for (ActionDef action : actions) {
+            if (action instanceof ActionDef.NodeActionDef nodeAction) {
+                validateNodeActionForDevice(deviceId, actionGroup, nodeAction, issues);
+            } else if (action instanceof ActionDef.ConditionAction conditionAction) {
+                validateActionsForDevice(deviceId, actionGroup + ".then", conditionAction.thenActions(), issues);
+                validateActionsForDevice(deviceId, actionGroup + ".else", conditionAction.elseActions(), issues);
+            } else if (action instanceof ActionDef.SequenceAction sequenceAction) {
+                validateActionsForDevice(deviceId, actionGroup + ".sequence", sequenceAction.steps(), issues);
+            }
+        }
+    }
+
+    private void validateNodeActionForDevice(String deviceId, String actionGroup,
+                                             ActionDef.NodeActionDef action,
+                                             List<Map<String, Object>> issues) {
+        var node = nodeRegistry.resolve(deviceId, action.nodeType());
+        if (node == null) {
+            issues.add(Map.of(
+                    "element", "action",
+                    "actionType", "node",
+                    "actionGroup", actionGroup,
+                    "capability", action.nodeType(),
+                    "issue", "Unknown node type: " + action.nodeType(),
+                    "severity", "error"
+            ));
+            return;
+        }
+
+        CapabilityInvocationValidator.ValidationResult validation =
+                invocationValidator.validateNodeAction(deviceId, action.nodeType(), action.params());
+        for (String error : validation.errors()) {
+            issues.add(Map.of(
+                    "element", "action",
+                    "actionType", "node",
+                    "actionGroup", actionGroup,
+                    "capability", action.nodeType(),
+                    "issue", error,
+                    "severity", "error"
+            ));
+        }
     }
 
     // ── Trigger status ──
@@ -727,18 +922,15 @@ public class WorkflowService {
      * This is the primary entry point — called by {@code EventInputHandler}.
      *
      * Resolves the event's namespaced ID and matches against
-     * {@link TriggerDef.DeviceEventTrigger} entries, respecting
-     * sectionId and nodeId filters.
+     * {@link TriggerDef.DeviceUiEventTrigger} entries, respecting
+     * pageId / sectionId / nodeId filters.
      */
     public int fireEvent(String deviceId, EventPayload payload) {
         String prefix = deviceId + ":";
-        // Resolve the namespaced event ID for trigger matching
         String eventId = payload.eventId();
         if (eventId == null) return 0;
 
-        // Also try legacy name for backward compatibility with existing triggers
-        String legacyName = eventRegistry.resolveEventId(eventId);
-        // For matching, use both namespaced and legacy forms
+        String pageId = !payload.pageId().isEmpty() ? payload.pageId() : null;
         String sectionId = payload.hasSectionContext() ? payload.sectionId() : null;
         String nodeId = !payload.nodeId().isEmpty() ? payload.nodeId() : null;
 
@@ -756,9 +948,9 @@ public class WorkflowService {
             Map<String, String> env = envConfigs.getOrDefault(def.id(), Map.of());
 
             for (TriggerDef trigger : def.triggers()) {
-                if (!(trigger instanceof TriggerDef.DeviceEventTrigger d)) continue;
-                // Match against both namespaced and legacy event names
-                if (!matchesEvent(d.event(), eventId, legacyName)) continue;
+                if (!(trigger instanceof TriggerDef.DeviceUiEventTrigger d)) continue;
+                if (!matchesEventType(d.eventType(), eventId)) continue;
+                if (!matchesFilter(d.pageId(), pageId)) continue;
                 if (!matchesFilter(d.sectionId(), sectionId)) continue;
                 if (!matchesFilter(d.nodeId(), nodeId)) continue;
 
@@ -769,20 +961,6 @@ public class WorkflowService {
                 }
             }
 
-            // fallback: legacy event-only triggers with blank filters
-            if (fired == 0 && (sectionId != null || nodeId != null)) {
-                for (TriggerDef trigger : def.triggers()) {
-                    if (!(trigger instanceof TriggerDef.DeviceEventTrigger d)) continue;
-                    if (!matchesEvent(d.event(), eventId, legacyName)) continue;
-                    if (isBlank(d.sectionId()) && isBlank(d.nodeId())) {
-                        List<ActionDef> actions = def.actions().get(trigger.id());
-                        if (actions != null) {
-                            executeTrigger(def, instance, trigger.id(), legacyPayload, env, payload);
-                            fired++;
-                        }
-                    }
-                }
-            }
         }
 
         return fired;
@@ -798,615 +976,15 @@ public class WorkflowService {
         return fireEvent(deviceId, eventPayload);
     }
 
-    /** Match trigger event name against both namespaced and legacy forms. */
-    private boolean matchesEvent(String triggerEvent, String eventId, String legacyName) {
-        if (triggerEvent.equals(eventId)) return true;
-        if (triggerEvent.equals(legacyName)) return true;
-        // Also try matching just the last segment (e.g., "single_click" → "hardware:buttons.boot.single_click")
-        if (eventId != null) {
-            int lastDot = eventId.lastIndexOf('.');
-            if (lastDot >= 0) {
-                String lastSegment = eventId.substring(lastDot + 1);
-                if (triggerEvent.equals(lastSegment)) return true;
-            }
-            int lastColon = eventId.lastIndexOf(':');
-            if (lastColon >= 0) {
-                String afterColon = eventId.substring(lastColon + 1);
-                if (triggerEvent.equals(afterColon)) return true;
-            }
-        }
-        return false;
-    }
-
-    // ── Node types catalog ──
-
-    /**
-     * Get node types catalog. Without deviceId returns global catalog;
-     * with deviceId includes device-specific enums from capability reports.
-     */
-    public Map<String, Object> getNodeTypes() {
-        return buildNodeTypesCatalog(null, null);
-    }
-
-    public Map<String, Object> getNodeTypes(String deviceId) {
-        return buildNodeTypesCatalog(deviceId, null);
-    }
-
-    /**
-     * Get node types filtered by a device type (auto-discovered capability profile).
-     * Useful for workflow editing when no specific device is selected but a
-     * device type is known.
-     */
-    public Map<String, Object> getNodeTypesForDeviceType(String deviceTypeKey) {
-        return buildNodeTypesCatalog(null, deviceTypeKey);
-    }
-
-    private Map<String, Object> buildNodeTypesCatalog(String deviceId, String deviceTypeKey) {
-        boolean hasDevice = deviceId != null && !deviceId.isEmpty();
-        boolean hasDeviceType = deviceTypeKey != null && !deviceTypeKey.isEmpty();
-        // Resolve capabilities from device type if specified
-        CapabilityRegistry.DeviceTypeInfo deviceTypeInfo = null;
-        if (hasDeviceType) {
-            deviceTypeInfo = capabilityRegistry.getDeviceType(deviceTypeKey).orElse(null);
-            if (deviceTypeInfo == null) {
-                log.warn("Device type not found: {}, falling back to global catalog", deviceTypeKey);
-                hasDeviceType = false;
-            }
-        }
-        boolean hasTarget = hasDevice || hasDeviceType;
-
-        // ── Triggers ──
-        List<Map<String, Object>> triggers = new ArrayList<>();
-
-        triggers.add(Map.of("type", "manual", "label", "手动触发", "params", List.of(), "category", "基础"));
-
-        triggers.add(Map.of("type", "cron", "label", "定时触发", "category", "基础",
-                "params", List.of(
-                        param("interval", "间隔秒数", "number", ""),
-                        param("cron", "Cron 表达式", "string", "例如: 0 */5 * * * *")
-                )));
-
-        triggers.add(Map.of("type", "webhook", "label", "Webhook 触发", "category", "基础",
-                "params", List.of(
-                        param("path", "回调路径", "string", "例如: /alerts/github")
-                )));
-
-        // Device event trigger: tree-structured event selector
-        List<Map<String, Object>> eventParams = new ArrayList<>();
-        Map<String, Object> eventParam;
-        if (hasDevice) {
-            List<Map<String, Object>> eventTree = buildDeviceEventTree(deviceId);
-            eventParam = paramWithTree("event", "事件类型", "event_tree", eventTree,
-                    "树形事件选择器：分类 → 能力 → 事件");
-        } else if (hasDeviceType && deviceTypeInfo != null) {
-            List<Map<String, Object>> eventTree = buildDeviceTypeEventTree(deviceTypeInfo);
-            eventParam = paramWithTree("event", "事件类型", "event_tree", eventTree,
-                    "树形事件选择器（按设备类型 " + deviceTypeInfo.label() + " 过滤）");
-        } else {
-            List<Map<String, Object>> globalEventTree = buildGlobalEventTree();
-            eventParam = paramWithTree("event", "事件类型", "event_tree", globalEventTree,
-                    "通用事件树（绑定设备后可精确列表）");
-        }
-        eventParams.add(eventParam);
-        eventParams.add(param("sectionId", "限定 Section", "string", "可选，留空则不限"));
-        eventParams.add(param("nodeId", "限定控件", "string", "可选，留空则不限"));
-        triggers.add(Map.of("type", "device_event", "label", "设备事件触发", "category", "终端",
-                "params", eventParams));
-
-        // Device command trigger: tree-structured command selector
-        List<Map<String, Object>> cmdTriggerParams = new ArrayList<>();
-        List<Map<String, Object>> cmdTree;
-        if (hasDevice) {
-            cmdTree = buildDeviceCommandTree(deviceId);
-        } else if (hasDeviceType && deviceTypeInfo != null) {
-            cmdTree = buildDeviceTypeCommandTree(deviceTypeInfo);
-        } else {
-            cmdTree = buildGlobalCommandTree();
-        }
-        cmdTriggerParams.add(paramWithTree("command", "命令名", "command_tree", cmdTree,
-                "树形命令选择器：分类 → 能力 → 命令"));
-        cmdTriggerParams.add(Map.of(
-                "name", "params", "label", "命令参数", "type", "map", "description", "命令所需参数"));
-        triggers.add(Map.of("type", "device_command", "label", "命令触发", "category", "终端",
-                "params", cmdTriggerParams));
-
-        // ── Actions ──
-        List<Map<String, Object>> actions = new ArrayList<>();
-
-        // Unified output node: references CapabilityNode types
-        List<Map<String, String>> nodeTypeOptions = new ArrayList<>();
-        if (hasTarget) {
-            for (NodeSchema schema : hasDevice
-                    ? nodeRegistry.getDeviceSchemas(deviceId)
-                    : nodeRegistry.getGlobalSchemas()) {
-                if ("device".equals(schema.category()) || "platform".equals(schema.category())) {
-                    nodeTypeOptions.add(Map.of("value", schema.type(), "label",
-                            schema.displayName() + " - " + schema.description()));
-                }
-            }
-        } else {
-            for (NodeSchema schema : nodeRegistry.getGlobalSchemas()) {
-                if ("platform".equals(schema.category())) {
-                    nodeTypeOptions.add(Map.of("value", schema.type(), "label",
-                            schema.displayName() + " - " + schema.description()));
-                }
-            }
-            // Add generic device node types
-            nodeTypeOptions.add(Map.of("value", "device.control", "label", "执行器命令 - 发送设备控制指令"));
-            nodeTypeOptions.add(Map.of("value", "device.audio.play", "label", "播放音频 - 音频预设或TTS"));
-            nodeTypeOptions.add(Map.of("value", "device.section.push", "label", "Section 更新 - 下发或更新 Section"));
-            nodeTypeOptions.add(Map.of("value", "device.page.update", "label", "页面更新 - 切换或重发页面"));
-        }
-        actions.add(Map.of("type", "node", "label", "统一输出节点", "category", "终端",
-                "description", "选择具体输出行为，参数由节点 Schema 自动约束",
-                "params", List.of(
-                        paramWithOptions("nodeType", "输出类型", "enum", nodeTypeOptions, "选择输出行为"),
-                        Map.of("name", "params", "label", "节点参数", "type", "map",
-                                "description", "参数由所选输出类型的 Schema 决定")
-                )));
-
-        actions.add(Map.of("type", "fetch", "label", "HTTP 请求", "category", "数据处理",
-                "params", List.of(
-                        param("url", "请求地址", "string", "支持 $data.xxx / $trigger.xxx"),
-                        param("method", "请求方法", "string", "GET / POST"),
-                        param("save", "存储变量名", "string", "结果保存到 $data.<name>")
-                )));
-
-        actions.add(Map.of("type", "set_variable", "label", "设置变量", "category", "数据处理",
-                "params", List.of(
-                        param("variable", "变量名", "string", "不含 $data. 前缀"),
-                        param("value", "变量值", "string",
-                                "支持 $data.xxx / $trigger.xxx / $env.XXX / 字面量 / 表达式")
-                ),
-                "syntax", "支持表达式: $data.x + 10 / '文本' / min(a,b) / $data.x == 'playing' ? '暂停' : '播放'"));
-
-        actions.add(Map.of("type", "condition", "label", "条件分支", "category", "流程控制",
-                "params", List.of(
-                        param("variable", "判断变量", "string", "$data.xxx"),
-                        param("operator", "运算符", "enum",
-                                "eq / neq / gt / gte / lt / lte / contains / isEmpty"),
-                        param("value", "比较值", "string", "支持字面量和 $data.xxx"),
-                        param("thenActions", "条件成立时执行", "actions[]", "动作数组"),
-                        param("elseActions", "条件不成立时执行", "actions[]", "可选，动作数组")
-                ),
-                "syntax", "thenActions 和 elseActions 均为动作数组，可嵌套 condition/sequence"));
-
-        actions.add(Map.of("type", "sequence", "label", "顺序执行", "category", "流程控制",
-                "params", List.of(
-                        param("steps", "步骤列表", "actions[]", "按顺序执行的动作数组")
-                ),
-                "syntax", "可包含任意类型动作，常用于 condition 分支内部"));
-
-        if (hasDevice) {
-            List<Map<String, Object>> controlCmdTree = buildDeviceCommandTree(deviceId);
-            actions.add(Map.of("type", "control", "label", "执行器命令", "category", "终端",
-                    "params", List.of(
-                            paramWithTree("command", "命令名", "command_tree", controlCmdTree,
-                                    "树形命令选择器：从设备能力中选取"),
-                            param("value", "命令值", "string", "支持 $data.xxx / $trigger.xxx")
-                    )));
-        } else if (hasDeviceType && deviceTypeInfo != null) {
-            List<Map<String, Object>> typeCmdTree = buildDeviceTypeCommandTree(deviceTypeInfo);
-            actions.add(Map.of("type", "control", "label", "执行器命令", "category", "终端",
-                    "params", List.of(
-                            paramWithTree("command", "命令名", "command_tree", typeCmdTree,
-                                    "树形命令选择器（按设备类型 " + deviceTypeInfo.label() + " 过滤）"),
-                            param("value", "命令值", "string", "支持 $data.xxx / $trigger.xxx")
-                    )));
-        } else {
-            List<Map<String, Object>> globalCmdTree = buildGlobalCommandTree();
-            actions.add(Map.of("type", "control", "label", "执行器命令", "category", "终端",
-                    "params", List.of(
-                            paramWithTree("command", "命令名", "command_tree", globalCmdTree,
-                                    "通用命令树（绑定设备后可精确列表）"),
-                            param("value", "命令值", "string", "支持 $data.xxx / $trigger.xxx")
-                    )));
-        }
-
-        actions.add(Map.of("type", "play_audio", "label", "播放音频", "category", "终端",
-                "params", List.of(
-                        param("preset", "预设音", "enum",
-                                "notification/success/error/warning/click/beep")
-                )));
-
-        actions.add(Map.of("type", "tts", "label", "TTS 朗读", "category", "终端",
-                "params", List.of(
-                        param("text", "朗读文本", "string", "支持 $data.xxx / $trigger.xxx")
-                )));
-
-        actions.add(Map.of("type", "patch_section", "label", "增量更新 Section", "category", "UI",
-                "params", List.of(
-                        param("page", "页面 ID", "string", ""),
-                        param("sectionId", "Section ID", "string", ""),
-                        param("bind", "绑定数据源", "string", "支持 $data.xxx")
-                )));
-
-        actions.add(Map.of("type", "update_page", "label", "下发页面", "category", "UI",
-                "params", List.of(
-                        param("page", "页面 ID", "string", "")
-                )));
-
-        actions.add(Map.of("type", "switch_page", "label", "切换页面", "category", "UI",
-                "params", List.of(
-                        param("page", "页面 ID", "string", "")
-                )));
-
-        // ── Section types (from SectionTypeCatalog) ──
-        List<Map<String, Object>> sectionTypes = new ArrayList<>();
-        for (var def : SectionTypeCatalog.all().values()) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("type", def.type());
-            entry.put("label", def.displayName());
-            entry.put("interactive", def.interactive());
-            entry.put("fields", SectionTypeCatalog.fieldsToMaps(def.displayFields()));
-            entry.put("interactionEvents", def.interactionEvents().stream()
-                    .map(e -> Map.of(
-                            "eventId", e.eventId(),
-                            "description", e.description(),
-                            "params", e.params().stream()
-                                    .map(p -> Map.of("name", p.name(), "type", p.type(),
-                                            "description", p.description()))
-                                    .toList()))
-                    .toList());
-            entry.put("constraints", def.defaultConstraints());
-            if (hasTarget) {
-                boolean supported = hasDevice
-                        ? capabilityRegistry.supportsSectionType(deviceId, def.type())
-                        : (deviceTypeInfo != null && deviceTypeInfo.sectionTypes().contains(def.type()));
-                entry.put("deviceSupported", supported);
-            }
-            sectionTypes.add(entry);
-        }
-
-        return Map.of(
-                "triggers", triggers,
-                "actions", actions,
-                "sectionTypes", sectionTypes
-        );
-    }
-
-    // ── Options builders ──
-
-    private List<Map<String, String>> buildEventOptions(String deviceId) {
-        // Use EventRegistry for structured event data
-        List<Map<String, String>> options = new ArrayList<>();
-        var snapshot = capabilityRegistry.getDeviceSnapshot(deviceId);
-        if (snapshot.isPresent()) {
-            // Device hardware events — cross-reference with EventRegistry for display names
-            for (String event : snapshot.get().inputEvents()) {
-                String resolvedId = eventRegistry.resolveEventId(event);
-                var def = eventRegistry.getInboundEvent(resolvedId);
-                String label = def.map(ed -> ed.displayName() + " (" + ed.eventId() + ")")
-                        .orElse(event);
-                String source = def.map(ed -> ed.category().label()).orElse("硬件");
-                options.add(Map.of("value", resolvedId, "label", label, "source", source));
-            }
-            // Section interaction events
-            for (String event : capabilityRegistry.getDeviceInteractionEvents(deviceId)) {
-                String resolvedId = eventRegistry.resolveEventId(event);
-                var def = eventRegistry.getInboundEvent(resolvedId);
-                String label = def.map(ed -> ed.displayName() + " (" + ed.eventId() + ")")
-                        .orElse(event);
-                options.add(Map.of("value", resolvedId, "label", label, "source", "Section交互"));
-            }
-        }
-        // Also include events from EventRegistry that this device supports
-        for (var def : eventRegistry.getAllInboundEvents()) {
-            boolean alreadyAdded = options.stream().anyMatch(o -> def.eventId().equals(o.get("value")));
-            if (!alreadyAdded && snapshot.isPresent() && snapshot.get().supportsEvent(def.eventId())) {
-                options.add(Map.of("value", def.eventId(), "label",
-                        def.displayName() + " (" + def.eventId() + ")",
-                        "source", def.category().label()));
-            }
-        }
-        return options;
-    }
-
-    private List<Map<String, String>> buildGlobalEventOptions() {
-        // Use EventRegistry for structured, categorized event options
-        List<Map<String, String>> options = new ArrayList<>();
-        for (var def : eventRegistry.getAllInboundEvents()) {
-            options.add(Map.of(
-                    "value", def.eventId(),
-                    "label", def.displayName() + " (" + def.eventId() + ")",
-                    "source", def.category().label()));
-        }
-        // Fallback if EventRegistry is empty
-        if (options.isEmpty()) {
-            options.add(Map.of("value", "button.click", "label", "button.click (通用)", "source", "硬件"));
-            options.add(Map.of("value", "imu.shake", "label", "imu.shake (通用)", "source", "硬件"));
-            options.add(Map.of("value", "action.click", "label", "action.click (通用)", "source", "Section交互"));
-        }
-        return options;
-    }
-
-    private List<Map<String, String>> buildCommandOptions(String deviceId) {
-        List<Map<String, String>> options = new ArrayList<>();
-        var snapshot = capabilityRegistry.getDeviceSnapshot(deviceId);
-        if (snapshot.isPresent()) {
-            for (String cmd : snapshot.get().outputCommands()) {
-                options.add(Map.of("value", cmd, "label", cmd));
-            }
-        }
-        return options;
-    }
-
-    private List<Map<String, String>> buildGlobalCommandOptions() {
-        List<Map<String, String>> options = new ArrayList<>();
-        for (String cmd : capabilityRegistry.getKnownCommands()) {
-            options.add(Map.of("value", cmd, "label", cmd));
-        }
-        if (options.isEmpty()) {
-            options.add(Map.of("value", "rgb.effect.set", "label", "rgb.effect.set (通用)"));
-            options.add(Map.of("value", "audio.prompt.play", "label", "audio.prompt.play (通用)"));
-            options.add(Map.of("value", "device.reboot", "label", "device.reboot (通用)"));
-            options.add(Map.of("value", "display.section.render", "label", "display.section.render (通用)"));
-        }
-        return options;
-    }
-
-    private Map<String, Object> paramWithOptions(String name, String label, String type,
-                                                  List<Map<String, String>> options, String description) {
-        Map<String, Object> p = param(name, label, type, description);
-        p.put("options", options);
-        return p;
-    }
-
-    /** Build a param with a tree structure for hierarchical event/command selection. */
-    private Map<String, Object> paramWithTree(String name, String label, String type,
-                                               List<Map<String, Object>> tree, String description) {
-        Map<String, Object> p = param(name, label, type, description);
-        p.put("tree", tree);
-        return p;
-    }
-
-    // ── Tree builders for event/command selectors ──
-
-    /**
-     * Build a device-specific event tree: only events the device supports,
-     * enriched with EventDefinition metadata (payload schemas, descriptions).
-     */
-    private List<Map<String, Object>> buildDeviceEventTree(String deviceId) {
-        var snapshot = capabilityRegistry.getDeviceSnapshot(deviceId);
-        if (snapshot.isEmpty()) return buildGlobalEventTree();
-
-        var caps = snapshot.get();
-        List<Map<String, Object>> tree = new ArrayList<>();
-
-        // Get all EventDefinitions and filter by device support
-        for (var def : eventRegistry.getAllInboundEvents()) {
-            String resolvedId = eventRegistry.resolveEventId(def.eventId());
-            boolean supported = caps.supportsEvent(def.eventId())
-                    || caps.supportsEvent(resolvedId)
-                    || caps.inputEvents().stream().anyMatch(e ->
-                        eventRegistry.resolveEventId(e).equals(def.eventId()));
-
-            if (!supported) continue;
-
-            addEventToTree(tree, def);
-        }
-
-        // Sort categories
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-        return tree;
-    }
-
-    /** Build an event tree filtered by a device type's capabilities. */
-    private List<Map<String, Object>> buildDeviceTypeEventTree(
-            CapabilityRegistry.DeviceTypeInfo deviceTypeInfo) {
-        List<Map<String, Object>> tree = new ArrayList<>();
-        for (var def : eventRegistry.getAllInboundEvents()) {
-            String resolvedId = eventRegistry.resolveEventId(def.eventId());
-            boolean supported = deviceTypeInfo.inputEvents().contains(def.eventId())
-                    || deviceTypeInfo.inputEvents().contains(resolvedId)
-                    || deviceTypeInfo.inputEvents().stream().anyMatch(e ->
-                        eventRegistry.resolveEventId(e).equals(def.eventId()));
-            if (!supported) continue;
-            addEventToTree(tree, def);
-        }
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-        return tree;
-    }
-
-    /** Build a global event tree: all known events from EventRegistry. */
-    private List<Map<String, Object>> buildGlobalEventTree() {
-        List<Map<String, Object>> tree = new ArrayList<>();
-        for (var def : eventRegistry.getAllInboundEvents()) {
-            addEventToTree(tree, def);
-        }
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-
-        // Fallback if registry is empty
-        if (tree.isEmpty()) {
-            Map<String, Object> fallback = new LinkedHashMap<>();
-            fallback.put("category", "HARDWARE_BUTTON");
-            fallback.put("label", "物理按钮");
-            fallback.put("capabilities", List.of(
-                    Map.of("capability", "buttons.boot", "label", "BOOT 按钮", "events", List.of(
-                            eventLeaf("hardware:buttons.boot.single_click", "单击", "buttons.boot"),
-                            eventLeaf("hardware:buttons.boot.double_click", "双击", "buttons.boot"),
-                            eventLeaf("hardware:buttons.boot.long_press_start", "长按开始", "buttons.boot")
-                    ))
-            ));
-            tree.add(fallback);
-        }
-        return tree;
-    }
-
-    private void addEventToTree(List<Map<String, Object>> tree, com.zwbd.agentnexus.sdui.event.EventDefinition def) {
-        String catLabel = def.category().label();
-        String catName = def.category().name();
-
-        // Find or create category node
-        Map<String, Object> catNode = tree.stream()
-                .filter(m -> catName.equals(m.get("category")))
-                .findFirst().orElse(null);
-        if (catNode == null) {
-            catNode = new LinkedHashMap<>();
-            catNode.put("category", catName);
-            catNode.put("label", catLabel);
-            catNode.put("capabilities", new ArrayList<Map<String, Object>>());
-            tree.add(catNode);
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> capabilities = (List<Map<String, Object>>) catNode.get("capabilities");
-
-        // Find or create capability node
-        String capName = def.sourceCapability();
-        Map<String, Object> capNode = capabilities.stream()
-                .filter(m -> capName.equals(m.get("capability")))
-                .findFirst().orElse(null);
-        if (capNode == null) {
-            capNode = new LinkedHashMap<>();
-            capNode.put("capability", capName);
-            capNode.put("label", def.displayName());
-            capNode.put("description", def.description());
-            capNode.put("events", new ArrayList<Map<String, Object>>());
-            capabilities.add(capNode);
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> events = (List<Map<String, Object>>) capNode.get("events");
-
-        // Add event leaf
-        events.add(eventLeaf(def.eventId(), def.displayName(), def.sourceCapability()));
-    }
-
-    private Map<String, Object> eventLeaf(String eventId, String displayName, String source) {
-        Map<String, Object> leaf = new LinkedHashMap<>();
-        leaf.put("eventId", eventId);
-        leaf.put("displayName", displayName);
-        leaf.put("source", source);
-
-        // Enrich with EventDefinition if available
-        var def = eventRegistry.getInboundEvent(eventId);
-        def.ifPresent(d -> {
-            leaf.put("description", d.description());
-            leaf.put("category", d.category().name());
-            leaf.put("payloadSchema", d.payloadSchema().stream()
-                    .map(pd -> Map.of("name", pd.name(), "type", pd.type(),
-                            "required", pd.required(), "description",
-                            pd.description() != null ? pd.description() : ""))
-                    .toList());
-        });
-        return leaf;
-    }
-
-    /** Build device-specific command tree. */
-    private List<Map<String, Object>> buildDeviceCommandTree(String deviceId) {
-        var snapshot = capabilityRegistry.getDeviceSnapshot(deviceId);
-        if (snapshot.isEmpty()) return buildGlobalCommandTree();
-
-        var caps = snapshot.get();
-        List<Map<String, Object>> tree = new ArrayList<>();
-
-        for (var def : eventRegistry.getAllOutboundEvents()) {
-            if (!caps.supportsCommand(def.eventId())) continue;
-
-            addCommandToTree(tree, def);
-        }
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-        return tree;
-    }
-
-    /** Build a command tree filtered by a device type's capabilities. */
-    private List<Map<String, Object>> buildDeviceTypeCommandTree(
-            CapabilityRegistry.DeviceTypeInfo deviceTypeInfo) {
-        List<Map<String, Object>> tree = new ArrayList<>();
-        for (var def : eventRegistry.getAllOutboundEvents()) {
-            if (!deviceTypeInfo.outputCommands().contains(def.eventId())) continue;
-            addCommandToTree(tree, def);
-        }
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-        return tree;
-    }
-
-    /** Build global command tree. */
-    private List<Map<String, Object>> buildGlobalCommandTree() {
-        List<Map<String, Object>> tree = new ArrayList<>();
-        for (var def : eventRegistry.getAllOutboundEvents()) {
-            addCommandToTree(tree, def);
-        }
-        tree.sort(Comparator.comparing(m -> (String) m.get("label")));
-
-        if (tree.isEmpty()) {
-            Map<String, Object> fallback = new LinkedHashMap<>();
-            fallback.put("category", "LIGHTING");
-            fallback.put("label", "灯光控制");
-            fallback.put("capabilities", List.of(
-                    Map.of("capability", "rgb.effect", "label", "RGB 灯光", "commands", List.of(
-                            commandLeaf("rgb.effect.set", "灯光效果", "rgb.effect"),
-                            commandLeaf("rgb.off", "关闭灯光", "rgb.effect")
-                    ))
-            ));
-            tree.add(fallback);
-        }
-        return tree;
-    }
-
-    private void addCommandToTree(List<Map<String, Object>> tree, com.zwbd.agentnexus.sdui.event.EventDefinition def) {
-        String catLabel = def.category().label();
-        String catName = def.category().name();
-
-        Map<String, Object> catNode = tree.stream()
-                .filter(m -> catName.equals(m.get("category")))
-                .findFirst().orElse(null);
-        if (catNode == null) {
-            catNode = new LinkedHashMap<>();
-            catNode.put("category", catName);
-            catNode.put("label", catLabel);
-            catNode.put("capabilities", new ArrayList<Map<String, Object>>());
-            tree.add(catNode);
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> capabilities = (List<Map<String, Object>>) catNode.get("capabilities");
-
-        String capName = def.sourceCapability();
-        Map<String, Object> capNode = capabilities.stream()
-                .filter(m -> capName.equals(m.get("capability")))
-                .findFirst().orElse(null);
-        if (capNode == null) {
-            capNode = new LinkedHashMap<>();
-            capNode.put("capability", capName);
-            capNode.put("label", def.displayName());
-            capNode.put("description", def.description());
-            capNode.put("commands", new ArrayList<Map<String, Object>>());
-            capabilities.add(capNode);
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> commands = (List<Map<String, Object>>) capNode.get("commands");
-        commands.add(commandLeaf(def.eventId(), def.displayName(), def.sourceCapability()));
-    }
-
-    private Map<String, Object> commandLeaf(String commandId, String displayName, String source) {
-        Map<String, Object> leaf = new LinkedHashMap<>();
-        leaf.put("commandId", commandId);
-        leaf.put("displayName", displayName);
-        leaf.put("source", source);
-
-        var def = eventRegistry.getOutboundEvent(commandId);
-        def.ifPresent(d -> {
-            leaf.put("description", d.description());
-            leaf.put("category", d.category().name());
-            leaf.put("payloadSchema", d.payloadSchema().stream()
-                    .map(pd -> Map.of("name", pd.name(), "type", pd.type(),
-                            "required", pd.required(), "description",
-                            pd.description() != null ? pd.description() : ""))
-                    .toList());
-        });
-        return leaf;
+    private boolean matchesEventType(String triggerEventType, String eventId) {
+        return triggerEventType != null && triggerEventType.equals(eventId);
     }
 
     // ── Internal helpers ──
 
-    public void sendPageToDevice(String deviceId, PageDef page, WorkflowInstance instance,
-                                  Map<String, Object> triggerPayload, Map<String, String> env) {
-        SectionScene scene = actionExecutor.buildPageSceneWithBindings(
-                page, instance.variablesAsMap(), triggerPayload, env, instance.watcher());
-        sectionService.sendScene(deviceId, scene);
+    public boolean renderPage(String deviceId, WorkflowInstance instance, String pageId,
+                              Map<String, Object> triggerPayload, Map<String, String> env) {
+        return pageRuntimeService.renderPage(deviceId, instance, pageId, triggerPayload, env);
     }
 
     /**
@@ -1431,16 +1009,33 @@ public class WorkflowService {
         record = executionRecordRepo.save(record);
 
         try {
+            Map<String, Object> executionView = Map.of();
             if (def.edges() != null && !def.edges().isEmpty()) {
-                dagExecutor.executeDag(def, instance, triggerPayload, env, triggerId);
+                executionView = dagExecutor.executeDag(def, instance, triggerPayload, env, triggerId);
             } else {
                 List<ActionDef> actions = def.actions() != null ? def.actions().get(triggerId) : null;
                 if (actions != null) {
-                    actionExecutor.execute(actions, instance, triggerPayload, env, eventPayload);
+                    ActionExecutor.ExecutionReport report =
+                            actionExecutor.execute(actions, instance, triggerPayload, env, eventPayload);
+                    executionView = Map.of(
+                            "mode", "sequential",
+                            "executed", report.actionCount(),
+                            "nodeResults", report.nodeResults(),
+                            "failedNode", report.failedNode(),
+                            "failureReason", report.failureReason()
+                    );
                 }
             }
             record.setStatus("SUCCESS");
             record.setEndTime(LocalDateTime.now());
+            record.setFailedNode((String) executionView.get("failedNode"));
+            Object nodeResults = executionView.get("nodeResults");
+            if (nodeResults != null) {
+                record.setNodeResultsJson(objectMapper.writeValueAsString(nodeResults));
+            }
+            if (executionView.get("failureReason") instanceof String failure && !failure.isBlank()) {
+                record.setErrorMessage(failure);
+            }
             executionRecordRepo.save(record);
         } catch (Exception e) {
             log.error("Trigger execution failed: device={} workflow={} trigger={} error={}",
@@ -1461,7 +1056,7 @@ public class WorkflowService {
         List<Map<String, String>> conflicts = new ArrayList<>();
         if (newDef.pages() == null || newDef.pages().isEmpty()) return conflicts;
 
-        // Collect all section slots from newly loaded definition
+        // Collect all page/section bindings from newly loaded definition
         Set<String> newSlots = new LinkedHashSet<>();
         for (PageDef page : newDef.pages()) {
             if (page.sections() == null) continue;
@@ -1509,129 +1104,4 @@ public class WorkflowService {
         return s == null || s.isBlank();
     }
 
-    // ── App Store ──
-
-    @Transactional
-    public Map<String, Object> publishDefinition(String id) {
-        WorkflowDefinitionEntity entity = definitionRepo.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Definition not found: " + id));
-        entity.setStatus("published");
-        definitionRepo.save(entity);
-        log.info("Workflow published to app store: {}", id);
-        return Map.of("status", "published", "id", id, "version", entity.getVersion());
-    }
-
-    @Transactional
-    public Map<String, Object> unpublishDefinition(String id) {
-        WorkflowDefinitionEntity entity = definitionRepo.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Definition not found: " + id));
-        entity.setStatus("draft");
-        definitionRepo.save(entity);
-        log.info("Workflow unpublished from app store: {}", id);
-        return Map.of("status", "draft", "id", id);
-    }
-
-    public List<Map<String, Object>> browseStore(String category, String deviceId) {
-        List<WorkflowDefinitionEntity> all = definitionRepo.findAll();
-        List<Map<String, Object>> result = new ArrayList<>();
-
-        for (WorkflowDefinitionEntity entity : all) {
-            if (!"published".equals(entity.getStatus())) continue;
-            if (category != null && !category.isEmpty()
-                    && !category.equals(entity.getCategory())) continue;
-
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("id", entity.getId());
-            entry.put("name", entity.getName());
-            entry.put("icon", entity.getIcon());
-            entry.put("category", entity.getCategory());
-            entry.put("version", entity.getVersion());
-            entry.put("createdAt", entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null);
-
-            if (deviceId != null && !deviceId.isEmpty()) {
-                entry.put("compatible", checkDeviceCompatibility(deviceId, entity));
-            }
-            result.add(entry);
-        }
-        return result;
-    }
-
-    public List<String> getStoreCategories() {
-        return definitionRepo.findAll().stream()
-                .filter(e -> "published".equals(e.getStatus()))
-                .map(WorkflowDefinitionEntity::getCategory)
-                .filter(c -> c != null && !c.isEmpty())
-                .distinct()
-                .sorted()
-                .toList();
-    }
-
-    public Map<String, Object> checkCompatibility(String definitionId, String deviceId) {
-        WorkflowDefinitionEntity entity = definitionRepo.findById(definitionId)
-                .orElseThrow(() -> new IllegalArgumentException("Definition not found: " + definitionId));
-        boolean compatible = checkDeviceCompatibility(deviceId, entity);
-
-        // Check section conflicts
-        String key = instanceKey(deviceId, definitionId);
-        WorkflowDefinition def = loadedDefinitions.get(key);
-        List<Map<String, String>> conflicts = List.of();
-        if (def == null) {
-            try {
-                def = objectMapper.readValue(entity.getDefinitionJson(), WorkflowDefinition.class);
-            } catch (Exception e) {
-                return Map.of("compatible", false, "error", "Failed to parse definition");
-            }
-        }
-        conflicts = detectSectionConflicts(deviceId, def);
-
-        return Map.of(
-                "definitionId", definitionId,
-                "deviceId", deviceId,
-                "compatible", compatible && conflicts.isEmpty(),
-                "capabilityCompatible", compatible,
-                "sectionConflicts", conflicts
-        );
-    }
-
-    private boolean checkDeviceCompatibility(String deviceId, WorkflowDefinitionEntity entity) {
-        if (entity.getRequiredCapsJson() == null || entity.getRequiredCapsJson().isEmpty()) {
-            return true;
-        }
-        try {
-            @SuppressWarnings("unchecked")
-            List<String> required = objectMapper.readValue(entity.getRequiredCapsJson(), List.class);
-            var capsOpt = capabilityService.getCapabilities(deviceId);
-            if (capsOpt.isEmpty()) return false;
-
-            var caps = capsOpt.get();
-            Set<String> availableCaps = new LinkedHashSet<>();
-            if (caps.inputs() != null) {
-                availableCaps.addAll(caps.inputs());
-            }
-            if (caps.outputs() != null) {
-                availableCaps.addAll(caps.outputs());
-            }
-            if (caps.display() != null) {
-                availableCaps.add("display");
-                availableCaps.add("section");
-            }
-
-            for (String cap : required) {
-                if (!availableCaps.contains(cap)) return false;
-            }
-            return true;
-        } catch (Exception e) {
-            log.warn("Failed to parse required caps for {}: {}", entity.getId(), e.getMessage());
-            return true;
-        }
-    }
-
-    private Map<String, Object> param(String name, String label, String type, String syntax) {
-        Map<String, Object> p = new LinkedHashMap<>();
-        p.put("name", name);
-        p.put("label", label);
-        p.put("type", type);
-        if (syntax != null && !syntax.isEmpty()) p.put("syntax", syntax);
-        return p;
-    }
 }

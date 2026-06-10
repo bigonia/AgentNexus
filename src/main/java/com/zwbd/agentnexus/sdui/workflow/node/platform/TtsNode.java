@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui.workflow.node.platform;
 
+import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
+import com.zwbd.agentnexus.sdui.protocol.SduiRuntimeHandlers;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.workflow.VariableResolver;
 import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNode;
@@ -27,7 +29,7 @@ public class TtsNode implements CapabilityNode {
                 "platform", "mic",
                 List.of(new NodeSchema.ParamDef("text", "string", true, null, "朗读文本，支持 $data.xxx / $trigger.xxx")),
                 List.of(new NodeSchema.ParamDef("audioUrl", "string", false, null, "生成的音频 URL")),
-                false, 15000);
+                false, 15000, null, "platform", SduiProtocolConstants.NodeProtocols.SERVER_AUDIO, SduiRuntimeHandlers.PLATFORM_AUDIO_TTS, Map.of());
     }
 
     @Override

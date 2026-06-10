@@ -23,5 +23,8 @@ public interface SduiDeviceCommandRepository extends JpaRepository<SduiDeviceCom
     @Query("SELECT c FROM SduiDeviceCommand c WHERE c.deviceId = :deviceId ORDER BY c.createdAt DESC")
     List<SduiDeviceCommand> findTopNByDeviceIdOrderByCreatedAtDesc(@Param("deviceId") String deviceId, Pageable pageable);
 
+    @Query("SELECT c FROM SduiDeviceCommand c WHERE c.deviceId = :deviceId ORDER BY c.createdAt DESC")
+    List<SduiDeviceCommand> findHistoryByDeviceId(@Param("deviceId") String deviceId, Pageable pageable);
+
     void deleteByDeviceId(String deviceId);
 }

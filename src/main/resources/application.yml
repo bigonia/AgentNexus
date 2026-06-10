@@ -53,11 +53,9 @@ spring:
 #                - -y
 #                - "@antv/mcp-server-chart"
             playwright:
-              command: cmd
+              command: npx
               args:
-                # 第一个参数是 /c, 告诉 cmd 执行完命令后退出
-                - /c
-                - npx
+                - -y
                 - "@playwright/mcp@latest"
 #        sse:
 #          connections:
@@ -166,7 +164,7 @@ file:
   upload-dir: ./upload-dir
 
 # -------------------------------------------------------------------
-# DrawThings 本地文生图配置
+# DrawThings 本地文生图（独立模块，不影响 SDUI）
 # -------------------------------------------------------------------
 drawthings:
   enabled: true
@@ -180,6 +178,9 @@ drawthings:
 sdui:
   command:
     timeout-scan-ms: 3000
+  telemetry:
+    retention-days: 7
+    retention-cron: "0 15 3 * * *"
   tts:
     ffmpeg-path: ffmpeg
   stt:

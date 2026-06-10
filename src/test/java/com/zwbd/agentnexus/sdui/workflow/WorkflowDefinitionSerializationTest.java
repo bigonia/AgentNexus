@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkflowDefinitionSerializationTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final WorkflowDefinitionNormalizer normalizer = new WorkflowDefinitionNormalizer();
 
     @Test
     void roundTripFullDefinition() throws Exception {
@@ -32,24 +33,25 @@ class WorkflowDefinitionSerializationTest {
                         new TriggerDef.CronTrigger("t_refresh", 60, null),
                         new TriggerDef.WebhookTrigger("t_new_mail", "/new-email"),
                         new TriggerDef.ManualTrigger("t_debug"),
-                        new TriggerDef.DeviceEventTrigger("t_btn", "action_click", null, null)
+                        new TriggerDef.DeviceUiEventTrigger("t_btn", "ui:action_click", null, null, null)
                 ),
                 Map.of(
                         "t_refresh", List.of(
                                 new ActionDef.FetchAction("$env.MAIL_API/inbox", "GET", null, "data"),
-                                new ActionDef.UpdatePageAction("main")
+                                new ActionDef.NodeActionDef("device.page.render", Map.of("page", "main"))
                         ),
                         "t_new_mail", List.of(
                                 new ActionDef.FetchAction("$env.MAIL_API/inbox", "GET", null, "data"),
-                                new ActionDef.UpdatePageAction("main"),
-                                new ActionDef.PlayAudioAction("notification", null),
-                                new ActionDef.TtsAction("$trigger.from 发来邮件: $trigger.subject")
+                                new ActionDef.NodeActionDef("device.page.render", Map.of("page", "main")),
+                                new ActionDef.NodeActionDef("platform.audio.play", Map.of("preset", "notification")),
+                                new ActionDef.NodeActionDef("platform.tts", Map.of("text", "$trigger.from 发来邮件: $trigger.subject"))
                         ),
                         "t_debug", List.of(
-                                new ActionDef.UpdatePageAction("main")
+                                new ActionDef.NodeActionDef("device.page.render", Map.of("page", "main"))
                         ),
                         "t_btn", List.of(
-                                new ActionDef.ControlAction("audio.prompt.play", "notification")
+                                new ActionDef.NodeActionDef("device.control",
+                                        Map.of("command", "audio.prompt.play", "params", Map.of("preset", "notification")))
                         )
                 ),
                 null, null, null
@@ -66,7 +68,6 @@ class WorkflowDefinitionSerializationTest {
         assertEquals(4, parsed.triggers().size());
         assertEquals(4, parsed.actions().size());
 
-        // Verify trigger types
         TriggerDef t1 = parsed.triggers().get(0);
         assertInstanceOf(TriggerDef.CronTrigger.class, t1);
         assertEquals(60, ((TriggerDef.CronTrigger) t1).interval());
@@ -79,16 +80,15 @@ class WorkflowDefinitionSerializationTest {
         assertInstanceOf(TriggerDef.ManualTrigger.class, t3);
 
         TriggerDef t4 = parsed.triggers().get(3);
-        assertInstanceOf(TriggerDef.DeviceEventTrigger.class, t4);
-        assertEquals("action_click", ((TriggerDef.DeviceEventTrigger) t4).event());
+        assertInstanceOf(TriggerDef.DeviceUiEventTrigger.class, t4);
+        assertEquals("ui:action_click", ((TriggerDef.DeviceUiEventTrigger) t4).eventType());
 
-        // Verify actions
         List<ActionDef> newMailActions = parsed.actions().get("t_new_mail");
         assertEquals(4, newMailActions.size());
         assertInstanceOf(ActionDef.FetchAction.class, newMailActions.get(0));
-        assertInstanceOf(ActionDef.UpdatePageAction.class, newMailActions.get(1));
-        assertInstanceOf(ActionDef.PlayAudioAction.class, newMailActions.get(2));
-        assertInstanceOf(ActionDef.TtsAction.class, newMailActions.get(3));
+        assertInstanceOf(ActionDef.NodeActionDef.class, newMailActions.get(1));
+        assertInstanceOf(ActionDef.NodeActionDef.class, newMailActions.get(2));
+        assertInstanceOf(ActionDef.NodeActionDef.class, newMailActions.get(3));
     }
 
     @Test
@@ -97,7 +97,7 @@ class WorkflowDefinitionSerializationTest {
                 "minimal", "最小工作流", "",
                 List.of(),
                 List.of(new TriggerDef.ManualTrigger("t1")),
-                Map.of("t1", List.of(new ActionDef.UpdatePageAction("main"))),
+                Map.of("t1", List.of(new ActionDef.NodeActionDef("device.page.render", Map.of("page", "main")))),
                 null, null, null
         );
 
@@ -117,7 +117,8 @@ class WorkflowDefinitionSerializationTest {
                 List.of(new TriggerDef.ManualTrigger("t1")),
                 Map.of("t1", List.of(
                         new ActionDef.NodeActionDef("device.control",
-                                Map.of("command", "rgb.effect.set", "value", "#ff0000")),
+                                Map.of("command", "rgb.effect.set",
+                                        "params", Map.of("mode", "solid", "r", 255, "g", 0, "b", 0, "brightness", 120))),
                         new ActionDef.NodeActionDef("platform.tts",
                                 Map.of("text", "$data.message"))
                 )),
@@ -147,14 +148,26 @@ class WorkflowDefinitionSerializationTest {
           "id": "test", "name": "Test", "icon": "",
           "pages": [],
           "triggers": [{"id": "t1", "type": "manual"}],
-          "actions": {"t1": [{"type": "node", "nodeType": "device.audio.play", "params": {"preset": "notification"}}]}
+          "actions": {"t1": [{"type": "node", "nodeType": "platform.audio.play", "params": {"preset": "notification"}}]}
         }""";
         WorkflowDefinition parsed = mapper.readValue(json, WorkflowDefinition.class);
         ActionDef action = parsed.actions().get("t1").get(0);
         assertInstanceOf(ActionDef.NodeActionDef.class, action);
         ActionDef.NodeActionDef na = (ActionDef.NodeActionDef) action;
-        assertEquals("device.audio.play", na.nodeType());
+        assertEquals("platform.audio.play", na.nodeType());
         assertEquals("notification", na.params().get("preset"));
+    }
+
+    @Test
+    void legacyActionTypeRejected() {
+        String json = """
+        {
+          "id": "test", "name": "Test", "icon": "",
+          "pages": [],
+          "triggers": [{"id": "t1", "type": "manual"}],
+          "actions": {"t1": [{"type": "update_page", "page": "main"}]}
+        }""";
+        assertThrows(Exception.class, () -> mapper.readValue(json, WorkflowDefinition.class));
     }
 
     @Test
@@ -170,5 +183,23 @@ class WorkflowDefinitionSerializationTest {
         TriggerDef t = parsed.triggers().get(0);
         assertInstanceOf(TriggerDef.CronTrigger.class, t);
         assertEquals(30, ((TriggerDef.CronTrigger) t).interval());
+    }
+
+    @Test
+    void normalizerAddsMissingPageAndSectionIds() {
+        WorkflowDefinition def = new WorkflowDefinition(
+                "normalized", "标准化测试", "",
+                List.of(new PageDef(null, "vertical_scroll", false, 0, List.of(
+                        new SectionBindDef(null, "hero_section", Map.of("value", "$data.value"))
+                ))),
+                List.of(),
+                Map.of(),
+                null, null, null
+        );
+
+        WorkflowDefinition normalized = normalizer.normalize(def);
+
+        assertEquals("workflow_page_1", normalized.pages().get(0).id());
+        assertEquals("workflow_section_workflow_page_1_1", normalized.pages().get(0).sections().get(0).id());
     }
 }

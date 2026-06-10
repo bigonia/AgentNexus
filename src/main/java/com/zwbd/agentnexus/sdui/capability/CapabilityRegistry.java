@@ -178,7 +178,9 @@ public class CapabilityRegistry {
         // Collect input events from catalog for each reported input name
         if (caps.inputs() != null) {
             for (String inputName : caps.inputs()) {
-                events.addAll(catalog.getInputEvents(inputName));
+                for (String eventName : catalog.getInputEvents(inputName)) {
+                    events.add(normalizeInputEventId(inputName, eventName));
+                }
             }
         }
 
@@ -295,6 +297,25 @@ public class CapabilityRegistry {
     public boolean supportsEvent(String deviceId, String eventId) {
         DeviceCapabilities caps = deviceSnapshots.get(deviceId);
         return caps != null && caps.supportsEvent(eventId);
+    }
+
+    private String normalizeInputEventId(String inputName, String eventName) {
+        if (eventName == null || eventName.isBlank()) {
+            return eventName;
+        }
+        if (eventName.contains(":")) {
+            return eventName;
+        }
+        if (inputName != null && inputName.startsWith("buttons.")) {
+            return "input:" + inputName + "." + eventName;
+        }
+        if ("motion".equals(inputName)) {
+            return "input:motion." + eventName;
+        }
+        if (inputName != null && inputName.startsWith("audio.") && eventName.startsWith("audio.")) {
+            return "input:" + inputName + "." + eventName;
+        }
+        return eventName;
     }
 
     public boolean supportsCommand(String deviceId, String command) {
@@ -667,8 +688,8 @@ public class CapabilityRegistry {
      */
     private String describeFeatureDiff(DeviceTypeInfo variant, DeviceTypeInfo reference) {
         // Check for major capability group differences
-        boolean refBoot = hasInput(reference, "buttons.boot");
-        boolean varBoot = hasInput(variant, "buttons.boot");
+        boolean refPwr = hasInput(reference, "buttons.pwr");
+        boolean varPwr = hasInput(variant, "buttons.pwr");
         boolean refPlus = hasInput(reference, "buttons.plus");
         boolean varPlus = hasInput(variant, "buttons.plus");
         boolean refMotion = hasInput(reference, "motion");
@@ -679,7 +700,7 @@ public class CapabilityRegistry {
         boolean varRgb = hasOutput(variant, "rgb.effect");
 
         List<String> missing = new ArrayList<>();
-        if (refPlus && !varPlus) missing.add("单按钮");
+        if ((refPwr && !varPwr) || (refPlus && !varPlus)) missing.add("单按钮");
         if (refMotion && !varMotion) missing.add("无运动");
         if (refAudio && !varAudio) missing.add("无语音");
         if (refRgb && !varRgb) missing.add("无灯光");

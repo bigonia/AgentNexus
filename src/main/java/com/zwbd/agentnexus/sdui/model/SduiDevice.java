@@ -39,6 +39,11 @@ public class SduiDevice {
     @Column(columnDefinition = "text")
     private String capabilitiesSnapshot;
 
+    @Column(length = 64)
+    private String capabilitiesSchemaVersion;
+
+    private LocalDateTime capabilitiesReportedAt;
+
     // ── Connection tracking ──
     private LocalDateTime connectedAt;
     @Column(length = 128)
@@ -55,6 +60,9 @@ public class SduiDevice {
     private LocalDateTime claimCodeExpireAt;
 
     private LocalDateTime claimedAt;
+
+    @Column(length = 500)
+    private String notes;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
