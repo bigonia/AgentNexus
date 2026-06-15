@@ -10,9 +10,7 @@ import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
 import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
-import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,7 +25,6 @@ public class SduiCapabilityService {
     private final SduiDeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
     private final CommandSchemaRegistry schemaRegistry;
-    private final CapabilityNodeRegistry nodeRegistry;
     private final CapabilityRegistry capabilityRegistry;
     private final CapabilityCatalog catalog;
     private final DeviceProtocolCatalog protocolCatalog;
@@ -36,14 +33,12 @@ public class SduiCapabilityService {
     public SduiCapabilityService(SduiDeviceRepository deviceRepository,
                                   ObjectMapper objectMapper,
                                   CommandSchemaRegistry schemaRegistry,
-                                  @Lazy CapabilityNodeRegistry nodeRegistry,
                                   CapabilityRegistry capabilityRegistry,
                                   CapabilityCatalog catalog,
                                   DeviceProtocolCatalog protocolCatalog) {
         this.deviceRepository = deviceRepository;
         this.objectMapper = objectMapper;
         this.schemaRegistry = schemaRegistry;
-        this.nodeRegistry = nodeRegistry;
         this.capabilityRegistry = capabilityRegistry;
         this.catalog = catalog;
         this.protocolCatalog = protocolCatalog;
@@ -59,13 +54,6 @@ public class SduiCapabilityService {
             device.setCapabilitiesSchemaVersion(caps.schemaVersion());
             device.setCapabilitiesReportedAt(LocalDateTime.now());
             deviceRepository.save(device);
-        }
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> capsMap = objectMapper.readValue(rawJson, Map.class);
-            nodeRegistry.registerDeviceNodes(deviceId, capsMap);
-        } catch (Exception e) {
-            log.warn("Failed to register device nodes for {}: {}", deviceId, e.getMessage());
         }
         capabilityRegistry.onDeviceReport(deviceId, caps);
         log.info("Capabilities stored for device {}, hasDisplay={}", deviceId, caps.display() != null);
@@ -138,7 +126,6 @@ public class SduiCapabilityService {
     public void clearCapabilitiesCache(String deviceId) {
         cache.remove(deviceId);
         schemaRegistry.clearDeviceSchemas(deviceId);
-        nodeRegistry.unregisterDeviceNodes(deviceId);
         capabilityRegistry.removeDevice(deviceId);
         log.info("Capabilities cache cleared for device {}", deviceId);
     }

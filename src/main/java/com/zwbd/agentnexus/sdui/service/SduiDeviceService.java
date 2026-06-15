@@ -15,7 +15,6 @@ import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceTelemetryRepository;
 import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
 import com.zwbd.agentnexus.sdui.section.SectionPresets;
-import com.zwbd.agentnexus.sdui.workflow.WorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -37,7 +36,6 @@ public class SduiDeviceService {
     private final SduiCapabilityService capabilityService;
     private final SectionOrchestrationService orchestrationService;
     private final DeviceSessionManager sessionManager;
-    private final WorkflowService workflowService;
     private final SduiDeviceRepository deviceRepository;
     private final SduiDeviceTelemetryRepository telemetryRepository;
     private final SduiDeviceCommandRepository commandRepository;
@@ -157,7 +155,6 @@ public class SduiDeviceService {
                 .filter(d -> currentSpaceId().equals(d.getOwnerSpaceId()))
                 .orElseThrow(() -> new IllegalArgumentException("device not found or not owned"));
 
-        workflowService.unloadWorkflow(deviceId);
         telemetryRepository.deleteByDeviceId(deviceId);
         commandRepository.deleteByDeviceId(deviceId);
         capabilityService.clearCapabilitiesCache(deviceId);

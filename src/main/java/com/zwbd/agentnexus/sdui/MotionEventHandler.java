@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
 import com.zwbd.agentnexus.sdui.service.DeviceLifecycleService;
-import com.zwbd.agentnexus.sdui.workflow.WorkflowService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
@@ -17,16 +16,13 @@ import java.util.Map;
 public class MotionEventHandler implements TopicHandler {
 
     private final DeviceSessionManager sessionManager;
-    private final WorkflowService workflowService;
     private final DeviceLifecycleService lifecycleService;
     private final ObjectMapper objectMapper;
 
     public MotionEventHandler(DeviceSessionManager sessionManager,
-                              WorkflowService workflowService,
                               DeviceLifecycleService lifecycleService,
                               ObjectMapper objectMapper) {
         this.sessionManager = sessionManager;
-        this.workflowService = workflowService;
         this.lifecycleService = lifecycleService;
         this.objectMapper = objectMapper;
     }
@@ -72,9 +68,8 @@ public class MotionEventHandler implements TopicHandler {
                 payloadMap
         );
 
-        int fired = workflowService.fireEvent(deviceId, payload);
-        log.info("Motion event received from {}: eventId={}, firedTriggers={}, payload={}",
-                deviceId, payload.eventId(), fired, payload.rawFields());
+        log.info("Motion event received from {}: eventId={}, payload={}",
+                deviceId, payload.eventId(), payload.rawFields());
     }
 
     private String toLegacyEventName(String eventType) {

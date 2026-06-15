@@ -1,6 +1,6 @@
 version: "2.0"
 # SDUI Capability Catalog v2 — enriched with display names, descriptions, and payload schemas.
-# This catalog defines the contract between device capabilities and the workflow event system.
+# This catalog defines the contract between device capabilities and the platform event system.
 # Event IDs follow the pattern: <category>:<capability>.<specific-event>
 
 inputs:

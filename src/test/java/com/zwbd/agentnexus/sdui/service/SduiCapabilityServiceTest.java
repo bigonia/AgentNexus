@@ -6,7 +6,6 @@ import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
-import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -20,7 +19,6 @@ class SduiCapabilityServiceTest {
 
     private SduiDeviceRepository deviceRepository;
     private CommandSchemaRegistry schemaRegistry;
-    private CapabilityNodeRegistry nodeRegistry;
     private CapabilityRegistry capabilityRegistry;
     private SduiCapabilityService capabilityService;
     private CapabilityCatalog registryCatalog;
@@ -29,7 +27,6 @@ class SduiCapabilityServiceTest {
     void setUp() {
         deviceRepository = mock(SduiDeviceRepository.class);
         schemaRegistry = mock(CommandSchemaRegistry.class);
-        nodeRegistry = mock(CapabilityNodeRegistry.class);
         registryCatalog = new CapabilityCatalog();
         ReflectionTestUtils.invokeMethod(registryCatalog, "load");
         capabilityRegistry = new CapabilityRegistry(registryCatalog);
@@ -38,7 +35,6 @@ class SduiCapabilityServiceTest {
                 deviceRepository,
                 new ObjectMapper(),
                 schemaRegistry,
-                nodeRegistry,
                 capabilityRegistry,
                 registryCatalog,
                 protocolCatalog

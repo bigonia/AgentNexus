@@ -3,7 +3,6 @@ package com.zwbd.agentnexus.sdui.section;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import com.zwbd.agentnexus.sdui.service.SduiProtocolService;
-import com.zwbd.agentnexus.sdui.workflow.PageDef;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

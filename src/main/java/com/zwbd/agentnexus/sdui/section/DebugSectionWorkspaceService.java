@@ -13,7 +13,6 @@ public class DebugSectionWorkspaceService {
     private static final String PAGE_ID_PREFIX = "debug_page_";
     private static final String SECTION_ID_PREFIX = "section_";
     private static final String DEBUG_NAMESPACE = "debug";
-    private static final String WORKFLOW_NAMESPACE = "workflow";
 
     private final DeviceCapabilityProjection capabilityProjection;
     private final SectionDataCodec sectionDataCodec;
@@ -90,64 +89,6 @@ public class DebugSectionWorkspaceService {
         return result;
     }
 
-    public void syncWorkflowScene(String deviceId, SectionScene scene) {
-        replacePage(workspace(WORKFLOW_NAMESPACE, deviceId), workspacePageFromScene(scene));
-    }
-
-    public void syncWorkflowPatch(String deviceId, SectionPatch patch) {
-        DebugWorkspace workspace = workspace(WORKFLOW_NAMESPACE, deviceId);
-        WorkspacePage page = workspace.pages.get(patch.pageId());
-        if (page == null) {
-            throw new IllegalArgumentException("page not found in workflow workspace: " + patch.pageId());
-        }
-        applyPatchEntries(page, patch.patches());
-        workspace.activePageId = patch.pageId();
-    }
-
-    public WorkflowPatchResult applyWorkflowPatch(String deviceId, String pageId, String sectionId,
-                                                  String operation, String sectionType, Map<String, Object> data) {
-        DebugWorkspace workspace = workspace(WORKFLOW_NAMESPACE, deviceId);
-        String resolvedPageId = !stringValue(pageId).isBlank()
-                ? pageId
-                : workspace.activePageId;
-        if (resolvedPageId == null || resolvedPageId.isBlank()) {
-            throw new IllegalArgumentException("pageId is required when no active workflow page exists");
-        }
-        WorkspacePage page = workspace.pages.get(resolvedPageId);
-        if (page == null) {
-            throw new IllegalArgumentException("page not found in workflow workspace: " + resolvedPageId);
-        }
-
-        Map<String, Object> rawPatch = new LinkedHashMap<>();
-        if (sectionId != null && !sectionId.isBlank()) {
-            rawPatch.put("sectionId", sectionId);
-        }
-        rawPatch.put("op", operation);
-        if (sectionType != null && !sectionType.isBlank()) {
-            rawPatch.put("sectionType", sectionType);
-        }
-        if (data != null) {
-            rawPatch.put("fields", data);
-        }
-
-        SectionPatch.PatchEntry entry = applySinglePatch(deviceId, page, rawPatch, System.currentTimeMillis());
-        workspace.activePageId = resolvedPageId;
-        return new WorkflowPatchResult(resolvedPageId, entry.sectionId(), entry);
-    }
-
-    public Map<String, Object> getWorkflowState(String deviceId) {
-        return getState(WORKFLOW_NAMESPACE, deviceId);
-    }
-
-    public String findWorkflowSectionType(String deviceId, String pageId, String sectionId) {
-        return findSectionType(WORKFLOW_NAMESPACE, deviceId, pageId, sectionId);
-    }
-
-    public String getWorkflowActivePageId(String deviceId) {
-        DebugWorkspace workspace = workspaces.get(workspaceKey(WORKFLOW_NAMESPACE, deviceId));
-        return workspace != null ? workspace.activePageId : null;
-    }
-
     private WorkspacePage workspacePageFromRequest(String deviceId, Map<String, Object> body) {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawSections = body.get("sections") instanceof List<?> list
@@ -171,26 +112,6 @@ public class DebugSectionWorkspaceService {
             if (page.sections.putIfAbsent(section.sectionId, section) != null) {
                 throw new IllegalArgumentException("duplicate sectionId in page: " + section.sectionId);
             }
-        }
-        page.updatedAt = now;
-        return page;
-    }
-
-    private WorkspacePage workspacePageFromScene(SectionScene scene) {
-        WorkspacePage page = new WorkspacePage(
-                scene.pageId(),
-                scene.layout().wireName(),
-                scene.autoScroll(),
-                scene.autoScrollMs()
-        );
-        long now = System.currentTimeMillis();
-        for (SectionEntry entry : scene.sections()) {
-            page.sections.put(entry.sectionId(), new WorkspaceSection(
-                    entry.sectionId(),
-                    entry.type().wireName(),
-                    new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
-                    now
-            ));
         }
         page.updatedAt = now;
         return page;
@@ -477,8 +398,6 @@ public class DebugSectionWorkspaceService {
         WorkspaceSection section = page.sections.get(sectionId);
         return section != null ? section.sectionType : null;
     }
-
-    public record WorkflowPatchResult(String pageId, String sectionId, SectionPatch.PatchEntry patchEntry) {}
 
     private static final class DebugWorkspace {
         private final String deviceId;

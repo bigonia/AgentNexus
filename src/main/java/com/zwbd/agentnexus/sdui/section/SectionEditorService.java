@@ -37,20 +37,6 @@ public class SectionEditorService {
         );
     }
 
-    public List<Map<String, Object>> buildWorkflowPageEditor(String deviceId) {
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> sectionTypes =
-                (List<Map<String, Object>>) buildSectionEditor(deviceId).getOrDefault("sectionTypes", List.of());
-        return sectionTypes.stream().map(section -> {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("type", section.get("type"));
-            entry.put("displayFields", section.getOrDefault("displayFields", List.of()));
-            entry.put("events", section.getOrDefault("events", List.of()));
-            entry.put("patchOps", section.getOrDefault("patchOps", List.of()));
-            return entry;
-        }).toList();
-    }
-
     private Map<String, Object> toEditorSection(SectionSpec spec, SectionRenderMode renderMode) {
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("type", spec.type());

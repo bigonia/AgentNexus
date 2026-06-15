@@ -7,7 +7,6 @@ import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.service.CommandSchemaRegistry;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
-import com.zwbd.agentnexus.sdui.workflow.node.CapabilityNodeRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -28,7 +27,6 @@ class CapabilityContractServiceTest {
         SduiDeviceRepository deviceRepository = mock(SduiDeviceRepository.class);
         when(deviceRepository.findById(org.mockito.ArgumentMatchers.anyString())).thenReturn(Optional.empty());
         CommandSchemaRegistry schemaRegistry = mock(CommandSchemaRegistry.class);
-        CapabilityNodeRegistry nodeRegistry = mock(CapabilityNodeRegistry.class);
         CapabilityCatalog capabilityCatalog = new CapabilityCatalog();
         ReflectionTestUtils.invokeMethod(capabilityCatalog, "load");
         CapabilityRegistry capabilityRegistry = new CapabilityRegistry(capabilityCatalog);
@@ -37,7 +35,6 @@ class CapabilityContractServiceTest {
                 deviceRepository,
                 new ObjectMapper(),
                 schemaRegistry,
-                nodeRegistry,
                 capabilityRegistry,
                 capabilityCatalog,
                 protocolCatalog

@@ -5,7 +5,6 @@ import com.zwbd.agentnexus.sdui.event.EventPayload;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec.DecodedFrame;
 import com.zwbd.agentnexus.sdui.service.DeviceLifecycleService;
-import com.zwbd.agentnexus.sdui.workflow.WorkflowService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
@@ -17,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Handles UI3 Binary EVENT_INPUT frames (msgType=9) from devices.
  *
  * Extracts structured event data from TLV fields, builds an {@link EventPayload},
- * and routes it to the workflow system and event listeners (SSE).
+ * and routes it to event listeners (SSE).
  *
  * TLV fields consumed:
  * <ul>
@@ -35,19 +34,22 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class EventInputHandler implements BinaryFrameHandler {
 
     private final DeviceSessionManager sessionManager;
-    private final WorkflowService workflowService;
     private final DeviceLifecycleService lifecycleService;
     private final List<EventListener> listeners = new CopyOnWriteArrayList<>();
+    private final List<PayloadEventListener> payloadListeners = new CopyOnWriteArrayList<>();
 
-    public EventInputHandler(DeviceSessionManager sessionManager, WorkflowService workflowService,
+    public EventInputHandler(DeviceSessionManager sessionManager,
                              DeviceLifecycleService lifecycleService) {
         this.sessionManager = sessionManager;
-        this.workflowService = workflowService;
         this.lifecycleService = lifecycleService;
     }
 
     public interface EventListener {
         void onEvent(String deviceId, String event, String nodeId, long ts);
+    }
+
+    public interface PayloadEventListener {
+        void onEvent(EventPayload payload);
     }
 
     public void addListener(EventListener listener) {
@@ -56,6 +58,14 @@ public class EventInputHandler implements BinaryFrameHandler {
 
     public void removeListener(EventListener listener) {
         listeners.remove(listener);
+    }
+
+    public void addPayloadListener(PayloadEventListener listener) {
+        payloadListeners.add(listener);
+    }
+
+    public void removePayloadListener(PayloadEventListener listener) {
+        payloadListeners.remove(listener);
     }
 
     @Override
@@ -77,11 +87,6 @@ public class EventInputHandler implements BinaryFrameHandler {
             lifecycleService.touchDevice(deviceId);
         }
 
-        // Fire into workflow system
-        if (deviceId != null && payload.eventId() != null) {
-            workflowService.fireEvent(deviceId, payload);
-        }
-
         // Notify SSE listeners (real-time event monitor)
         if (deviceId != null && !listeners.isEmpty()) {
             String evt = payload.eventId() != null ? payload.eventId() : "unknown";
@@ -90,6 +95,16 @@ public class EventInputHandler implements BinaryFrameHandler {
                     listener.onEvent(deviceId, evt, payload.nodeId(), payload.ts());
                 } catch (Exception e) {
                     log.error("EventListener error for device {}: {}", deviceId, e.getMessage());
+                }
+            }
+        }
+
+        if (deviceId != null && !payloadListeners.isEmpty()) {
+            for (PayloadEventListener listener : payloadListeners) {
+                try {
+                    listener.onEvent(payload);
+                } catch (Exception e) {
+                    log.error("PayloadEventListener error for device {}: {}", deviceId, e.getMessage());
                 }
             }
         }

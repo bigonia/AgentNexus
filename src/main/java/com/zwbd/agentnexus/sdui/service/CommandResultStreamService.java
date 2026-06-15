@@ -1,6 +1,7 @@
 package com.zwbd.agentnexus.sdui.service;
 
 import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
+import com.zwbd.agentnexus.sdui.workflow.service.CommandLifecycleEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -8,14 +9,29 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 @Slf4j
 @Service
 public class CommandResultStreamService {
 
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
+    private final List<CommandResultListener> listeners = new CopyOnWriteArrayList<>();
+
+    public interface CommandResultListener {
+        void onCommandEvent(CommandLifecycleEvent event);
+    }
+
+    public void addListener(CommandResultListener listener) {
+        listeners.add(listener);
+    }
+
+    public void removeListener(CommandResultListener listener) {
+        listeners.remove(listener);
+    }
 
     public SseEmitter subscribe(String deviceId) {
         SseEmitter existing = emitters.get(deviceId);
@@ -54,6 +70,18 @@ public class CommandResultStreamService {
                 ? java.time.Instant.ofEpochMilli(command.getAckTs()).atOffset(ZoneOffset.UTC).toString()
                 : null);
         send(command.getDeviceId(), "command_result", payload);
+        publishToListeners(CommandLifecycleEvent.from(command, phase));
+    }
+
+    private void publishToListeners(CommandLifecycleEvent event) {
+        for (CommandResultListener listener : listeners) {
+            try {
+                listener.onCommandEvent(event);
+            } catch (Exception e) {
+                log.warn("CommandResultListener error for device {} command {}: {}",
+                        event.deviceId(), event.command(), e.getMessage());
+            }
+        }
     }
 
     private void send(String deviceId, String eventName, Map<String, Object> payload) {
