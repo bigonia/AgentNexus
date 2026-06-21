@@ -23,8 +23,8 @@ import java.util.function.Function;
  * </ul>
  *
  * <h3>Factory methods</h3>
- * Use {@link #fromBinaryInput} for UI3 binary events (msgType=9), including
- * section interaction, hardware button, and motion sensor events.
+ * Use {@link #fromBinaryInput} for UI3 binary events (msgType=9). It extracts
+ * raw protocol fields only; {@link EventRegistry} resolves the configured event ID.
  * Use {@link #fromJsonTopic} for JSON-topic events such as audio.
  * Use {@link #minimal} when only deviceId and eventId are known.
  */
@@ -100,7 +100,7 @@ public record EventPayload(
         if (eventName != null) rawFields.put("eventName", eventName);
 
         return new EventPayload(
-                resolveBinaryEventId(kind, nodeId, eventName),
+                eventName,
                 deviceId,
                 pageId != null ? pageId : "",
                 sectionId != null ? sectionId : "",
@@ -147,7 +147,7 @@ public record EventPayload(
     public static EventPayload fromLegacyMap(String deviceId, String eventName,
                                               Map<String, Object> payload) {
         return new EventPayload(
-                resolveEventId(eventName),
+                eventName,
                 deviceId,
                 strVal(payload, "pageId", ""),
                 strVal(payload, "sectionId", ""),
@@ -177,6 +177,20 @@ public record EventPayload(
         return m;
     }
 
+    public EventPayload withEventId(String resolvedEventId) {
+        return new EventPayload(
+                resolvedEventId,
+                deviceId,
+                pageId,
+                sectionId,
+                nodeId,
+                kind,
+                value,
+                ts,
+                rawFields
+        );
+    }
+
     // ── Query helpers ──
 
     /** @return true if this event has section-level context. */
@@ -203,53 +217,6 @@ public record EventPayload(
     }
 
     // ── Internal helpers ──
-
-    /**
-     * Map a legacy event name string to a namespaced event ID.
-     * If already namespaced (contains ':'), returns as-is.
-     */
-    private static String resolveEventId(String eventName) {
-        if (eventName == null || eventName.isEmpty()) return null;
-        // Already namespaced
-        if (eventName.contains(":")) return eventName;
-        // Section interaction events
-        if (eventName.startsWith("action.") || eventName.startsWith("list.")
-                || eventName.startsWith("toggle.") || eventName.startsWith("overlay.")
-                || eventName.startsWith("nav.")) {
-            return "ui:" + eventName;
-        }
-        // Known hardware events
-        if (eventName.startsWith("imu.")) return "input:motion." + eventName;
-        if (eventName.startsWith("audio.")) return "input:audio.record." + eventName;
-        // Default: treat as-is for backward compat
-        return eventName;
-    }
-
-    private static String resolveBinaryEventId(int kind, String nodeId, String eventName) {
-        if (kind == 4 && nodeId != null && !nodeId.isBlank() && eventName != null && !eventName.isBlank()) {
-            if ("motion".equals(nodeId)) {
-                return "input:motion." + eventName;
-            }
-            return "input:buttons." + normalizeButtonNodeId(nodeId) + "." + normalizeButtonEventName(eventName);
-        }
-        return resolveEventId(eventName);
-    }
-
-    private static String normalizeButtonNodeId(String nodeId) {
-        return switch (nodeId) {
-            case "boot" -> "pwr";
-            default -> nodeId;
-        };
-    }
-
-    private static String normalizeButtonEventName(String eventName) {
-        return switch (eventName) {
-            case "short_press" -> "single_click";
-            case "long_press", "long_press_start" -> "long_press_start";
-            case "long_press_end" -> "long_press_up";
-            default -> eventName;
-        };
-    }
 
     private static int findTlvInt(DecodedFrame frame, int type, int defaultValue) {
         return frame.tlvs().stream()

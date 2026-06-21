@@ -29,10 +29,22 @@ public class CapabilityCatalog {
     public record InputDef(String name, String protocol, Integer eventKind, String topic,
                            List<String> events,
                            String displayName, String description,
-                           List<PayloadField> payloadSchema) {
+                           List<PayloadField> payloadSchema,
+                           boolean platform,
+                           Map<String, String> eventDisplayNames) {
         /** Backward-compat constructor for code that only provides events list. */
         public InputDef(String name, String protocol, Integer eventKind, String topic, List<String> events) {
-            this(name, protocol, eventKind, topic, events, null, null, List.of());
+            this(name, protocol, eventKind, topic, events, null, null, List.of(), false, Map.of());
+        }
+
+        /** Whether this is a platform-mediated capability (not a simple physical input). */
+        public boolean isPlatform() {
+            return platform;
+        }
+
+        /** Get the display name for a specific event, falling back to the raw event name. */
+        public String eventDisplayName(String eventName) {
+            return eventDisplayNames.getOrDefault(eventName, eventName);
         }
     }
 
@@ -176,16 +188,18 @@ public class CapabilityCatalog {
             String topic = (String) def.get("topic");
             String displayName = (String) def.get("displayName");
             String description = (String) def.get("description");
+            boolean platform = def.get("platform") instanceof Boolean b ? b : false;
 
             // Parse events — supports both old format (List<String>) and new format (Map<String, {displayName}>)
             List<String> events = parseEventList(def.get("events"));
+            Map<String, String> eventDisplayNames = parseEventDisplayNames(def.get("events"));
 
             // Parse payloadSchema if present (new in catalog v2)
             List<PayloadField> payloadSchema = parsePayloadSchema(
                     (List<Map<String, Object>>) def.get("payloadSchema"));
 
             inputsByName.put(name, new InputDef(name, protocol, eventKind, topic, events,
-                    displayName, description, payloadSchema));
+                    displayName, description, payloadSchema, platform, eventDisplayNames));
         }
     }
 
@@ -214,6 +228,26 @@ public class CapabilityCatalog {
             return new ArrayList<>((Set<String>) map.keySet());
         }
         return List.of();
+    }
+
+    /**
+     * Parse per-event display names from the events node (new map format only).
+     * Returns a map of eventName → displayName.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, String> parseEventDisplayNames(Object eventsNode) {
+        if (!(eventsNode instanceof Map<?, ?> map)) return Map.of();
+        Map<String, String> result = new LinkedHashMap<>();
+        for (var entry : map.entrySet()) {
+            String eventName = String.valueOf(entry.getKey());
+            if (entry.getValue() instanceof Map<?, ?> eventMeta) {
+                String displayName = (String) eventMeta.get("displayName");
+                if (displayName != null && !displayName.isBlank()) {
+                    result.put(eventName, displayName);
+                }
+            }
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")

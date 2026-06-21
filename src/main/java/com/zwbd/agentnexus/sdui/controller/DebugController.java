@@ -14,13 +14,19 @@ import com.zwbd.agentnexus.sdui.protocol.catalog.FieldSpec;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceCommandRepository;
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.service.*;
+import com.zwbd.agentnexus.sdui.debug.DebugArtifactStore;
+import com.zwbd.agentnexus.sdui.debug.DebugSessionHandle;
+import com.zwbd.agentnexus.sdui.debug.DebugSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -46,6 +52,8 @@ public class DebugController {
     private final EventStreamService eventStreamService;
     private final CommandResultStreamService commandResultStreamService;
     private final SduiDeviceCommandRepository commandRepository;
+    private final DebugSessionService sessionService;
+    private final DebugArtifactStore artifactStore;
     private final ObjectMapper objectMapper;
 
     // ── Command execution ──
@@ -200,11 +208,109 @@ public class DebugController {
         return ApiResponse.ok(state);
     }
 
+    /**
+     * Export the current debug workspace as a state-machine-compatible page state.
+     * Call this after building a page in the section debug editor to get JSON
+     * suitable for pasting into a state machine definition's {@code states} array.
+     */
+    @GetMapping("/{deviceId}/section/state/as-state")
+    public ApiResponse<Map<String, Object>> sectionStateAsStateMachinePage(@PathVariable String deviceId) {
+        Map<String, Object> result = new LinkedHashMap<>(
+                debugSectionWorkspaceService.getStateAsStateMachinePage(deviceId));
+        result.put("online", sessionManager.isDeviceOnline(deviceId));
+        return ApiResponse.ok(result);
+    }
+
     // ── SSE event stream ──
 
     @GetMapping(value = "/{deviceId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter eventStream(@PathVariable String deviceId) {
         return eventStreamService.subscribe(deviceId);
+    }
+
+    // ── Generic debug sessions ──
+
+    /**
+     * List all active debug sessions for a device.
+     */
+    @GetMapping("/{deviceId}/sessions")
+    public ApiResponse<Map<String, Object>> listSessions(@PathVariable String deviceId) {
+        List<Map<String, Object>> items = sessionService.listSessions(deviceId).stream()
+                .map(this::sessionToMap)
+                .toList();
+        return ApiResponse.ok(Map.of(
+                "deviceId", deviceId,
+                "online", sessionManager.isDeviceOnline(deviceId),
+                "sessions", items
+        ));
+    }
+
+    /**
+     * Get a specific debug session by id (e.g. "audio-record").
+     */
+    @GetMapping("/{deviceId}/sessions/{sessionId}")
+    public ApiResponse<Map<String, Object>> getSession(@PathVariable String deviceId,
+                                                       @PathVariable String sessionId) {
+        return sessionService.getSession(deviceId, sessionId)
+                .map(s -> ApiResponse.ok(sessionToMap(s)))
+                .orElse(ApiResponse.error(40400, "session not found: " + sessionId));
+    }
+
+    // ── Generic debug artifacts ──
+
+    /**
+     * Get artifact metadata (sttText, durationMs, etc.) without the binary blob.
+     * For the binary blob, use the .../blob endpoint.
+     */
+    @GetMapping("/{deviceId}/artifacts/{artifactId}")
+    public ApiResponse<Map<String, Object>> getArtifact(@PathVariable String deviceId,
+                                                        @PathVariable String artifactId) {
+        Optional<DebugArtifactStore.Artifact> opt = artifactStore.get(deviceId, artifactId);
+        if (opt.isEmpty()) {
+            return ApiResponse.error(40400, "artifact not found: " + artifactId);
+        }
+        DebugArtifactStore.Artifact a = opt.get();
+        Map<String, Object> data = new LinkedHashMap<>(a.metadata());
+        data.put("deviceId", deviceId);
+        data.put("artifactId", a.artifactId());
+        data.put("type", a.type());
+        data.put("mimeType", a.mimeType());
+        data.put("blobBytes", a.blob() != null ? a.blob().length : 0);
+        data.put("createdAt", a.createdAt());
+        data.put("createdAtIso", Instant.ofEpochMilli(a.createdAt()).toString());
+        return ApiResponse.ok(data);
+    }
+
+    /**
+     * Download the binary blob for an artifact.
+     * For audio recordings this returns the WAV file (Content-Type: audio/wav).
+     */
+    @GetMapping("/{deviceId}/artifacts/{artifactId}/blob")
+    public ResponseEntity<byte[]> getArtifactBlob(@PathVariable String deviceId,
+                                                   @PathVariable String artifactId) {
+        Optional<DebugArtifactStore.Artifact> opt = artifactStore.get(deviceId, artifactId);
+        if (opt.isEmpty() || opt.get().blob() == null) {
+            return ResponseEntity.notFound().build();
+        }
+        DebugArtifactStore.Artifact a = opt.get();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(a.mimeType()));
+        headers.setContentDispositionFormData("inline", deviceId + "-" + artifactId);
+        headers.setContentLength(a.blob().length);
+        return ResponseEntity.ok().headers(headers).body(a.blob());
+    }
+
+    private Map<String, Object> sessionToMap(DebugSessionHandle s) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sessionId", s.sessionId());
+        data.put("deviceId", s.deviceId());
+        data.put("type", s.type());
+        data.put("status", s.status());
+        data.put("startedAt", s.startedAt());
+        data.put("startedAtIso", Instant.ofEpochMilli(s.startedAt()).toString());
+        data.put("elapsedMs", System.currentTimeMillis() - s.startedAt());
+        data.putAll(s.metrics());
+        return data;
     }
 
     private Map<String, Object> toCommandDetail(SduiDeviceCommand cmd) {

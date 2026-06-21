@@ -14,6 +14,8 @@ public final class BinaryProtocolCodec {
     public static final int MSG_TYPE_SECTION_SCENE = 15;
     public static final int MSG_TYPE_SECTION_PATCH = 16;
     public static final int MSG_TYPE_AUDIO_PCM = 17;
+    /** Inbound raw PCM audio chunks from device microphone recording (msgType=18). */
+    public static final int MSG_TYPE_AUDIO_RECORD_CHUNK = 18;
 
     // ── Well-known TLV type constants (inbound events, msgType=9) ──
     /** TLV 120: Numeric event kind (1=UI_CLICK, 2=OVERLAY_CONFIRM, 3=TOGGLE_CHANGE, 4=BUTTON; higher values reserved for device-defined inputs such as sensors). */

@@ -1,22 +1,25 @@
 package com.zwbd.agentnexus.sdui.service;
 
+import com.zwbd.agentnexus.sdui.event.EventPayload;
 import com.zwbd.agentnexus.sdui.handler.EventInputHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
-public class EventStreamService implements EventInputHandler.EventListener {
+public class EventStreamService implements EventInputHandler.EventListener, EventInputHandler.PayloadEventListener {
 
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
 
     public EventStreamService(EventInputHandler eventInputHandler) {
         eventInputHandler.addListener(this);
+        eventInputHandler.addPayloadListener(this);
     }
 
     public SseEmitter subscribe(String deviceId) {
@@ -53,12 +56,14 @@ public class EventStreamService implements EventInputHandler.EventListener {
         return emitter;
     }
 
+    // ── Simple event listener (binary input events from terminals) ──
+
     @Override
     public void onEvent(String deviceId, String event, String nodeId, long ts) {
         SseEmitter emitter = emitters.get(deviceId);
         if (emitter == null) return;
 
-        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        Map<String, Object> data = new LinkedHashMap<>();
         data.put("ts", ts);
         if (nodeId != null) data.put("nodeId", nodeId);
         if (event != null) data.put("event", event);
@@ -72,6 +77,31 @@ public class EventStreamService implements EventInputHandler.EventListener {
         } catch (IOException e) {
             emitters.remove(deviceId, emitter);
             log.info("SSE send failed for device {}, removing emitter: {}", deviceId, e.getMessage());
+            try { emitter.completeWithError(e); } catch (Exception ignored) {}
+        }
+    }
+
+    // ── Rich payload event listener (audio data, STT results, etc.) ──
+
+    @Override
+    public void onEvent(EventPayload payload) {
+        SseEmitter emitter = emitters.get(payload.deviceId());
+        if (emitter == null) return;
+
+        Map<String, Object> data = new LinkedHashMap<>(payload.rawFields());
+        data.put("eventId", payload.eventId());
+        data.put("ts", payload.ts());
+
+        String sseEventName = (payload.eventId() != null && !payload.eventId().isEmpty())
+                ? payload.eventId() : "platform_event";
+
+        try {
+            emitter.send(SseEmitter.event()
+                    .name(sseEventName)
+                    .data(data));
+        } catch (IOException e) {
+            emitters.remove(payload.deviceId(), emitter);
+            log.info("SSE payload send failed for device {}, removing emitter: {}", payload.deviceId(), e.getMessage());
             try { emitter.completeWithError(e); } catch (Exception ignored) {}
         }
     }

@@ -8,31 +8,15 @@ inputs:
     protocol: ui3_binary
     eventKind: 4
     displayName: "PWR 按钮"
-    description: "设备电源按键，对外仅暴露短按与长按事件"
+    description: "设备电源按键，对外暴露短按与长按事件"
     events:
-      single_click:
-        displayName: "单击"
-      long_press_start:
-        displayName: "长按开始"
+      short_press:
+        displayName: "短按"
+      long_press:
+        displayName: "长按"
     payloadSchema:
       - {name: nodeId, type: string, required: true, description: "按钮标识 (pwr)"}
-      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
-      - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
-      - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
-
-  buttons.boot:
-    protocol: ui3_binary
-    eventKind: 4
-    displayName: "BOOT 按钮"
-    description: "设备顶部 BOOT 多功能按钮，对外仅暴露短按与长按事件"
-    events:
-      single_click:
-        displayName: "单击"
-      long_press_start:
-        displayName: "长按开始"
-    payloadSchema:
-      - {name: nodeId, type: string, required: true, description: "按钮标识 (boot)"}
-      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
+      - {name: event, type: string, required: true, description: "事件类型 (short_press / long_press)"}
       - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
       - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
 
@@ -40,48 +24,47 @@ inputs:
     protocol: ui3_binary
     eventKind: 4
     displayName: "PLUS 按钮"
-    description: "设备 PLUS 按钮，对外仅暴露短按与长按事件"
+    description: "设备 PLUS 按钮，对外暴露短按与长按事件"
     events:
-      single_click:
-        displayName: "单击"
-      long_press_start:
-        displayName: "长按开始"
+      short_press:
+        displayName: "短按"
+      long_press:
+        displayName: "长按"
     payloadSchema:
       - {name: nodeId, type: string, required: true, description: "按钮标识 (plus)"}
-      - {name: eventName, type: string, required: true, description: "具体按钮事件名"}
+      - {name: event, type: string, required: true, description: "事件类型 (short_press / long_press)"}
       - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
       - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
 
   audio.record:
     protocol: json_topic
     topic: audio/record
+    platform: true
     displayName: "音频录制"
-    description: "设备麦克风音频采集和语音识别结果"
+    description: "设备麦克风音频采集。平台下发开始/停止命令控制录音生命周期。终端通过 audio/record topic 发送 state=start/stop 标记，通过 UI3 Binary msgType=18 上传原始 PCM 分片。停止后平台组装 PCM→WAV→STT 转写。"
     events:
+      audio.record.started:
+        displayName: "录音已开始"
+        description: "终端确认开始麦克风采集"
+      audio.record.chunk:
+        displayName: "录音上传中"
+        description: "终端上传 PCM 分片进度，节流每秒约1次"
       audio.record.data:
-        displayName: "音频数据"
+        displayName: "录音上传完成"
+        description: "录音完成后平台发布，包含 PCM 元数据（采样率、声道数、数据大小）"
+      audio.stt.processing:
+        displayName: "语音识别中"
+        description: "PCM 已转 WAV，开始 STT 转写"
       audio.stt.result:
         displayName: "语音识别结果"
+        description: "STT 转写后的文本内容"
     payloadSchema:
-      - {name: audioData, type: string, required: false, description: "Base64 编码的音频数据"}
-      - {name: format, type: string, required: false, description: "音频格式 (wav/pcm)"}
+      - {name: pcmSize, type: int, required: false, description: "原始 PCM 数据大小(字节)"}
+      - {name: sampleRate, type: int, required: false, description: "采样率(Hz)，默认 22050"}
+      - {name: channels, type: int, required: false, description: "声道数，默认 1 (mono)"}
+      - {name: bitsPerSample, type: int, required: false, description: "位深，默认 16"}
+      - {name: format, type: string, required: false, description: "PCM 格式 (pcm_s16le)"}
       - {name: text, type: string, required: false, description: "语音识别转录文本"}
-      - {name: confidence, type: float, required: false, description: "识别置信度"}
-    commands:
-      audio.stt.transcribe:
-        topic: server
-        displayName: "语音转录"
-        description: "将音频数据转录为文本"
-        params:
-          audioData:
-            type: string
-            required: true
-            label: 音频数据(base64)
-          format:
-            type: string
-            required: false
-            default: wav
-            label: 音频格式
 
   motion:
     protocol: ui3_binary
@@ -129,6 +112,23 @@ outputs:
         action: reboot
         displayName: "重启"
         description: "远程重启设备"
+        params: {}
+
+  audio.record:
+    displayName: "音频录制控制"
+    description: "控制终端音频录制的开始和停止"
+    commands:
+      audio.record.start:
+        topic: cmd/control
+        action: audio_record_start
+        displayName: "开始录制"
+        description: "通知终端开始麦克风音频录制"
+        params: {}
+      audio.record.stop:
+        topic: cmd/control
+        action: audio_record_stop
+        displayName: "停止录制"
+        description: "通知终端停止录制并上传音频数据"
         params: {}
 
   audio.stream:

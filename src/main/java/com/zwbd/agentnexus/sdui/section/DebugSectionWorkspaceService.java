@@ -79,6 +79,66 @@ public class DebugSectionWorkspaceService {
         return getState(DEBUG_NAMESPACE, deviceId);
     }
 
+    /**
+     * Export the current debug workspace as a state-machine-compatible page state.
+     * This bridges the debug section editor to the state machine: users build a
+     * page in the debug UI, then export it as a state definition that can be
+     * copied into a state machine definition's "states" array.
+     *
+     * Returns the active page in state machine page format:
+     * {@code { pageId, layout, autoScroll, autoScrollMs, sections: [...] }}.
+     */
+    public Map<String, Object> getStateAsStateMachinePage(String deviceId) {
+        DebugWorkspace workspace = workspaces.get(workspaceKey(DEBUG_NAMESPACE, deviceId));
+        if (workspace == null) {
+            return emptyStateMachinePage(deviceId);
+        }
+
+        WorkspacePage activePage = workspace.pages.get(workspace.activePageId);
+        if (activePage == null && !workspace.pages.isEmpty()) {
+            activePage = workspace.pages.values().iterator().next();
+        }
+        if (activePage == null) {
+            return emptyStateMachinePage(deviceId);
+        }
+
+        List<Map<String, Object>> sections = new ArrayList<>();
+        for (WorkspaceSection section : activePage.sections.values()) {
+            Map<String, Object> sectionMap = new LinkedHashMap<>();
+            sectionMap.put("sectionId", section.sectionId);
+            sectionMap.put("sectionType", section.sectionType);
+            sectionMap.put("fields", new LinkedHashMap<>(section.fields));
+            sections.add(sectionMap);
+        }
+
+        Map<String, Object> pageState = new LinkedHashMap<>();
+        pageState.put("pageId", activePage.pageId);
+        pageState.put("layout", activePage.layout);
+        pageState.put("autoScroll", activePage.autoScroll);
+        pageState.put("autoScrollMs", activePage.autoScrollMs);
+        pageState.put("sections", sections);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("state", pageState);
+        result.put("usage", "Copy the 'state' object into a state machine definition's 'states' array, or use it as the basis for a page node.");
+        return result;
+    }
+
+    private Map<String, Object> emptyStateMachinePage(String deviceId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("state", Map.of(
+                "pageId", "state_machine_page",
+                "layout", "vertical_scroll",
+                "autoScroll", false,
+                "autoScrollMs", 0,
+                "sections", List.of()
+        ));
+        result.put("usage", "No debug workspace exists. Build a page in the section debug editor first.");
+        return result;
+    }
+
     public Map<String, Object> clear(String deviceId) {
         workspaces.remove(workspaceKey(DEBUG_NAMESPACE, deviceId));
         Map<String, Object> result = new LinkedHashMap<>();

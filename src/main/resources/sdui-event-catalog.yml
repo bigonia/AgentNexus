@@ -1,0 +1,418 @@
+commands:
+  groups:
+    - id: display.brightness
+      displayName: 屏幕亮度
+      commands:
+        - id: display.brightness.set
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 设置亮度
+          description: 设置屏幕亮度百分比
+          transport: {protocol: json_topic, topic: cmd/control, action: brightness}
+          payloadSchema:
+            - {name: value, type: int, required: true, min: 0, max: 100, description: 亮度百分比}
+
+    - id: device.reboot
+      displayName: 设备重启
+      commands:
+        - id: device.reboot
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 重启
+          description: 远程重启设备
+          transport: {protocol: json_topic, topic: cmd/control, action: reboot}
+          payloadSchema: []
+
+    - id: audio.output
+      displayName: 音频输出
+      commands:
+        - id: audio.prompt.play
+          subtype: platform
+          direction: OUTBOUND
+          displayName: 提示音
+          description: 播放预设提示音
+          transport: {protocol: server}
+          payloadSchema:
+            - {name: preset, type: enum, required: true, values: [notification, success, error, warning, click, beep], description: 提示音}
+        - id: audio.tts.speak
+          subtype: platform
+          direction: OUTBOUND
+          displayName: TTS 朗读
+          description: 将文本合成为语音并播放
+          transport: {protocol: server}
+          payloadSchema:
+            - {name: text, type: string, required: true, description: TTS 文本}
+        - id: audio.volume.set
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 设置音量
+          description: 设置音量百分比
+          transport: {protocol: json_topic, topic: cmd/control, action: volume}
+          payloadSchema:
+            - {name: value, type: int, required: true, min: 0, max: 100, description: 音量百分比}
+
+    - id: audio.record
+      displayName: 音频录制
+      commands:
+        - id: audio.record.start
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 开始录制
+          description: 通知终端开始麦克风音频采集
+          transport: {protocol: json_topic, topic: cmd/control, action: audio_record_start}
+          payloadSchema: []
+        - id: audio.record.stop
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 停止录制
+          description: 通知终端停止录制并上传音频分片
+          transport: {protocol: json_topic, topic: cmd/control, action: audio_record_stop}
+          payloadSchema: []
+
+    - id: rgb.effect
+      displayName: RGB 灯光
+      commands:
+        - id: rgb.effect.set
+          subtype: dispatch
+          direction: OUTBOUND
+          displayName: 灯光效果
+          description: 设置 RGB 固定色或动态灯效
+          transport: {protocol: json_topic, topic: cmd/control, action: rgb_set}
+          payloadSchema:
+            - {name: mode, type: enum, required: false, values: [solid, blink, breathe, rainbow, chase], description: 模式}
+            - {name: r, type: int, required: true, min: 0, max: 255, description: 红色}
+            - {name: g, type: int, required: true, min: 0, max: 255, description: 绿色}
+            - {name: b, type: int, required: true, min: 0, max: 255, description: 蓝色}
+            - {name: brightness, type: int, required: false, min: 0, max: 255, description: 亮度}
+            - {name: period_ms, type: int, required: false, min: 200, max: 5000, description: 周期}
+            - {name: step_ms, type: int, required: false, min: 10, max: 500, description: 步进}
+
+  lifecycle:
+    - id: command.dispatch
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令已下发
+      description: 命令已被平台下发或处理
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true, description: 命令 ID}
+        - {name: command, type: string, required: true, description: 命令名}
+        - {name: status, type: string, required: false, description: 命令状态}
+    - id: command.ack
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令 ACK
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true}
+        - {name: command, type: string, required: true}
+        - {name: status, type: string, required: true}
+    - id: command.rejected
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令被拒绝
+      description: 设备拒绝执行命令
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true}
+        - {name: command, type: string, required: true}
+        - {name: status, type: string, required: true}
+        - {name: reason, type: string, required: false}
+    - id: command.failed
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令失败
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true}
+        - {name: command, type: string, required: true}
+        - {name: status, type: string, required: true}
+        - {name: reason, type: string, required: false}
+    - id: command.timeout
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令超时
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true}
+        - {name: command, type: string, required: true}
+        - {name: status, type: string, required: true}
+        - {name: reason, type: string, required: false}
+    - id: command.result
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 命令结果
+      source: command.lifecycle
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cmdId, type: string, required: true}
+        - {name: command, type: string, required: true}
+        - {name: status, type: string, required: true}
+        - {name: payload, type: object, required: false}
+    - id: audio.record.started
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 录音已开始
+      description: 终端确认开始麦克风采集
+      source: audio.record
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: startedAt, type: int, required: false, description: "录音开始时间(epoch ms)"}
+    - id: audio.record.chunk
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 录音上传中
+      description: 终端上传 PCM 分片，节流每秒约1次
+      source: audio.record
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: bytesReceived, type: int, required: false, description: "已接收 PCM 字节数"}
+        - {name: chunkCount, type: int, required: false, description: "已接收分片数"}
+    - id: audio.record.data
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 录音上传完成
+      description: 一段录音完成，包含 PCM 元数据
+      source: audio.record
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: pcmSize, type: int, required: false, description: "原始 PCM 数据大小(字节)"}
+        - {name: sampleRate, type: int, required: false, description: "采样率(Hz)"}
+        - {name: channels, type: int, required: false, description: "声道数"}
+        - {name: bitsPerSample, type: int, required: false, description: "位深"}
+        - {name: format, type: string, required: false, description: "PCM 格式 (pcm_s16le)"}
+    - id: audio.stt.processing
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 语音识别中
+      description: PCM 已转 WAV，开始 STT 转写
+      source: audio.record
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: wavSize, type: int, required: false, description: "WAV 数据大小(字节)"}
+    - id: audio.stt.result
+      subtype: lifecycle
+      direction: INBOUND
+      displayName: 语音识别结果
+      description: STT 转写后的文本内容
+      source: audio.record
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: text, type: string, required: false, description: "转写文本"}
+
+  system:
+    - id: timer.elapsed
+      subtype: system
+      direction: INBOUND
+      displayName: 定时器到期
+      description: 状态机内部定时器到期事件
+      source: timer
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: timerId, type: string, required: false}
+        - {name: elapsedMs, type: int, required: false}
+    - id: system:cron
+      subtype: system
+      direction: INBOUND
+      displayName: 定时触发
+      description: 基于 cron 表达式的定时器事件
+      source: system
+      transport: {protocol: internal}
+      payloadSchema:
+        - {name: cron, type: string, required: true, description: cron 表达式}
+        - {name: triggeredAt, type: string, required: false, description: 触发时间}
+
+sections:
+  types:
+    - type: hero_section
+      displayName: Hero 数据
+      fields:
+        - {name: value, type: string}
+        - {name: label, type: string}
+        - {name: subtitle, type: string}
+        - {name: tone, type: enum, values: [primary, success, warning, danger, secondary]}
+        - {name: iconSrc, type: string}
+        - {name: iconSymbol, type: string}
+        - {name: progress, type: int, min: 0, max: 100}
+      events: []
+
+    - type: metric_section
+      displayName: 指标网格
+      fields:
+        - name: metrics
+          type: array
+          children:
+            - {name: label, type: string}
+            - {name: value, type: string}
+      events: []
+
+    - type: chart_section
+      displayName: 图表
+      fields:
+        - {name: title, type: string}
+        - {name: points, type: array}
+        - {name: progress, type: int, min: 0, max: 100}
+      events: []
+
+    - type: progress_section
+      displayName: 进度条
+      fields:
+        - {name: title, type: string}
+        - {name: progress, type: int, min: 0, max: 100}
+        - {name: progressText, type: string}
+      events: []
+
+    - type: text_section
+      displayName: 文本
+      fields:
+        - {name: title, type: string}
+        - {name: body, type: string}
+      events: []
+
+    - type: timer_section
+      displayName: 计时器
+      fields:
+        - {name: title, type: string}
+        - {name: progress, type: int, min: 0, max: 100}
+        - name: timer
+          type: object
+          children:
+            - {name: elapsedMs, type: int, min: 0}
+            - {name: running, type: boolean}
+      events: []
+
+    - type: image_section
+      displayName: 图片
+      fields:
+        - {name: iconSrc, type: string}
+        - {name: title, type: string}
+        - {name: subtitle, type: string}
+      events: []
+
+    - type: overlay_section
+      displayName: 覆盖层
+      fields:
+        - {name: title, type: string}
+        - {name: body, type: string}
+        - {name: tone, type: enum, values: [neutral, warning, success, danger, primary]}
+        - {name: unreadCount, type: int, min: 0, max: 999}
+        - {name: autoHideMs, type: int, min: 0, max: 30000}
+      events:
+        - id: ui:overlay.confirm
+          subtype: interaction
+          direction: INBOUND
+          displayName: 确认覆盖层
+          description: 用户关闭或确认弹窗
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: overlay.confirm}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: ts, type: int, required: false}
+
+    - type: action_section
+      displayName: 操作按钮
+      constraints: {max_actions: 4}
+      fields:
+        - name: actions
+          type: array
+          children:
+            - {name: id, type: string}
+            - {name: label, type: string}
+            - {name: tone, type: enum, values: [primary, secondary, success, warning, danger]}
+            - {name: enabled, type: boolean}
+      events:
+        - id: ui:action.click
+          subtype: interaction
+          direction: INBOUND
+          displayName: 按钮点击
+          description: 用户点击操作按钮
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: action.click}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: buttonId, type: string, required: false}
+            - {name: ts, type: int, required: false}
+
+    - type: list_section
+      displayName: 列表
+      constraints: {max_items: 8}
+      fields:
+        - name: items
+          type: array
+          children:
+            - {name: id, type: string}
+            - {name: title, type: string}
+            - {name: subtitle, type: string}
+            - {name: tone, type: enum, values: [neutral, primary, success, warning, danger]}
+            - {name: iconSrc, type: string}
+      events:
+        - id: ui:list.select
+          subtype: interaction
+          direction: INBOUND
+          displayName: 列表选择
+          description: 用户点击列表项
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: list.select}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: itemId, type: string, required: false}
+            - {name: rowData, type: object, required: false}
+            - {name: ts, type: int, required: false}
+
+    - type: toggle_section
+      displayName: 开关组
+      constraints: {max_options: 6}
+      fields:
+        - name: options
+          type: array
+          children:
+            - {name: id, type: string}
+            - {name: label, type: string}
+            - {name: active, type: boolean}
+      events:
+        - id: ui:toggle.change
+          subtype: interaction
+          direction: INBOUND
+          displayName: 开关变化
+          description: 用户切换开关
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: toggle.change}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: optionId, type: string, required: false}
+            - {name: active, type: boolean, required: false}
+            - {name: value, type: boolean, required: false}
+            - {name: ts, type: int, required: false}
+
+    - type: nav_section
+      displayName: 导航标签
+      fields:
+        - name: tabs
+          type: array
+          children:
+            - {name: id, type: string}
+            - {name: label, type: string}
+        - {name: activeTab, type: int, min: 0}
+      events:
+        - id: ui:nav.change
+          subtype: interaction
+          direction: INBOUND
+          displayName: 标签切换
+          description: 用户切换导航标签
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: nav.change}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: tabId, type: string, required: false}
+            - {name: activeTab, type: int, required: false}
+            - {name: ts, type: int, required: false}

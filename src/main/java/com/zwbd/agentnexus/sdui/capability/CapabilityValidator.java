@@ -13,7 +13,7 @@ import java.util.*;
  * Wraps CapabilityRegistry + SectionTypeCatalog.
  *
  * Designed so workflow nodes and debug tools share the same validation logic.
- * Later migration: inject this into WorkflowService.loadWorkflow() and ActionExecutor.
+ * Later migration: inject this into state-machine deployment validation and action execution.
  */
 @Slf4j
 @Component
@@ -234,8 +234,8 @@ public class CapabilityValidator {
     // ── Workflow-level validation (for future migration) ──
 
     /**
-     * Validate a workflow trigger definition against a device's capabilities.
-     * This will be called by WorkflowService.loadWorkflow() for pre-deployment validation.
+     * Validate a state-machine trigger definition against a device's capabilities.
+     * This can be called by state-machine deployment validation before publishing.
      */
     public ValidationResult validateTrigger(String deviceId, String triggerType, String eventOrCommand) {
         if ("device.ui.event".equals(triggerType)) {

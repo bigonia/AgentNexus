@@ -1,69 +1,35 @@
 package com.zwbd.agentnexus.sdui.event;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Unified event type definition for the SDUI event system.
+ * Configuration-backed SDUI event contract.
  *
- * Replaces the previously scattered string-based event definitions
- * (capability-catalog.yml strings, SectionTypeCatalog.InteractionEvent,
- *  CapabilityRegistry.knownEvents Set) with a single typed contract.
- *
- * <h3>Event ID naming convention</h3>
- * All event IDs follow: {@code <category>:<capability>.<specific-event>}
- * <pre>
- *   ui:action.click             — action_section button click
- *   input:buttons.pwr.single_click
- *   input:motion.imu.shake
- *   input:audio.record.audio.record.data
- *   display:brightness.set
- *   rgb:effect.set
- * </pre>
- *
- * <h3>Direction</h3>
- * <ul>
- *   <li><b>INBOUND</b> — device → server (button press, sensor, audio, section interaction)</li>
- *   <li><b>OUTBOUND</b> — server → device (command, section render, audio play, RGB control)</li>
- * </ul>
- *
- * <h3>EventCategory</h3>
- * Groups events by their source domain for structured display in the
- * workflow editor and organized lookup in {@link EventRegistry}.
+ * Events are defined by sdui-event-catalog.yml and grouped into two domains:
+ * command events and section events. Runtime payloads refer to these IDs; this
+ * record describes their schema and constraints.
  */
 public record EventDefinition(
-        /** Globally unique, namespaced event ID (e.g. "ui:action.click"). */
         String eventId,
-
-        /** Direction of event flow. */
+        EventKind kind,
         Direction direction,
-
-        /** Domain category for grouping and display. */
         EventCategory category,
-
-        /** Human-readable short name (e.g. "按钮点击", "RGB 设置"). */
+        String subtype,
         String displayName,
-
-        /** Human-readable explanation of what this event represents. */
         String description,
-
-        /** Capability name this event originates from or targets
-         *  (e.g. "buttons.pwr", "action_section", "rgb.effect"). */
         String sourceCapability,
-
-        /** How this event travels over the wire. */
         TransportInfo transport,
-
-        /** For INBOUND: fields the event carries.
-         *  For OUTBOUND: parameters the command requires. */
         List<ParamDef> payloadSchema,
-
-        /** For SECTION-level events that contain sub-events at ELEMENT level,
-         *  this references the parent eventId. Null for top-level events. */
+        Map<String, Object> constraints,
         String parentEventId
 ) {
 
-    // ── Nested types ──
+    public enum EventKind {
+        COMMAND,
+        SECTION
+    }
 
     public enum Direction {
         INBOUND,
@@ -71,157 +37,172 @@ public record EventDefinition(
     }
 
     public enum EventCategory {
-        /** Physical button events (pwr, plus, etc.) */
-        HARDWARE_BUTTON("物理按钮"),
-        /** IMU / motion sensor events */
-        HARDWARE_SENSOR("运动传感器"),
-        /** Section UI interaction events (click, select, toggle, confirm) */
-        SECTION_INTERACTION("Section 交互"),
-        /** Audio recording / STT result events */
-        AUDIO_INPUT("音频输入"),
-        /** Device lifecycle events (connect, disconnect, heartbeat) */
-        SYSTEM("系统状态"),
-        /** Display commands (render, patch, brightness) */
-        DISPLAY("显示控制"),
-        /** Audio output commands (prompt, TTS, volume) */
-        AUDIO_OUTPUT("音频输出"),
-        /** RGB lighting commands */
-        LIGHTING("灯光控制");
+        /** Outbound command — device action (e.g. reboot, set brightness). */
+        COMMAND_DISPATCH("命令动作", false),
+        /** Outbound platform capability (e.g. TTS, audio prompt). */
+        COMMAND_PLATFORM("平台能力", false),
+        /**
+         * Internal lifecycle events (command ACK, timeout, audio streaming, STT progress).
+         * NOT exposed as state-machine trigger options — purely for internal routing.
+         */
+        COMMAND_LIFECYCLE("内部生命周期", false),
+        /** User-facing section interaction (button click, toggle, list select). */
+        USER_INTERACTION("用户交互", true),
+        /** System-level timer / cron events — available as state-machine triggers. */
+        SYSTEM_EVENT("系统事件", true),
+        /** Section render lifecycle (reserved, not currently used). */
+        SECTION_RENDER("Section 渲染", false);
 
         private final String label;
+        private final boolean publicTrigger;
 
-        EventCategory(String label) { this.label = label; }
+        EventCategory(String label, boolean publicTrigger) {
+            this.label = label;
+            this.publicTrigger = publicTrigger;
+        }
 
-        public String label() { return label; }
+        public String label() {
+            return label;
+        }
+
+        /** Whether events of this category should be shown as state-machine trigger options. */
+        public boolean isPublicTrigger() {
+            return publicTrigger;
+        }
+
+        /** Whether events of this category are internal only (not exposed in public APIs). */
+        public boolean isInternal() {
+            return !publicTrigger;
+        }
     }
 
-    /**
-     * Describes how an event travels between device and server.
-     */
     public record TransportInfo(
-            /** "ui3_binary" | "json_topic" | "internal" */
             String protocol,
-            /** For json_topic: the topic string (e.g. "cmd/control", "motion") */
             String topic,
-            /** For json_topic: the action field within the payload */
             String action,
-            /** For ui3_binary: the msgType byte in the binary frame header */
             Integer msgType,
-            /** For ui3_binary EVENT_INPUT: the eventKind value in TLV 120 */
-            Integer eventKind
+            Integer eventKind,
+            String eventName,
+            String nodeId
     ) {
-        public static TransportInfo ui3Binary(int msgType, int eventKind) {
-            return new TransportInfo("ui3_binary", null, null, msgType, eventKind);
-        }
-
-        public static TransportInfo ui3Binary(int msgType) {
-            return new TransportInfo("ui3_binary", null, null, msgType, null);
-        }
-
-        public static TransportInfo jsonTopic(String topic) {
-            return new TransportInfo("json_topic", topic, null, null, null);
-        }
-
-        public static TransportInfo jsonTopic(String topic, String action) {
-            return new TransportInfo("json_topic", topic, action, null, null);
-        }
-
-        public static TransportInfo internal() {
-            return new TransportInfo("internal", null, null, null, null);
-        }
-
-        public static TransportInfo serverSide() {
-            return new TransportInfo("server", null, null, null, null);
+        public Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            putIfPresent(map, "protocol", protocol);
+            putIfPresent(map, "topic", topic);
+            putIfPresent(map, "action", action);
+            putIfPresent(map, "msgType", msgType);
+            putIfPresent(map, "eventKind", eventKind);
+            putIfPresent(map, "eventName", eventName);
+            putIfPresent(map, "nodeId", nodeId);
+            return map;
         }
     }
 
-    /**
-     * Parameter/field definition for payload schemas.
-     * Mirrors the pattern from SectionTypeCatalog.ParamDef.
-     */
     public record ParamDef(
             String name,
             String type,
             boolean required,
+            Object min,
+            Object max,
+            List<String> values,
             String description
     ) {
-        public ParamDef(String name, String type, String description) {
-            this(name, type, false, description);
-        }
-
-        /** Serialize to a frontend-friendly map. */
         public Map<String, Object> toMap() {
-            return Map.of(
-                    "name", name,
-                    "type", type,
-                    "required", required,
-                    "description", description != null ? description : ""
-            );
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("name", name);
+            map.put("type", type);
+            map.put("required", required);
+            putIfPresent(map, "min", min);
+            putIfPresent(map, "max", max);
+            if (values != null && !values.isEmpty()) {
+                map.put("values", values);
+            }
+            map.put("description", description != null ? description : "");
+            return map;
         }
     }
 
-    // ── Factory methods ──
-
-    /**
-     * Create an inbound event definition from a capability catalog input entry.
-     */
-    public static EventDefinition inbound(
-            String eventId, EventCategory category, String displayName, String description,
-            String sourceCapability, TransportInfo transport, List<ParamDef> payloadSchema) {
-        return new EventDefinition(eventId, Direction.INBOUND, category,
-                displayName, description, sourceCapability, transport, payloadSchema, null);
-    }
-
-    /**
-     * Create an inbound event with a parent event (ELEMENT-level under a SECTION-level event).
-     */
-    public static EventDefinition inboundChild(
-            String eventId, EventCategory category, String displayName, String description,
-            String sourceCapability, TransportInfo transport, List<ParamDef> payloadSchema,
-            String parentEventId) {
-        return new EventDefinition(eventId, Direction.INBOUND, category,
-                displayName, description, sourceCapability, transport, payloadSchema, parentEventId);
-    }
-
-    /**
-     * Create an outbound event definition (command).
-     */
-    public static EventDefinition outbound(
-            String eventId, EventCategory category, String displayName, String description,
-            String sourceCapability, TransportInfo transport, List<ParamDef> payloadSchema) {
-        return new EventDefinition(eventId, Direction.OUTBOUND, category,
-                displayName, description, sourceCapability, transport, payloadSchema, null);
-    }
-
-    // ── Helpers ──
-
-    /** @return true if this is a section interaction event. */
+    /** True for section events that are user-facing triggers (button click, toggle, etc.). */
     public boolean isSectionInteraction() {
-        return category == EventCategory.SECTION_INTERACTION;
+        return kind == EventKind.SECTION && category == EventCategory.USER_INTERACTION;
     }
 
-    /** @return true if this event has sub-events at ELEMENT level. */
+    /** True for internal command lifecycle events (ACK, timeout, audio streaming, etc.). */
+    public boolean isCommandLifecycle() {
+        return kind == EventKind.COMMAND && category == EventCategory.COMMAND_LIFECYCLE;
+    }
+
+    /** True if this event should be shown as a state-machine trigger option in public APIs. */
+    public boolean isPublicTrigger() {
+        return category.isPublicTrigger();
+    }
+
+    /** True if this event is internal-only (not for public API exposure). */
+    public boolean isInternal() {
+        return category.isInternal();
+    }
+
     public boolean hasParent() {
         return parentEventId != null && !parentEventId.isBlank();
     }
 
-    /** @return the top-level parent event ID, or this eventId if already top-level. */
     public String rootEventId() {
         return hasParent() ? parentEventId : eventId;
     }
 
-    /** Serialize to a frontend-friendly map for the workflow editor. */
+    /** Full internal map — includes transport and all protocol details. */
     public Map<String, Object> toMap() {
-        return Map.of(
-                "eventId", eventId,
-                "direction", direction.name(),
-                "category", category.name(),
-                "displayName", displayName,
-                "description", description != null ? description : "",
-                "sourceCapability", sourceCapability,
-                "transport", transport.protocol(),
-                "payloadSchema", payloadSchema.stream().map(ParamDef::toMap).toList(),
-                "parentEventId", parentEventId != null ? parentEventId : ""
-        );
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("eventId", eventId);
+        map.put("id", eventId);
+        map.put("kind", kind.name());
+        map.put("direction", direction.name());
+        map.put("category", category.name());
+        map.put("categoryLabel", category.label());
+        map.put("subtype", subtype != null ? subtype : "");
+        map.put("displayName", displayName);
+        map.put("description", description != null ? description : "");
+        map.put("sourceCapability", sourceCapability);
+        map.put("transport", transport != null ? transport.toMap() : Map.of());
+        map.put("payloadSchema", payloadSchema.stream().map(ParamDef::toMap).toList());
+        map.put("constraints", constraints != null ? constraints : Map.of());
+        map.put("parentEventId", parentEventId != null ? parentEventId : "");
+        return map;
+    }
+
+    /**
+     * Public API map — strips internal details (transport, protocol-level fields).
+     * Suitable for state-machine editor and frontend consumption.
+     */
+    public Map<String, Object> toPublicMap() {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("eventId", eventId);
+        map.put("kind", kind.name());
+        map.put("category", category.name());
+        map.put("categoryLabel", category.label());
+        map.put("displayName", displayName);
+        map.put("description", description != null ? description : "");
+        map.put("sourceCapability", sourceCapability);
+        map.put("payloadSchema", publicPayloadSchema());
+        map.put("constraints", constraints != null ? constraints : Map.of());
+        return map;
+    }
+
+    /**
+     * Payload schema filtered for public consumption: excludes protocol-internal
+     * fields ({@code nodeId}, {@code ts}) that have no meaning for state-machine
+     * trigger conditions.
+     */
+    private List<Map<String, Object>> publicPayloadSchema() {
+        return payloadSchema.stream()
+                .filter(p -> !"nodeId".equals(p.name()) && !"ts".equals(p.name()))
+                .map(ParamDef::toMap)
+                .toList();
+    }
+
+    private static void putIfPresent(Map<String, Object> map, String key, Object value) {
+        if (value != null) {
+            map.put(key, value);
+        }
     }
 }

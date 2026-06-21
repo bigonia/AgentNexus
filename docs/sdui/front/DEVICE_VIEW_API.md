@@ -2,11 +2,11 @@
 
 本文档定义 SDUI 的“设备管理查看”接口，面向前端设备列表页、设备详情页、遥测图表页、连接状态页的直接接入。
 
-本文档只覆盖设备查看与基础管理动作，不覆盖能力事实、设备调试、工作流编排：
+本文档只覆盖设备查看与基础管理动作，不覆盖能力事实、设备调试、状态机编排：
 
-- 设备能力查看：参阅 [`workflow.md`](workflow.md) 中的能力层说明，以及后续独立能力文档
-- 设备调试：参阅 [`workflow.md`](workflow.md) 中的调试层说明
-- 工作流：参阅 [`workflow.md`](workflow.md)
+- 设备能力查看：参阅能力目录和事件 catalog 文档
+- 设备调试：参阅 [`DEBUG_API.md`](DEBUG_API.md)
+- 状态机编排：参阅 [`STATE_MACHINE_FRONTEND_INTEGRATION.md`](STATE_MACHINE_FRONTEND_INTEGRATION.md)
 
 ---
 
@@ -60,7 +60,7 @@
 - `GET /api/v1/sdui/capabilities/{deviceId}/events`
 - `GET /api/v1/sdui/capabilities/{deviceId}/sections`
 - 全部 `debug/*`
-- 全部 `workflows/*`
+- 全部 `state-machines/*`
 
 ---
 

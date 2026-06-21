@@ -6,7 +6,7 @@
 
 本文档不覆盖：
 
-- 工作流页面编排：参阅 [`WORKFLOW_API.md`](WORKFLOW_API.md)
+- 工作流页面编排：参阅 [`STATE_MACHINE_FRONTEND_INTEGRATION.md`](STATE_MACHINE_FRONTEND_INTEGRATION.md)
 - 设备查看：参阅 [`DEVICE_VIEW_API.md`](DEVICE_VIEW_API.md)
 - 命令调试：参阅 [`DEBUG_API.md`](DEBUG_API.md)
 
@@ -443,14 +443,14 @@ section 不存在：
 
 ---
 
-## 6. 与工作流的关系
+## 6. 与状态机的关系
 
-当前 debug section 与 workflow page-state 是两套独立状态：
+当前 debug section 与 state machine authoritative state 是两套独立状态：
 
 - `debug/{deviceId}/section/state`
   - 返回 debug workspace
-- `workflows/devices/{deviceId}/page-state`
-  - 返回 workflow 运行态页面状态
+- `state-machines/deployments/{deploymentId}`
+  - 返回状态机部署运行态页面状态
 
 二者都可能向设备发送页面。
 
@@ -462,8 +462,8 @@ section 不存在：
 
 前端接入建议：
 
-- debug 页面不要把 workflow page-state 当成自己的编辑数据源
-- workflow 页面也不要读取 debug workspace 作为正式运行态
+- debug 页面不要把状态机 `authoritativeState` 当成自己的编辑数据源
+- 状态机页面也不要读取 debug workspace 作为正式运行态
 
 ---
 

@@ -1,8 +1,11 @@
 package com.zwbd.agentnexus.sdui.protocol.catalog;
 
 import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
+import com.zwbd.agentnexus.sdui.event.EventDefinition;
+import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
 import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -11,15 +14,27 @@ import java.util.*;
 public class DeviceProtocolCatalog {
 
     private final CapabilityCatalog capabilityCatalog;
+    private final EventRegistry eventRegistry;
     private final Map<String, CommandSpec> commands;
     private final Map<String, SectionSpec> sections;
     private final Map<String, EventSpec> events;
 
-    public DeviceProtocolCatalog(CapabilityCatalog capabilityCatalog) {
+    @Autowired
+    public DeviceProtocolCatalog(CapabilityCatalog capabilityCatalog,
+                                 EventRegistry eventRegistry) {
         this.capabilityCatalog = capabilityCatalog;
+        this.eventRegistry = eventRegistry;
         this.commands = Collections.unmodifiableMap(buildCommands());
         this.sections = Collections.unmodifiableMap(buildSections());
         this.events = Collections.unmodifiableMap(buildEvents());
+    }
+
+    public DeviceProtocolCatalog(CapabilityCatalog capabilityCatalog) {
+        this.capabilityCatalog = capabilityCatalog;
+        this.eventRegistry = null;
+        this.commands = Collections.unmodifiableMap(buildCommands());
+        this.sections = Collections.unmodifiableMap(buildSections());
+        this.events = Map.of();
     }
 
     public Collection<CommandSpec> commands() {
@@ -76,7 +91,11 @@ public class DeviceProtocolCatalog {
                     toFieldSpecs(def.displayFields()),
                     true,
                     List.of("add", "update", "remove"),
-                    def.interactionEvents().stream().map(SectionTypeCatalog.InteractionEvent::eventId).toList()
+                    eventRegistry != null ? eventRegistry.getAllSectionEvents().stream()
+                            .filter(event -> def.type().equals(event.sourceCapability()))
+                            .map(EventDefinition::eventId)
+                            .toList()
+                            : List.of()
             ));
         }
         return result;
@@ -84,73 +103,26 @@ public class DeviceProtocolCatalog {
 
     private Map<String, EventSpec> buildEvents() {
         Map<String, EventSpec> result = new LinkedHashMap<>();
-        for (CapabilityCatalog.InputDef input : capabilityCatalog.getInputsByName().values()) {
-            List<FieldSpec> payload = buildInputPayload(input);
-            TransportSpec transport = new TransportSpec(
-                    input.topic(),
-                    null,
-                    "ui3_binary".equals(input.protocol()) ? "EVENT_INPUT" : null
-            );
-            for (String event : input.events()) {
-                result.put(resolveInputEventId(input.name(), event), new EventSpec(
-                        resolveInputEventId(input.name(), event),
-                        input.name(),
-                        payload,
-                        transport
-                ));
-            }
+        if (eventRegistry == null) {
+            return result;
         }
-
-        for (SectionTypeCatalog.SectionTypeDef def : SectionTypeCatalog.all().values()) {
-            if (!def.interactive()) {
-                continue;
-            }
-            for (SectionTypeCatalog.InteractionEvent event : def.interactionEvents()) {
-                List<FieldSpec> payload = new ArrayList<>();
-                payload.add(new FieldSpec("pageId", "string"));
-                payload.add(new FieldSpec("sectionId", "string"));
-                payload.add(new FieldSpec("sectionType", "string"));
-                payload.add(new FieldSpec("nodeId", "string"));
-                payload.add(new FieldSpec("value", "object"));
-                payload.add(new FieldSpec("ts", "int"));
-                for (SectionTypeCatalog.ParamDef param : event.params()) {
-                    if (payload.stream().anyMatch(existing -> existing.name().equals(param.name()))) {
-                        continue;
-                    }
-                    payload.add(new FieldSpec(param.name(), normalizeType(param.type())));
-                }
-                result.put("ui:" + event.eventId(), new EventSpec(
-                        "ui:" + event.eventId(),
-                        def.type(),
-                        payload,
-                        new TransportSpec(null, event.eventId(), "EVENT_INPUT")
-                ));
-            }
+        for (EventDefinition event : eventRegistry.getAllInboundEvents()) {
+            EventDefinition.TransportInfo transport = event.transport();
+            result.put(event.eventId(), new EventSpec(
+                    event.eventId(),
+                    event.sourceCapability(),
+                    event.payloadSchema().stream()
+                            .map(field -> new FieldSpec(field.name(), normalizeType(field.type())))
+                            .toList(),
+                    new TransportSpec(
+                            transport != null ? transport.topic() : null,
+                            transport != null ? transport.action() : null,
+                            transport != null && transport.msgType() != null ? String.valueOf(transport.msgType()) : null
+                    )
+            ));
         }
 
         return result;
-    }
-
-    private List<FieldSpec> buildInputPayload(CapabilityCatalog.InputDef input) {
-        if (input.payloadSchema() != null && !input.payloadSchema().isEmpty()) {
-            return input.payloadSchema().stream()
-                    .map(field -> new FieldSpec(field.name(), normalizeType(field.type())))
-                    .toList();
-        }
-        if ("audio.record".equals(input.name())) {
-            return List.of(
-                    new FieldSpec("state", "string"),
-                    new FieldSpec("seq", "int"),
-                    new FieldSpec("total", "int"),
-                    new FieldSpec("codec", "string"),
-                    new FieldSpec("data", "string")
-            );
-        }
-        return List.of(
-                new FieldSpec("nodeId", "string"),
-                new FieldSpec("eventType", "string"),
-                new FieldSpec("ts", "int")
-        );
     }
 
     private List<FieldSpec> toFieldSpecs(List<SectionTypeCatalog.SectionFieldDef> defs) {
@@ -160,19 +132,6 @@ public class DeviceProtocolCatalog {
             specs.add(new FieldSpec(def.name(), normalizeType(def.type()), children));
         }
         return specs;
-    }
-
-    private String resolveInputEventId(String inputName, String eventName) {
-        if (inputName.startsWith("buttons.")) {
-            return "input:" + inputName + "." + eventName;
-        }
-        if ("motion".equals(inputName)) {
-            return "input:motion." + eventName;
-        }
-        if (inputName.startsWith("audio.")) {
-            return "input:" + inputName + "." + eventName;
-        }
-        return "input:" + inputName + "." + eventName;
     }
 
     private String normalizeType(String type) {

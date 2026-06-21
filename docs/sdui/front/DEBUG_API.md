@@ -10,8 +10,8 @@
 本文档不覆盖：
 
 - 设备查看：参阅 [`DEVICE_VIEW_API.md`](DEVICE_VIEW_API.md)
-- 能力事实查询：参阅 [`workflow.md`](workflow.md) 中能力层设计，以及后续独立能力文档
-- 工作流编排：参阅 [`workflow.md`](workflow.md)
+- 能力事实查询：参阅能力目录和事件 catalog 文档
+- 状态机编排：参阅 [`STATE_MACHINE_FRONTEND_INTEGRATION.md`](STATE_MACHINE_FRONTEND_INTEGRATION.md)
 
 ---
 
@@ -69,13 +69,13 @@
 - `GET /api/v1/sdui/capabilities/{deviceId}/sections`
 - `GET /api/v1/sdui/capabilities/{deviceId}/commands`
 - `GET /api/v1/sdui/capabilities/{deviceId}/protocol`
-- 全部 `workflows/*`
+- 全部 `state-machines/*`
 
 需要特别区分：
 
 - `capabilities/*` 回答“支持什么”
 - `debug/*` 回答“现在直接做什么”
-- `workflows/*` 回答“如何编排自动化”
+- `state-machines/*` 回答“如何编排自动化”
 
 ---
 

@@ -346,6 +346,198 @@ public class CapabilityRegistry {
         return Collections.unmodifiableSet(events);
     }
 
+    /**
+     * Get a device's physical input definitions (buttons, motion sensors, etc.)
+     * enriched from {@link CapabilityCatalog} with display names and descriptions.
+     *
+     * Physical inputs are simple trigger events — the platform only receives them,
+     * there are no configurable parameters. Platform-mediated capabilities
+     * (like audio.record) are excluded; see {@link #getDeviceMediaCapabilities(String)}.
+     *
+     * Events are grouped under their parent input to avoid redundant metadata.
+     */
+    public List<Map<String, Object>> getDevicePhysicalInputs(String deviceId) {
+        DeviceCapabilities caps = deviceSnapshots.get(deviceId);
+        if (caps == null) return List.of();
+
+        // Group events by input name
+        Map<String, List<Map<String, Object>>> groupedByInput = new LinkedHashMap<>();
+        Map<String, CapabilityCatalog.InputDef> inputDefsSeen = new LinkedHashMap<>();
+
+        for (String inputEventId : caps.inputEvents()) {
+            for (var entry : catalog.getInputsByName().entrySet()) {
+                CapabilityCatalog.InputDef inputDef = entry.getValue();
+                if (inputDef.platform()) continue; // skip platform-mediated capabilities
+                if (inputDef.events() == null) continue;
+                for (String eventName : inputDef.events()) {
+                    String normalizedId = normalizeInputEventId(entry.getKey(), eventName);
+                    if (inputEventId.equals(normalizedId)) {
+                        inputDefsSeen.putIfAbsent(entry.getKey(), inputDef);
+                        groupedByInput.computeIfAbsent(entry.getKey(), k -> new ArrayList<>())
+                                .add(Map.of(
+                                        "eventId", normalizedId,
+                                        "eventName", eventName,
+                                        "displayName", inputDef.eventDisplayName(eventName)
+                                ));
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Build the result — one entry per input, with grouped events
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (var entry : groupedByInput.entrySet()) {
+            CapabilityCatalog.InputDef def = inputDefsSeen.get(entry.getKey());
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("inputName", entry.getKey());
+            input.put("displayName", def != null && def.displayName() != null ? def.displayName() : entry.getKey());
+            input.put("description", def != null && def.description() != null ? def.description() : "");
+            input.put("events", entry.getValue());
+            result.add(input);
+        }
+        return result;
+    }
+
+    /**
+     * Get a device's platform-mediated media capabilities (audio recording, etc.).
+     * Unlike simple physical inputs, these are command→response pipelines:
+     * the platform sends a command, the device performs the action, and responds
+     * with lifecycle events + data.
+     *
+     * Each entry describes the full capability flow: outbound commands,
+     * inbound lifecycle events, and any events usable as state-machine triggers.
+     */
+    public List<Map<String, Object>> getDeviceMediaCapabilities(String deviceId) {
+        DeviceCapabilities caps = deviceSnapshots.get(deviceId);
+        if (caps == null) return List.of();
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (var entry : catalog.getInputsByName().entrySet()) {
+            CapabilityCatalog.InputDef inputDef = entry.getValue();
+            if (!inputDef.platform()) continue; // only platform-mediated capabilities
+
+            // Check if this device actually has this capability
+            boolean deviceHasCapability = false;
+            if (inputDef.events() != null) {
+                for (String eventName : inputDef.events()) {
+                    String normalizedId = normalizeInputEventId(entry.getKey(), eventName);
+                    if (caps.inputEvents().contains(normalizedId)) {
+                        deviceHasCapability = true;
+                        break;
+                    }
+                }
+            }
+            if (!deviceHasCapability) continue;
+
+            Map<String, Object> cap = new LinkedHashMap<>();
+            cap.put("capabilityName", entry.getKey());
+            cap.put("displayName", inputDef.displayName() != null ? inputDef.displayName() : entry.getKey());
+            cap.put("description", inputDef.description() != null ? inputDef.description() : "");
+            cap.put("flowType", "command_response");
+
+            // Outbound commands for this capability (from outputs section)
+            List<Map<String, Object>> commands = new ArrayList<>();
+            CapabilityCatalog.OutputDef outputDef = catalog.getOutput(entry.getKey()).orElse(null);
+            if (outputDef != null && outputDef.commands() != null) {
+                for (var cmdEntry : outputDef.commands().entrySet()) {
+                    CapabilityCatalog.CommandDef cmdDef = cmdEntry.getValue();
+                    if (cmdDef.internal()) continue;
+                    Map<String, Object> cmd = new LinkedHashMap<>();
+                    cmd.put("commandId", cmdEntry.getKey());
+                    cmd.put("displayName", cmdDef.displayName() != null ? cmdDef.displayName() : cmdEntry.getKey());
+                    cmd.put("description", cmdDef.description() != null ? cmdDef.description() : "");
+                    commands.add(cmd);
+                }
+            }
+            cap.put("commands", commands);
+
+            // Inbound lifecycle events
+            List<Map<String, Object>> events = new ArrayList<>();
+            if (inputDef.events() != null) {
+                for (String eventName : inputDef.events()) {
+                    String normalizedId = normalizeInputEventId(entry.getKey(), eventName);
+                    if (caps.inputEvents().contains(normalizedId)) {
+                        Map<String, Object> evt = new LinkedHashMap<>();
+                        evt.put("eventId", normalizedId);
+                        evt.put("eventName", eventName);
+                        evt.put("displayName", inputDef.eventDisplayName(eventName));
+                        events.add(evt);
+                    }
+                }
+            }
+            cap.put("events", events);
+
+            // Trigger events: subset of events usable as state-machine triggers.
+            // Currently, only audio.stt.result (transcribed text) qualifies.
+            List<Map<String, Object>> triggerEvents = new ArrayList<>();
+            for (Map<String, Object> evt : events) {
+                String evtName = (String) evt.get("eventName");
+                if ("audio.stt.result".equals(evtName)) {
+                    triggerEvents.add(evt);
+                }
+            }
+            cap.put("triggerEvents", triggerEvents);
+
+            result.add(cap);
+        }
+        return result;
+    }
+
+    /**
+     * Resolve a raw binary input event (from UI3 msgType=9) to its namespaced
+     * event ID (e.g. {@code short_press + kind=4 + nodeId=pwr} →
+     * {@code input:buttons.pwr.short_press}).
+     *
+     * This bridges the gap between raw device binary frames and the namespaced
+     * event IDs used in state-machine transition configuration.
+     *
+     * @param deviceId     the device that sent the event (used to verify capability)
+     * @param rawEventName the raw event name from TLV 122 (e.g. "short_press")
+     * @param eventKind    the event kind from TLV 120 (e.g. 4 for BUTTON)
+     * @param nodeId       the node/button ID from TLV 121 (e.g. "pwr")
+     * @return the resolved namespaced event ID, or the rawEventName if unresolvable
+     */
+    public String resolveInputEventId(String deviceId, String rawEventName, int eventKind, String nodeId) {
+        if (rawEventName == null || rawEventName.isBlank()) return rawEventName;
+
+        // Check if already a namespaced ID
+        if (rawEventName.contains(":")) return rawEventName;
+
+        DeviceCapabilities caps = deviceSnapshots.get(deviceId);
+        if (caps == null) return rawEventName;
+
+        // Iterate capability catalog inputs to find a match
+        for (var entry : catalog.getInputsByName().entrySet()) {
+            CapabilityCatalog.InputDef inputDef = entry.getValue();
+            if (inputDef.events() == null) continue;
+            // Skip platform-mediated (handled separately)
+            if (inputDef.platform()) continue;
+
+            // Match by eventKind if the input has one
+            if (inputDef.eventKind() != null && inputDef.eventKind() != eventKind) continue;
+
+            // For button inputs, additionally match by nodeId suffix
+            String inputName = entry.getKey();
+            if (inputName.startsWith("buttons.")) {
+                String buttonId = inputName.substring("buttons.".length());
+                if (nodeId != null && !nodeId.isBlank() && !buttonId.equals(nodeId)) continue;
+            }
+
+            // Check if the raw event name is in this input's events list
+            if (!inputDef.events().contains(rawEventName)) continue;
+
+            // Build the normalized ID
+            String normalizedId = normalizeInputEventId(inputName, rawEventName);
+            // Verify the device actually supports this event
+            if (caps.inputEvents().contains(normalizedId)) {
+                return normalizedId;
+            }
+        }
+
+        return rawEventName;
+    }
+
     // ── Queries: Command schemas ──
 
     public Optional<CommandParamSchema> getCommandSchema(String deviceId, String command) {
@@ -531,6 +723,27 @@ public class CapabilityRegistry {
         String typeKey;
         if (existingKey != null) {
             typeKey = existingKey;
+        } else if (oldTypeKey != null) {
+            // Same device reported updated capabilities — update existing type in-place
+            // (take union) rather than creating a duplicate variant for the same device.
+            DeviceTypeInfo oldInfo = deviceTypes.get(oldTypeKey);
+            Set<String> mergedEvents = new LinkedHashSet<>(oldInfo.inputEvents());
+            mergedEvents.addAll(events);
+            Set<String> mergedCommands = new LinkedHashSet<>(oldInfo.outputCommands());
+            mergedCommands.addAll(commands);
+            Set<String> mergedSections = new LinkedHashSet<>(oldInfo.sectionTypes());
+            mergedSections.addAll(sections);
+
+            typeKey = oldTypeKey;
+            DeviceTypeInfo updated = new DeviceTypeInfo(
+                    oldTypeKey, board, oldInfo.label(), oldInfo.labelSource(),
+                    false, Set.copyOf(mergedEvents), Set.copyOf(mergedCommands), Set.copyOf(mergedSections),
+                    oldInfo.deviceCount(), oldInfo.onlineCount(), oldInfo.exampleDeviceIds(), Instant.now()
+            );
+            deviceTypes.put(oldTypeKey, updated);
+            log.info("Device type updated (capabilities changed): key={} board={} events={}→{} commands={}→{}",
+                    oldTypeKey, board, oldInfo.inputEvents().size(), mergedEvents.size(),
+                    oldInfo.outputCommands().size(), mergedCommands.size());
         } else {
             // New capability fingerprint — create a new type
             typeKey = generateTypeKey(board, fingerprint);
@@ -547,8 +760,13 @@ public class CapabilityRegistry {
 
         // Update device-to-type mapping
         if (oldTypeKey != null && !oldTypeKey.equals(typeKey)) {
-            // Device changed types (firmware upgrade?) — update old type counts
-            updateTypeStats(oldTypeKey, -1, 0);
+            // Device moved to a different type — update old type counts and clean up if orphaned
+            DeviceTypeInfo oldInfo = updateTypeStats(oldTypeKey, -1, 0);
+            if (oldInfo != null && oldInfo.deviceCount() <= 1) {
+                // Last device left this type — remove orphaned type
+                deviceTypes.remove(oldTypeKey);
+                log.info("Removed orphaned device type: key={}", oldTypeKey);
+            }
         }
         deviceToType.put(deviceId, typeKey);
 
@@ -594,16 +812,18 @@ public class CapabilityRegistry {
         }
     }
 
-    private void updateTypeStats(String typeKey, int countDelta, int onlineDelta) {
+    private DeviceTypeInfo updateTypeStats(String typeKey, int countDelta, int onlineDelta) {
         DeviceTypeInfo info = deviceTypes.get(typeKey);
-        if (info == null) return;
-        deviceTypes.put(typeKey, new DeviceTypeInfo(
+        if (info == null) return null;
+        DeviceTypeInfo updated = new DeviceTypeInfo(
                 info.key(), info.board(), info.label(), info.labelSource(),
                 info.hasVariants(), info.inputEvents(), info.outputCommands(), info.sectionTypes(),
                 Math.max(0, info.deviceCount() + countDelta),
                 Math.max(0, info.onlineCount() + onlineDelta),
                 info.exampleDeviceIds(), info.lastSeen()
-        ));
+        );
+        deviceTypes.put(typeKey, updated);
+        return updated;
     }
 
     /**

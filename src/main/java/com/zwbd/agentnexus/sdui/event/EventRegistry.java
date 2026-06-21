@@ -1,476 +1,477 @@
 package com.zwbd.agentnexus.sdui.event;
 
-import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
-import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
-/**
- * Central registry for all SDUI event definitions.
- *
- * Aggregates events from:
- * <ol>
- *   <li>{@link CapabilityCatalog} — hardware events (buttons, sensors, audio input)</li>
- *   <li>{@link SectionTypeCatalog} — section interaction events (click, select, toggle, confirm)</li>
- *   <li>Output commands from capability-catalog.yml — outbound commands</li>
- * </ol>
- *
- * Provides structured queries for the workflow editor (event tree),
- * event validation, and legacy name resolution.
- */
 @Slf4j
 @Component
 public class EventRegistry {
 
-    private final CapabilityCatalog catalog;
+    private final Map<String, EventDefinition> commandEvents = new LinkedHashMap<>();
+    private final Map<String, EventDefinition> sectionEvents = new LinkedHashMap<>();
+    private final Map<String, EventCatalogProperties.SectionTypeEntry> sectionTypes;
+    private final Map<String, String> rawEventAliases = new LinkedHashMap<>();
 
-    public EventRegistry(CapabilityCatalog catalog) {
-        this.catalog = catalog;
-    }
-
-    // ── Inbound events ──
-    private final Map<String, EventDefinition> inboundEvents = new LinkedHashMap<>();
-
-    // ── Outbound events ──
-    private final Map<String, EventDefinition> outboundEvents = new LinkedHashMap<>();
-
-    // ── Events by category ──
-    private final Map<EventDefinition.EventCategory, List<EventDefinition>> eventsByCategory = new LinkedHashMap<>();
-
-    // ── Legacy name → namespaced ID mapping ──
-    private final Map<String, String> legacyNameToId = new LinkedHashMap<>();
-
-    @PostConstruct
-    public void init() {
-        registerHardwareEvents();
-        registerSectionInteractionEvents();
-        registerOutboundCommands();
-        log.info("EventRegistry initialized: {} inbound, {} outbound, {} legacy mappings, {} categories",
-                inboundEvents.size(), outboundEvents.size(), legacyNameToId.size(), eventsByCategory.size());
-    }
-
-    // ── Registration ──
-
-    private void registerHardwareEvents() {
-        for (var inputEntry : catalog.getInputsByName().entrySet()) {
-            String inputName = inputEntry.getKey();
-            CapabilityCatalog.InputDef input = inputEntry.getValue();
-            EventDefinition.EventCategory category = categorizeInput(inputName);
-
-            // Transport info
-            EventDefinition.TransportInfo transport = buildTransport(input);
-
-            // Payload schema from catalog (or default)
-            List<EventDefinition.ParamDef> payloadSchema = buildPayloadSchema(input);
-
-            // Register each event this input produces
-            for (String eventName : input.events()) {
-                String eventId = namespacedId(category, inputName, eventName);
-                String displayName = eventDisplayName(category, eventName);
-                String description = input.description() != null
-                        ? input.description() : inputName + " → " + eventName;
-
-                EventDefinition def = EventDefinition.inbound(
-                        eventId, category, displayName, description,
-                        inputName, transport, payloadSchema);
-
-                register(def);
-            }
+    public EventRegistry(EventCatalogLoader loader) {
+        for (EventDefinition def : loader.commandEvents()) {
+            commandEvents.put(def.eventId(), def);
+            registerAlias(def);
         }
-    }
-
-    private void registerSectionInteractionEvents() {
-        for (var typeDef : SectionTypeCatalog.all().values()) {
-            if (!typeDef.interactive()) continue;
-
-            String sectionType = typeDef.type(); // e.g. "action_section"
-            EventDefinition.EventCategory category = EventDefinition.EventCategory.SECTION_INTERACTION;
-            EventDefinition.TransportInfo transport = EventDefinition.TransportInfo.ui3Binary(9, 1);
-
-            for (SectionTypeCatalog.InteractionEvent ievt : typeDef.interactionEvents()) {
-                String eventId = "ui:" + ievt.eventId();
-
-                List<EventDefinition.ParamDef> payloadSchema = new ArrayList<>();
-                // Always present in section interaction events
-                payloadSchema.add(new EventDefinition.ParamDef("sectionId", "string", true,
-                        "触发事件的 Section ID"));
-                payloadSchema.add(new EventDefinition.ParamDef("pageId", "string", false,
-                        "所在页面 ID"));
-                // Add interaction-specific params
-                for (SectionTypeCatalog.ParamDef p : ievt.params()) {
-                    // Skip sectionId since we already added it as a standard field
-                    if ("sectionId".equals(p.name())) continue;
-                    if ("pageId".equals(p.name())) continue;
-                    payloadSchema.add(new EventDefinition.ParamDef(
-                            p.name(), p.type(), false, p.description()));
-                }
-                // Standard runtime fields
-                payloadSchema.add(new EventDefinition.ParamDef("nodeId", "string", false,
-                        "被操作的控件 ID"));
-                payloadSchema.add(new EventDefinition.ParamDef("ts", "int", false,
-                        "事件时间戳(ms)"));
-
-                EventDefinition def = EventDefinition.inbound(
-                        eventId, category, ievt.description(),
-                        sectionType + " 的 " + ievt.description(),
-                        sectionType, transport, payloadSchema);
-
-                register(def);
-            }
+        for (EventDefinition def : loader.sectionEvents()) {
+            sectionEvents.put(def.eventId(), def);
+            registerAlias(def);
         }
+        sectionTypes = loader.sectionTypes();
+        log.info("EventRegistry initialized from config: {} command events, {} section events",
+                commandEvents.size(), sectionEvents.size());
     }
 
-    private void registerOutboundCommands() {
-        for (var outputEntry : catalog.getOutputsByName().entrySet()) {
-            String outputName = outputEntry.getKey();
-            CapabilityCatalog.OutputDef output = outputEntry.getValue();
-            EventDefinition.EventCategory category = categorizeOutput(outputName);
-
-            for (var cmdEntry : output.commands().entrySet()) {
-                String cmdName = cmdEntry.getKey();
-                CapabilityCatalog.CommandDef cmd = cmdEntry.getValue();
-                if (cmd.internal()) continue; // skip internal server-side commands
-
-                String eventId = cmdName; // already namespaced: "display.brightness.set"
-                String displayName = cmd.displayName() != null ? cmd.displayName() : cmdName;
-                String description = cmd.description() != null ? cmd.description()
-                        : output.description() != null ? output.description() : cmdName;
-
-                EventDefinition.TransportInfo transport;
-                if ("server".equals(cmd.topic())) {
-                    transport = EventDefinition.TransportInfo.serverSide();
-                } else if (cmd.binaryMsgType() != null) {
-                    transport = EventDefinition.TransportInfo.ui3Binary(cmd.binaryMsgType());
-                } else if (cmd.topic() != null && cmd.action() != null) {
-                    transport = EventDefinition.TransportInfo.jsonTopic(cmd.topic(), cmd.action());
-                } else if (cmd.topic() != null) {
-                    transport = EventDefinition.TransportInfo.jsonTopic(cmd.topic());
-                } else {
-                    transport = EventDefinition.TransportInfo.internal();
-                }
-
-                // Build param schema from command params
-                List<EventDefinition.ParamDef> payloadSchema = new ArrayList<>();
-                for (var paramEntry : cmd.params().entrySet()) {
-                    CapabilityCatalog.FieldSchema fs = paramEntry.getValue();
-                    payloadSchema.add(new EventDefinition.ParamDef(
-                            paramEntry.getKey(), fs.type(), fs.required(),
-                            fs.description() != null ? fs.description() : fs.label()));
-                }
-
-                EventDefinition def = EventDefinition.outbound(
-                        eventId, category, displayName, description,
-                        outputName, transport, payloadSchema);
-
-                register(def);
-            }
-        }
+    public Optional<EventDefinition> getCommandEvent(String id) {
+        return Optional.ofNullable(commandEvents.get(resolveEventId(id)));
     }
 
-    // ── Registration helper ──
-
-    private void register(EventDefinition def) {
-        if (def.direction() == EventDefinition.Direction.INBOUND) {
-            inboundEvents.put(def.eventId(), def);
-        } else {
-            outboundEvents.put(def.eventId(), def);
-        }
-
-        eventsByCategory.computeIfAbsent(def.category(), k -> new ArrayList<>()).add(def);
-
-        // Legacy name mapping
-        String legacy = legacyNameFrom(def);
-        if (legacy != null && !legacy.equals(def.eventId())) {
-            legacyNameToId.putIfAbsent(legacy, def.eventId());
-        }
+    public Optional<EventDefinition> getSectionEvent(String id) {
+        return Optional.ofNullable(sectionEvents.get(resolveEventId(id)));
     }
 
-    // ── Categorization helpers ──
-
-    private EventDefinition.EventCategory categorizeInput(String inputName) {
-        if (inputName.startsWith("buttons.")) return EventDefinition.EventCategory.HARDWARE_BUTTON;
-        if ("motion".equals(inputName)) return EventDefinition.EventCategory.HARDWARE_SENSOR;
-        if (inputName.startsWith("audio.")) return EventDefinition.EventCategory.AUDIO_INPUT;
-        return EventDefinition.EventCategory.SYSTEM;
-    }
-
-    private EventDefinition.EventCategory categorizeOutput(String outputName) {
-        if (outputName.startsWith("display.")) return EventDefinition.EventCategory.DISPLAY;
-        if (outputName.startsWith("audio.")) return EventDefinition.EventCategory.AUDIO_OUTPUT;
-        if (outputName.startsWith("rgb.")) return EventDefinition.EventCategory.LIGHTING;
-        if ("device.reboot".equals(outputName)) return EventDefinition.EventCategory.SYSTEM;
-        return EventDefinition.EventCategory.SYSTEM;
-    }
-
-    // ── ID helpers ──
-
-    private String namespacedId(EventDefinition.EventCategory category, String inputName, String eventName) {
-        return switch (category) {
-            case HARDWARE_BUTTON -> "input:" + inputName + "." + eventName;
-            case HARDWARE_SENSOR -> "input:motion." + eventName;
-            case AUDIO_INPUT -> "input:" + inputName + "." + eventName;
-            default -> "input:" + inputName + "." + eventName;
-        };
-    }
-
-    private String eventDisplayName(EventDefinition.EventCategory category, String eventName) {
-        return switch (eventName) {
-            case "press_down" -> "按下";
-            case "press_up" -> "释放";
-            case "single_click" -> "单击";
-            case "double_click" -> "双击";
-            case "long_press_start" -> "长按开始";
-            case "long_press_up" -> "长按释放";
-            case "imu.shake" -> "摇晃";
-            case "imu.wrist_raise" -> "抬腕";
-            case "imu.flip" -> "翻转";
-            case "audio.record.data" -> "音频数据";
-            case "audio.stt.result" -> "语音识别结果";
-            default -> eventName;
-        };
-    }
-
-    private String legacyNameFrom(EventDefinition def) {
-        // Map namespaced ID back to the legacy name that firmware sends
-        String id = def.eventId();
-        if (id.startsWith("input:buttons.")) {
-            int lastDot = id.lastIndexOf('.');
-            return lastDot >= 0 ? id.substring(lastDot + 1) : id;
-        }
-        if (id.startsWith("ui:")) {
-            return id.substring("ui:".length());
-        }
-        if (id.startsWith("input:motion.")) {
-            return id.substring("input:motion.".length());
-        }
-        if (id.startsWith("input:audio.record.")) {
-            return id.substring("input:audio.record.".length());
-        }
-        return id;
-    }
-
-    private EventDefinition.TransportInfo buildTransport(CapabilityCatalog.InputDef input) {
-        if ("ui3_binary".equals(input.protocol())) {
-            return input.eventKind() != null
-                    ? EventDefinition.TransportInfo.ui3Binary(9, input.eventKind())
-                    : EventDefinition.TransportInfo.ui3Binary(9);
-        } else if ("json_topic".equals(input.protocol()) && input.topic() != null) {
-            return EventDefinition.TransportInfo.jsonTopic(input.topic());
-        }
-        return EventDefinition.TransportInfo.internal();
-    }
-
-    private List<EventDefinition.ParamDef> buildPayloadSchema(CapabilityCatalog.InputDef input) {
-        if (input.payloadSchema() != null && !input.payloadSchema().isEmpty()) {
-            return input.payloadSchema().stream()
-                    .map(f -> new EventDefinition.ParamDef(f.name(), f.type(), f.required(), f.description()))
-                    .toList();
-        }
-        // Default payload schema for binary events
-        return List.of(
-                new EventDefinition.ParamDef("nodeId", "string", "控件/按钮标识"),
-                new EventDefinition.ParamDef("eventName", "string", "事件名称"),
-                new EventDefinition.ParamDef("kind", "int", "事件类型编码"),
-                new EventDefinition.ParamDef("ts", "int", "事件时间戳(ms)")
-        );
-    }
-
-    // ── Queries ──
-
-    /** Get an inbound event definition by its namespaced ID. */
     public Optional<EventDefinition> getInboundEvent(String eventId) {
-        return Optional.ofNullable(inboundEvents.get(eventId));
+        String resolved = resolveEventId(eventId);
+        EventDefinition section = sectionEvents.get(resolved);
+        if (section != null && section.direction() == EventDefinition.Direction.INBOUND) {
+            return Optional.of(section);
+        }
+        EventDefinition command = commandEvents.get(resolved);
+        if (command != null && command.direction() == EventDefinition.Direction.INBOUND) {
+            return Optional.of(command);
+        }
+        return Optional.empty();
     }
 
-    /** Get an outbound event (command) definition by its command ID. */
     public Optional<EventDefinition> getOutboundEvent(String commandId) {
-        return Optional.ofNullable(outboundEvents.get(commandId));
+        return getCommandEvent(commandId)
+                .filter(def -> def.direction() == EventDefinition.Direction.OUTBOUND);
     }
 
-    /** Get all events in a given category. */
-    public List<EventDefinition> getEventsByCategory(EventDefinition.EventCategory category) {
-        return eventsByCategory.getOrDefault(category, List.of());
-    }
-
-    /** Get all inbound event definitions. */
     public Collection<EventDefinition> getAllInboundEvents() {
-        return Collections.unmodifiableCollection(inboundEvents.values());
+        List<EventDefinition> result = new ArrayList<>();
+        sectionEvents.values().stream()
+                .filter(def -> def.direction() == EventDefinition.Direction.INBOUND)
+                .forEach(result::add);
+        commandEvents.values().stream()
+                .filter(def -> def.direction() == EventDefinition.Direction.INBOUND)
+                .forEach(result::add);
+        return List.copyOf(result);
     }
 
-    /** Get all outbound event definitions. */
     public Collection<EventDefinition> getAllOutboundEvents() {
-        return Collections.unmodifiableCollection(outboundEvents.values());
+        return commandEvents.values().stream()
+                .filter(def -> def.direction() == EventDefinition.Direction.OUTBOUND)
+                .toList();
     }
 
-    /**
-     * Resolve a legacy event name (as sent by firmware) to its namespaced event ID.
-     * If the name is already namespaced, returns it as-is.
-     */
-    public String resolveEventId(String eventName) {
-        if (eventName == null || eventName.isEmpty()) return null;
-        if (eventName.contains(":")) return eventName; // already namespaced
-        return legacyNameToId.getOrDefault(eventName, eventName);
+    public Collection<EventDefinition> getAllCommandEvents() {
+        return List.copyOf(commandEvents.values());
     }
 
-    /**
-     * Check if an event ID is known (either as a namespaced ID or legacy name).
-     */
+    public Collection<EventDefinition> getAllSectionEvents() {
+        return List.copyOf(sectionEvents.values());
+    }
+
     public boolean isKnownEvent(String eventId) {
-        if (eventId == null) return false;
-        return inboundEvents.containsKey(eventId)
-                || legacyNameToId.containsKey(eventId)
-                || outboundEvents.containsKey(eventId);
+        String resolved = resolveEventId(eventId);
+        return commandEvents.containsKey(resolved) || sectionEvents.containsKey(resolved);
     }
 
-    /** Get all known inbound event IDs (both namespaced and legacy). */
     public Set<String> getKnownEventIds() {
-        Set<String> ids = new LinkedHashSet<>(inboundEvents.keySet());
-        ids.addAll(legacyNameToId.keySet());
-        return ids;
+        Set<String> result = new LinkedHashSet<>();
+        result.addAll(sectionEvents.keySet());
+        result.addAll(commandEvents.keySet());
+        result.addAll(rawEventAliases.keySet());
+        return result;
     }
 
-    /** Get all known command IDs. */
     public Set<String> getKnownCommandIds() {
-        return Collections.unmodifiableSet(outboundEvents.keySet());
+        return Set.copyOf(commandEvents.keySet());
     }
 
-    // ── Event tree for frontend ──
+    public String resolveEventId(String rawEventId) {
+        if (rawEventId == null || rawEventId.isBlank()) {
+            return null;
+        }
+        if (commandEvents.containsKey(rawEventId) || sectionEvents.containsKey(rawEventId)) {
+            return rawEventId;
+        }
+        return rawEventAliases.getOrDefault(rawEventId, rawEventId);
+    }
 
-    /**
-     * Build a structured event tree for the workflow editor's event selector.
-     *
-     * Structure: category → capability → event list
-     * <pre>
-     * [
-     *   {
-     *     "category": "HARDWARE_BUTTON",
-     *     "label": "物理按钮",
-     *     "capabilities": [
-     *       {
-     *         "capability": "buttons.pwr",
-     *         "label": "BOOT 按钮",
-     *         "events": [
-     *           { "eventId": "input:buttons.pwr.single_click", "displayName": "单击", ... }
-     *         ]
-     *       }
-     *     ]
-     *   }
-     * ]
-     * </pre>
-     */
+    public EventPayload normalizePayload(EventPayload payload) {
+        if (payload == null) {
+            return null;
+        }
+        String resolved = resolvePayloadEventId(payload);
+        if (resolved == null || resolved.equals(payload.eventId())) {
+            return payload;
+        }
+        return payload.withEventId(resolved);
+    }
+
+    public ValidationResult validatePayload(String eventId, Map<String, Object> payload) {
+        String resolved = resolveEventId(eventId);
+        EventDefinition def = sectionEvents.get(resolved);
+        if (def == null) {
+            def = commandEvents.get(resolved);
+        }
+        if (def == null) {
+            return ValidationResult.invalid(List.of(
+                    new ValidationError("event." + eventId, "UNKNOWN_EVENT", "unknown event: " + eventId)));
+        }
+        return validateFields(def.payloadSchema(), payload != null ? payload : Map.of(), "event." + resolved);
+    }
+
+    public ValidationResult validateCommand(String commandId, Map<String, Object> params) {
+        EventDefinition def = commandEvents.get(resolveEventId(commandId));
+        if (def == null || def.direction() != EventDefinition.Direction.OUTBOUND) {
+            return ValidationResult.invalid(List.of(
+                    new ValidationError("command." + commandId, "UNKNOWN_COMMAND", "unknown command event: " + commandId)));
+        }
+        return validateFields(def.payloadSchema(), params != null ? params : Map.of(), "command." + def.eventId());
+    }
+
+    public ValidationResult validateSectionFields(String sectionType, Map<String, Object> fields) {
+        EventCatalogProperties.SectionTypeEntry section = sectionTypes.get(sectionType);
+        if (section == null) {
+            return ValidationResult.invalid(List.of(
+                    new ValidationError("section." + sectionType, "UNKNOWN_SECTION_TYPE", "unknown section type: " + sectionType)));
+        }
+        List<EventDefinition.ParamDef> schema = section.getFields().stream()
+                .map(field -> new EventDefinition.ParamDef(
+                        field.getName(), normalizeType(field.getType()), field.isRequired(),
+                        field.getMin(), field.getMax(), field.getValues(), field.getDescription()))
+                .toList();
+        return validateFields(schema, fields != null ? fields : Map.of(), "section." + sectionType);
+    }
+
+    public boolean isKnownSectionType(String sectionType) {
+        return sectionTypes.containsKey(sectionType);
+    }
+
+    public Map<String, Object> catalogForEditor() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("commands", commandCatalog());
+        result.put("sections", sectionCatalog());
+        return result;
+    }
+
+    /** Full inbound event tree — all categories (for internal/debug use). */
     public List<Map<String, Object>> getInboundEventTree() {
         List<Map<String, Object>> tree = new ArrayList<>();
-
-        // Group inbound events by category → source capability
-        Map<EventDefinition.EventCategory, Map<String, List<EventDefinition>>> grouped = new LinkedHashMap<>();
-
-        for (EventDefinition def : inboundEvents.values()) {
-            grouped.computeIfAbsent(def.category(), k -> new LinkedHashMap<>())
-                    .computeIfAbsent(def.sourceCapability(), k -> new ArrayList<>())
-                    .add(def);
+        // Section interaction events → USER_INTERACTION category
+        List<Map<String, Object>> sectionGroups = groupedPublicSectionEvents();
+        if (!sectionGroups.isEmpty()) {
+            tree.add(Map.of("category", "USER_INTERACTION", "label", "用户交互",
+                    "capabilities", sectionGroups));
         }
-
-        for (var catEntry : grouped.entrySet()) {
-            EventDefinition.EventCategory category = catEntry.getKey();
-            Map<String, Object> catNode = new LinkedHashMap<>();
-            catNode.put("category", category.name());
-            catNode.put("label", category.label());
-
-            List<Map<String, Object>> capabilities = new ArrayList<>();
-            for (var capEntry : catEntry.getValue().entrySet()) {
-                String capName = capEntry.getKey();
-                List<EventDefinition> eventDefs = capEntry.getValue();
-
-                Map<String, Object> capNode = new LinkedHashMap<>();
-                capNode.put("capability", capName);
-                capNode.put("label", inboundCapabilityLabel(capName));
-                capNode.put("events", eventDefs.stream()
-                        .map(EventDefinition::toMap)
-                        .toList());
-
-                capabilities.add(capNode);
-            }
-            catNode.put("capabilities", capabilities);
-            tree.add(catNode);
+        // System events → SYSTEM_EVENT category
+        List<Map<String, Object>> systemEvents = groupedSystemEvents();
+        if (!systemEvents.isEmpty()) {
+            tree.add(Map.of("category", "SYSTEM_EVENT", "label", "系统事件",
+                    "capabilities", systemEvents));
         }
+        // Internal lifecycle events — excluded from public tree
         return tree;
     }
 
     /**
-     * Build a structured command tree for the workflow editor's action selector.
-     * Same structure as {@link #getInboundEventTree()} but for outbound events.
+     * Public inbound event tree — only public-trigger categories (USER_INTERACTION + SYSTEM_EVENT).
+     * Uses {@link EventDefinition#toPublicMap()} to exclude transport and internal fields.
      */
+    public List<Map<String, Object>> getPublicInboundEventTree() {
+        return getInboundEventTree(); // already filters to public-only
+    }
+
     public List<Map<String, Object>> getOutboundEventTree() {
-        List<Map<String, Object>> tree = new ArrayList<>();
-
-        Map<EventDefinition.EventCategory, Map<String, List<EventDefinition>>> grouped = new LinkedHashMap<>();
-
-        for (EventDefinition def : outboundEvents.values()) {
-            grouped.computeIfAbsent(def.category(), k -> new LinkedHashMap<>())
-                    .computeIfAbsent(def.sourceCapability(), k -> new ArrayList<>())
-                    .add(def);
-        }
-
-        for (var catEntry : grouped.entrySet()) {
-            EventDefinition.EventCategory category = catEntry.getKey();
-            Map<String, Object> catNode = new LinkedHashMap<>();
-            catNode.put("category", category.name());
-            catNode.put("label", category.label());
-
-            List<Map<String, Object>> capabilities = new ArrayList<>();
-            for (var capEntry : catEntry.getValue().entrySet()) {
-                String capabilityName = capEntry.getKey();
-                List<EventDefinition> eventDefs = capEntry.getValue();
-                Map<String, Object> capNode = new LinkedHashMap<>();
-                capNode.put("capability", capabilityName);
-                capNode.put("label", outboundCapabilityLabel(capabilityName));
-                capNode.put("commands", eventDefs.stream()
-                        .map(EventDefinition::toMap)
-                        .toList());
-                capabilities.add(capNode);
-            }
-            catNode.put("capabilities", capabilities);
-            tree.add(catNode);
-        }
-        return tree;
-    }
-
-    public String inboundCapabilityLabel(String capabilityName) {
-        return catalog.getInput(capabilityName)
-                .map(CapabilityCatalog.InputDef::displayName)
-                .filter(label -> label != null && !label.isBlank())
-                .orElse(capabilityName);
-    }
-
-    public String outboundCapabilityLabel(String capabilityName) {
-        return catalog.getOutput(capabilityName)
-                .map(CapabilityCatalog.OutputDef::displayName)
-                .filter(label -> label != null && !label.isBlank())
-                .orElse(capabilityName);
+        return commandCatalog();
     }
 
     /**
-     * Build a flat list of event options for backward-compatible API responses.
-     * Each entry has: value (eventId), label (displayName), category, source.
+     * Flat event options for editor dropdowns — public trigger events only
+     * ({@code USER_INTERACTION} + {@code SYSTEM_EVENT}).
+     * Excludes internal lifecycle events (command ACK, audio streaming, etc.).
      */
     public List<Map<String, String>> getFlatEventOptions() {
-        List<Map<String, String>> options = new ArrayList<>();
-        for (EventDefinition def : inboundEvents.values()) {
-            options.add(Map.of(
+        List<Map<String, String>> result = new ArrayList<>();
+        for (EventDefinition def : getAllInboundEvents()) {
+            if (!def.isPublicTrigger()) {
+                continue;
+            }
+            result.add(Map.of(
                     "value", def.eventId(),
                     "label", def.displayName(),
                     "category", def.category().name(),
                     "source", def.sourceCapability()
             ));
         }
-        return options;
+        return result;
     }
 
-    // ── Package-private accessor for testing ──
+    /** Get all public trigger events (for state-machine and board-type APIs). */
+    public List<EventDefinition> getPublicTriggerEvents() {
+        List<EventDefinition> result = new ArrayList<>();
+        for (EventDefinition def : getAllInboundEvents()) {
+            if (def.isPublicTrigger()) {
+                result.add(def);
+            }
+        }
+        return result;
+    }
 
-    Map<String, EventDefinition> inboundEventsMap() { return inboundEvents; }
-    Map<String, EventDefinition> outboundEventsMap() { return outboundEvents; }
+    public List<EventDefinition> getEventsByCategory(EventDefinition.EventCategory category) {
+        List<EventDefinition> result = new ArrayList<>();
+        commandEvents.values().stream().filter(def -> def.category() == category).forEach(result::add);
+        sectionEvents.values().stream().filter(def -> def.category() == category).forEach(result::add);
+        return result;
+    }
+
+    private String resolvePayloadEventId(EventPayload payload) {
+        if (payload.eventId() != null && isKnownEvent(payload.eventId())) {
+            return resolveEventId(payload.eventId());
+        }
+        String rawName = string(payload.rawFields().get("eventName"));
+        for (EventDefinition def : sectionEvents.values()) {
+            EventDefinition.TransportInfo transport = def.transport();
+            if (transport == null) {
+                continue;
+            }
+            boolean nameMatches = rawName.equals(transport.eventName()) || payload.eventId() != null && payload.eventId().equals(transport.eventName());
+            boolean kindMatches = transport.eventKind() == null || transport.eventKind() == payload.kind();
+            if (nameMatches && kindMatches) {
+                return def.eventId();
+            }
+        }
+        return resolveEventId(payload.eventId());
+    }
+
+    private ValidationResult validateFields(List<EventDefinition.ParamDef> schema,
+                                            Map<String, Object> payload,
+                                            String errorPath) {
+        List<ValidationError> errors = new ArrayList<>();
+        for (EventDefinition.ParamDef field : schema) {
+            String fieldPath = errorPath + ".params." + field.name();
+            Object value = payload.get(field.name());
+            if (value == null && field.required()) {
+                errors.add(new ValidationError(fieldPath, "MISSING_REQUIRED_FIELD",
+                        errorPath + " missing required field: " + field.name()));
+                continue;
+            }
+            if (value == null) {
+                continue;
+            }
+            validateType(field, value, fieldPath, errors);
+            validateRange(field, value, fieldPath, errors);
+            if (field.values() != null && !field.values().isEmpty() && !field.values().contains(String.valueOf(value))) {
+                errors.add(new ValidationError(fieldPath, "INVALID_ENUM_VALUE",
+                        errorPath + " field " + field.name() + " must be one of " + field.values()));
+            }
+        }
+        return errors.isEmpty() ? ValidationResult.ok() : ValidationResult.invalid(errors);
+    }
+
+    private void validateType(EventDefinition.ParamDef field, Object value, String fieldPath, List<ValidationError> errors) {
+        String type = normalizeType(field.type());
+        boolean ok = switch (type) {
+            case "string", "color", "enum" -> value instanceof String;
+            case "int" -> value instanceof Number || string(value).matches("-?\\d+");
+            case "float" -> value instanceof Number || string(value).matches("-?\\d+(\\.\\d+)?");
+            case "boolean" -> value instanceof Boolean || "true".equalsIgnoreCase(string(value)) || "false".equalsIgnoreCase(string(value));
+            case "array" -> value instanceof List<?>;
+            case "object" -> value instanceof Map<?, ?>;
+            default -> true;
+        };
+        if (!ok) {
+            errors.add(new ValidationError(fieldPath, "TYPE_MISMATCH",
+                    fieldPath + " must be " + type));
+        }
+    }
+
+    private void validateRange(EventDefinition.ParamDef field, Object value, String fieldPath, List<ValidationError> errors) {
+        if (field.min() == null && field.max() == null) {
+            return;
+        }
+        Double number = toDouble(value);
+        if (number == null) {
+            return;
+        }
+        Double min = toDouble(field.min());
+        Double max = toDouble(field.max());
+        if (min != null && number < min) {
+            errors.add(new ValidationError(fieldPath, "VALUE_OUT_OF_RANGE",
+                    fieldPath + " must be >= " + field.min()));
+        }
+        if (max != null && number > max) {
+            errors.add(new ValidationError(fieldPath, "VALUE_OUT_OF_RANGE",
+                    fieldPath + " must be <= " + field.max()));
+        }
+    }
+
+    private List<Map<String, Object>> commandCatalog() {
+        Map<String, List<EventDefinition>> grouped = new LinkedHashMap<>();
+        for (EventDefinition def : commandEvents.values()) {
+            grouped.computeIfAbsent(def.sourceCapability(), ignored -> new ArrayList<>()).add(def);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        grouped.forEach((source, events) -> result.add(Map.of(
+                "capability", source,
+                "label", source,
+                "commands", events.stream().map(EventDefinition::toMap).toList()
+        )));
+        return result;
+    }
+
+    private List<Map<String, Object>> sectionCatalog() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (EventCatalogProperties.SectionTypeEntry section : sectionTypes.values()) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("type", section.getType());
+            map.put("displayName", section.getDisplayName());
+            map.put("operations", section.getOperations());
+            map.put("fields", section.getFields().stream().map(this::fieldToMap).toList());
+            map.put("constraints", section.getConstraints());
+            map.put("events", sectionEvents.values().stream()
+                    .filter(def -> section.getType().equals(def.sourceCapability()))
+                    .map(EventDefinition::toMap)
+                    .toList());
+            result.add(map);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> groupedPublicSectionEvents() {
+        Map<String, List<EventDefinition>> grouped = new LinkedHashMap<>();
+        sectionEvents.values().forEach(def -> grouped.computeIfAbsent(def.sourceCapability(), ignored -> new ArrayList<>()).add(def));
+        List<Map<String, Object>> result = new ArrayList<>();
+        grouped.forEach((source, events) -> result.add(Map.of(
+                "capability", source,
+                "label", source,
+                "events", events.stream().map(EventDefinition::toPublicMap).toList()
+        )));
+        return result;
+    }
+
+    private List<Map<String, Object>> groupedSystemEvents() {
+        List<EventDefinition> systemEvents = commandEvents.values().stream()
+                .filter(def -> def.category() == EventDefinition.EventCategory.SYSTEM_EVENT)
+                .toList();
+        if (systemEvents.isEmpty()) {
+            return List.of();
+        }
+        return List.of(Map.of(
+                "capability", "system",
+                "label", "系统事件",
+                "events", systemEvents.stream().map(EventDefinition::toPublicMap).toList()
+        ));
+    }
+
+    /** @deprecated Internal lifecycle events are no longer in the public tree. */
+    @Deprecated
+    private List<Map<String, Object>> groupedCommandLifecycleEvents() {
+        List<EventDefinition> lifecycle = commandEvents.values().stream()
+                .filter(EventDefinition::isCommandLifecycle)
+                .toList();
+        if (lifecycle.isEmpty()) {
+            return List.of();
+        }
+        return List.of(Map.of(
+                "capability", "command.lifecycle",
+                "label", "内部生命周期",
+                "events", lifecycle.stream().map(EventDefinition::toMap).toList()
+        ));
+    }
+
+    private Map<String, Object> fieldToMap(EventCatalogProperties.FieldEntry field) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", field.getName());
+        map.put("type", normalizeType(field.getType()));
+        map.put("required", field.isRequired());
+        if (field.getMin() != null) map.put("min", field.getMin());
+        if (field.getMax() != null) map.put("max", field.getMax());
+        if (field.getValues() != null && !field.getValues().isEmpty()) map.put("values", field.getValues());
+        if (field.getDescription() != null) map.put("description", field.getDescription());
+        if (field.getChildren() != null && !field.getChildren().isEmpty()) {
+            map.put("children", field.getChildren().stream().map(this::fieldToMap).toList());
+        }
+        return map;
+    }
+
+    private void registerAlias(EventDefinition def) {
+        EventDefinition.TransportInfo transport = def.transport();
+        if (transport != null && transport.eventName() != null && !transport.eventName().isBlank()) {
+            rawEventAliases.putIfAbsent(transport.eventName(), def.eventId());
+        }
+    }
+
+    private Double toDouble(Object value) {
+        if (value instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private String normalizeType(String type) {
+        if (type == null || type.isBlank()) {
+            return "string";
+        }
+        return switch (type) {
+            case "integer", "number" -> "int";
+            case "bool" -> "boolean";
+            default -> type;
+        };
+    }
+
+    private String string(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    public record ValidationError(String path, String code, String message) {
+        public Map<String, Object> toMap() {
+            return Map.of("path", path, "code", code, "message", message);
+        }
+    }
+
+    public record ValidationResult(boolean valid, List<ValidationError> errors) {
+        public static ValidationResult ok() {
+            return new ValidationResult(true, List.of());
+        }
+
+        public static ValidationResult invalid(List<ValidationError> errors) {
+            return new ValidationResult(false, List.copyOf(errors));
+        }
+
+        public Map<String, Object> toMap() {
+            return Map.of(
+                    "valid", valid,
+                    "errors", errors.stream().map(ValidationError::toMap).toList()
+            );
+        }
+
+        /** @deprecated for backward compat in runtime callers that still use string errors */
+        public List<String> errorMessages() {
+            return errors.stream().map(ValidationError::message).toList();
+        }
+    }
 }

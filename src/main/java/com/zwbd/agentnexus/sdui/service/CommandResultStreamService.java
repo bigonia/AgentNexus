@@ -1,7 +1,7 @@
 package com.zwbd.agentnexus.sdui.service;
 
 import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
-import com.zwbd.agentnexus.sdui.workflow.service.CommandLifecycleEvent;
+import com.zwbd.agentnexus.sdui.statemachine.CommandLifecycleEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
