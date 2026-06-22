@@ -1,4 +1,5 @@
-# macOS 环境专用配置：覆盖 MCP stdio 命令为 macOS 兼容形式
+# macOS 环境专用配置：覆盖 MCP stdio 命令为 macOS 兼容形式，
+# 以及 whisper STT 路径（brew 安装的是 whisper-cli 而非 whisper）
 spring:
   ai:
     mcp:
@@ -10,3 +11,10 @@ spring:
               args:
                 - -c
                 - npx -y @playwright/mcp@latest
+
+sdui:
+  tts:
+    ffmpeg-path: ffmpeg
+  stt:
+    whisper-path: /opt/homebrew/bin/whisper-cli
+    whisper-model: /opt/homebrew/share/whisper-cpp/models/ggml-tiny.en.bin
