@@ -72,4 +72,21 @@ class CommandServiceTest {
         assertEquals("rgb_policy", captor.getValue().getAction());
         verify(commandResultStreamService).publishCommand(any(SduiDeviceCommand.class), eq("dispatch"));
     }
+
+    @Test
+    void rgbOffUsesRgbOffAction() {
+        when(dispatcher.dispatchWithAction(eq("dev-1"), eq("rgb.off"), eq("rgb_off"), any()))
+                .thenReturn(new CommandDispatcher.DispatchResult("cmd-3", "cmd/control", "rgb_off",
+                        "{\"cmd_id\":\"cmd-3\",\"action\":\"rgb_off\"}", true));
+
+        var result = commandService.dispatchCommand("dev-1", "rgb.off", Map.of());
+
+        assertTrue(result.sent());
+        assertEquals("rgb_off", result.action());
+        verify(dispatcher).dispatchWithAction(eq("dev-1"), eq("rgb.off"), eq("rgb_off"), eq(Map.of()));
+        ArgumentCaptor<SduiDeviceCommand> captor = ArgumentCaptor.forClass(SduiDeviceCommand.class);
+        verify(commandRepository).save(captor.capture());
+        assertEquals("rgb.off", captor.getValue().getCommand());
+        assertEquals("rgb_off", captor.getValue().getAction());
+    }
 }

@@ -17,6 +17,8 @@ import com.zwbd.agentnexus.sdui.service.*;
 import com.zwbd.agentnexus.sdui.debug.DebugArtifactStore;
 import com.zwbd.agentnexus.sdui.debug.DebugSessionHandle;
 import com.zwbd.agentnexus.sdui.debug.DebugSessionService;
+import com.zwbd.agentnexus.sdui.debug.node.CapabilityNodeTestService;
+import com.zwbd.agentnexus.sdui.service.audio.AudioRecordSessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -54,20 +56,25 @@ public class DebugController {
     private final SduiDeviceCommandRepository commandRepository;
     private final DebugSessionService sessionService;
     private final DebugArtifactStore artifactStore;
+    private final CapabilityNodeTestService nodeTestService;
     private final ObjectMapper objectMapper;
+    private final AudioRecordSessionManager audioRecordSessionManager;
 
     // ── Command execution ──
 
     @PostMapping("/{deviceId}/command")
     public ApiResponse<Map<String, Object>> executeCommand(@PathVariable String deviceId,
                                                             @RequestBody Map<String, Object> body) {
-        if (!sessionManager.isDeviceOnline(deviceId)) {
-            return ApiResponse.error(40000, "device is offline");
-        }
-
         String command = (String) body.getOrDefault("command", "");
         if (command.isBlank()) {
             return ApiResponse.error(40000, "command is required");
+        }
+
+        if (!sessionManager.isDeviceOnline(deviceId)) {
+            if (isDeferredAudioRecordStop(deviceId, command)) {
+                return ApiResponse.ok(deferAudioRecordStop(deviceId, command, "debug_command_offline"));
+            }
+            return ApiResponse.error(40000, "device is offline");
         }
 
         @SuppressWarnings("unchecked")
@@ -104,6 +111,23 @@ public class DebugController {
         response.put("dispatchStatus", dispResult.sent() ? "sent" : "send_failed");
         response.put("ackStatus", dispResult.status());
         return ApiResponse.ok(response);
+    }
+
+    private boolean isDeferredAudioRecordStop(String deviceId, String command) {
+        return "audio.record.stop".equals(command) && audioRecordSessionManager.isRecording(deviceId);
+    }
+
+    private Map<String, Object> deferAudioRecordStop(String deviceId, String command, String reason) {
+        audioRecordSessionManager.requestStopOnReconnect(deviceId, reason);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sent", false);
+        response.put("deviceId", deviceId);
+        response.put("command", command);
+        response.put("dispatchStatus", "pending_reconnect");
+        response.put("ackStatus", "PENDING_RECONNECT");
+        response.put("recording", true);
+        response.put("pendingStop", true);
+        return response;
     }
 
     // ── Command schemas ──
@@ -226,6 +250,36 @@ public class DebugController {
     @GetMapping(value = "/{deviceId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter eventStream(@PathVariable String deviceId) {
         return eventStreamService.subscribe(deviceId);
+    }
+
+    // ── Capability node validation ──
+
+    @PostMapping("/{deviceId}/node-tests/input")
+    public ApiResponse<Map<String, Object>> createInputNodeTest(@PathVariable String deviceId,
+                                                                @RequestBody Map<String, Object> body) {
+        try {
+            return ApiResponse.ok(nodeTestService.createInputTest(deviceId, body));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(40000, e.getMessage());
+        }
+    }
+
+    @GetMapping("/{deviceId}/node-tests/{testId}")
+    public ApiResponse<Map<String, Object>> getNodeTest(@PathVariable String deviceId,
+                                                        @PathVariable String testId) {
+        return nodeTestService.getTest(deviceId, testId)
+                .map(ApiResponse::ok)
+                .orElse(ApiResponse.error(40400, "node test not found: " + testId));
+    }
+
+    @PostMapping("/{deviceId}/node-tests/output")
+    public ApiResponse<Map<String, Object>> executeOutputNodeTest(@PathVariable String deviceId,
+                                                                  @RequestBody Map<String, Object> body) {
+        try {
+            return ApiResponse.ok(nodeTestService.executeOutputTest(deviceId, body));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(40000, e.getMessage());
+        }
     }
 
     // ── Generic debug sessions ──

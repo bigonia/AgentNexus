@@ -162,3 +162,4 @@ sdui:
   stt:
     whisper-path: whisper
     whisper-model: base
+    language: zh

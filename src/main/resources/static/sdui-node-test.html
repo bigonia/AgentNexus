@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SDUI 能力节点验证</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f6f7f9;
+            --panel: #ffffff;
+            --line: #d9dee7;
+            --text: #18202c;
+            --muted: #667085;
+            --accent: #1769e0;
+            --ok: #087443;
+            --warn: #9a6700;
+            --bad: #b42318;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        header {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 650;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
+            min-height: calc(100vh - 56px);
+        }
+
+        aside {
+            padding: 18px;
+            border-right: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        section {
+            padding: 18px 22px;
+        }
+
+        .field {
+            display: grid;
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 650;
+        }
+
+        select, input, textarea, button {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #fff;
+            color: var(--text);
+            font: inherit;
+        }
+
+        select, input {
+            height: 36px;
+            padding: 0 10px;
+        }
+
+        textarea {
+            min-height: 84px;
+            padding: 10px;
+            resize: vertical;
+        }
+
+        button {
+            height: 36px;
+            padding: 0 12px;
+            cursor: pointer;
+            font-weight: 650;
+        }
+
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        button.secondary {
+            background: #eef4ff;
+            border-color: #b8cdf8;
+            color: #174ea6;
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .toolbar button {
+            width: auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+        }
+
+        .card {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            padding: 14px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .card.active {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(23, 105, 224, .12);
+        }
+
+        .title-row {
+            display: flex;
+            align-items: start;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .node-title {
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .node-desc {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 999px;
+            background: #eef2f6;
+            color: #344054;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .pill.ok { background: #dcfae6; color: var(--ok); }
+        .pill.warn { background: #fef0c7; color: var(--warn); }
+        .pill.bad { background: #fee4e2; color: var(--bad); }
+
+        .muted { color: var(--muted); }
+
+        .split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 14px;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            padding: 14px;
+        }
+
+        .panel h2 {
+            margin: 0 0 12px;
+            font-size: 15px;
+        }
+
+        pre {
+            margin: 0;
+            padding: 12px;
+            border-radius: 6px;
+            background: #101828;
+            color: #e4e7ec;
+            overflow: auto;
+            max-height: 360px;
+            font-size: 12px;
+        }
+
+        .form-grid {
+            display: grid;
+            gap: 10px;
+        }
+
+        .empty {
+            border: 1px dashed var(--line);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            color: var(--muted);
+            background: rgba(255,255,255,.65);
+        }
+
+        @media (max-width: 900px) {
+            main, .split {
+                grid-template-columns: 1fr;
+            }
+            aside {
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>SDUI 能力节点验证</h1>
+    <span id="status" class="pill">ready</span>
+</header>
+<main>
+    <aside>
+        <div class="field">
+            <label for="apiBase">API Base</label>
+            <input id="apiBase" placeholder="http://localhost:8080">
+        </div>
+        <div class="field">
+            <label for="boardType">板卡类型</label>
+            <select id="boardType"></select>
+        </div>
+        <div class="field">
+            <label for="device">绑定设备</label>
+            <select id="device"></select>
+        </div>
+        <div class="toolbar">
+            <button id="refresh" class="secondary">刷新</button>
+            <button id="loadNodes" class="primary">加载节点</button>
+        </div>
+        <div class="panel">
+            <h2>绑定状态</h2>
+            <div id="bindingInfo" class="muted">尚未加载</div>
+        </div>
+    </aside>
+    <section>
+        <div class="split">
+            <div>
+                <div class="toolbar">
+                    <span class="pill" id="nodeCount">0 nodes</span>
+                    <span class="muted">选择节点后可在右侧验证</span>
+                </div>
+                <div id="nodes" class="grid"></div>
+            </div>
+            <div class="panel">
+                <h2>节点验证</h2>
+                <div id="tester" class="empty">请选择一个节点</div>
+                <h2 style="margin-top:16px">结果</h2>
+                <pre id="result">{}</pre>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+const state = {
+    boardTypes: [],
+    devices: [],
+    nodes: [],
+    selectedNode: null,
+    pollTimer: null
+};
+
+const $ = id => document.getElementById(id);
+
+function setStatus(text, kind = '') {
+    const el = $('status');
+    el.textContent = text;
+    el.className = `pill ${kind}`;
+}
+
+function showResult(value) {
+    $('result').textContent = JSON.stringify(value, null, 2);
+}
+
+async function api(path, options = {}) {
+    setStatus('loading');
+    const res = await fetch(apiUrl(path), {
+        headers: {'Content-Type': 'application/json'},
+        ...options
+    });
+    const json = await res.json();
+    if (!res.ok || json.code !== 20000) {
+        setStatus('error', 'bad');
+        throw new Error(json.message || res.statusText);
+    }
+    setStatus('ok', 'ok');
+    return json.data;
+}
+
+function apiUrl(path) {
+    const base = $('apiBase').value.trim();
+    if (!base) return path;
+    return base.replace(/\/$/, '') + path;
+}
+
+async function loadBasics() {
+    try {
+        const [types, devices] = await Promise.all([
+            api('/api/v1/sdui/board-types'),
+            api('/api/v1/sdui/devices?size=200')
+        ]);
+        state.boardTypes = Array.isArray(types) ? types : [];
+        state.devices = devices.items || [];
+        renderSelects();
+    } catch (e) {
+        showResult({error: e.message});
+    }
+}
+
+function renderSelects() {
+    $('boardType').innerHTML = state.boardTypes.map(type =>
+        `<option value="${escapeHtml(type.key)}">${escapeHtml(type.label || type.key)} (${type.onlineCount || 0}/${type.deviceCount || 0})</option>`
+    ).join('');
+    $('device').innerHTML = state.devices.map(device =>
+        `<option value="${escapeHtml(device.deviceId)}">${escapeHtml(device.name || device.deviceId)} - ${escapeHtml(device.status || '')}</option>`
+    ).join('');
+    if (!state.boardTypes.length) $('boardType').innerHTML = '<option value="">无板卡类型</option>';
+    if (!state.devices.length) $('device').innerHTML = '<option value="">无设备</option>';
+}
+
+async function loadNodes() {
+    const typeKey = $('boardType').value;
+    const deviceId = $('device').value;
+    if (!typeKey) return showResult({error: '请选择板卡类型'});
+    if (!deviceId) return showResult({error: '请选择绑定设备'});
+
+    try {
+        const typeCatalog = await api(`/api/v1/sdui/board-types/${encodeURIComponent(typeKey)}/capability-nodes`);
+        const deviceCatalog = await api(`/api/v1/sdui/capability-nodes/${encodeURIComponent(deviceId)}`);
+        state.nodes = deviceCatalog.nodes || [];
+        state.selectedNode = null;
+        $('bindingInfo').innerHTML = `
+            <div>板卡：${escapeHtml(typeCatalog.label || typeKey)}</div>
+            <div>设备：${escapeHtml(deviceId)}</div>
+            <div>设备节点：${state.nodes.length}</div>
+            <div>未解析：${(deviceCatalog.unresolvedNodes || []).length}</div>
+        `;
+        showResult({typeCatalog, deviceCatalog});
+        renderNodes();
+        renderTester();
+    } catch (e) {
+        showResult({error: e.message});
+    }
+}
+
+function renderNodes() {
+    $('nodeCount').textContent = `${state.nodes.length} nodes`;
+    if (!state.nodes.length) {
+        $('nodes').innerHTML = '<div class="empty">没有可验证节点</div>';
+        return;
+    }
+    $('nodes').innerHTML = state.nodes.map((node, index) => `
+        <article class="card ${state.selectedNode === node ? 'active' : ''}" data-index="${index}">
+            <div class="title-row">
+                <div>
+                    <div class="node-title">${escapeHtml(node.displayName || node.nodeType)}</div>
+                    <div class="node-desc">${escapeHtml(node.description || '')}</div>
+                </div>
+                <span class="pill">${escapeHtml(node.runtimeMode || '')}</span>
+            </div>
+            <div class="muted">${escapeHtml(node.nodeType)} · ${escapeHtml(node.capabilityId || '')}</div>
+        </article>
+    `).join('');
+    document.querySelectorAll('.card[data-index]').forEach(card => {
+        card.addEventListener('click', () => {
+            state.selectedNode = state.nodes[Number(card.dataset.index)];
+            renderNodes();
+            renderTester();
+        });
+    });
+}
+
+function renderTester() {
+    clearPoll();
+    const node = state.selectedNode;
+    if (!node) {
+        $('tester').className = 'empty';
+        $('tester').innerHTML = '请选择一个节点';
+        return;
+    }
+    $('tester').className = '';
+    if (node.runtimeMode === 'trigger') {
+        renderInputTester(node);
+        return;
+    }
+    if (['action', 'session', 'ui_patch'].includes(node.runtimeMode)) {
+        renderOutputTester(node);
+        return;
+    }
+    $('tester').innerHTML = '<div class="empty">该节点暂不支持验证</div>';
+}
+
+function renderInputTester(node) {
+    const events = findEvents(node);
+    $('tester').innerHTML = `
+        <div class="form-grid">
+            <div class="field">
+                <label>事件</label>
+                <select id="eventId">
+                    ${events.map(evt => `<option value="${escapeHtml(evt.eventId)}">${escapeHtml(evt.displayName || evt.eventId)}</option>`).join('')}
+                </select>
+            </div>
+            <div class="field">
+                <label>nodeId 可选</label>
+                <input id="nodeId" value="${escapeHtml(node.instanceId || '')}">
+            </div>
+            <div class="field">
+                <label>超时 ms</label>
+                <input id="timeoutMs" type="number" value="30000">
+            </div>
+            <button id="startInputTest" class="primary">开始监听输入</button>
+        </div>
+    `;
+    $('startInputTest').addEventListener('click', () => startInputTest(node));
+}
+
+function renderOutputTester(node) {
+    const fields = outputFields(node);
+    $('tester').innerHTML = `
+        <div class="form-grid">
+            ${fields.map(fieldHtml).join('')}
+            <button id="runOutputTest" class="primary">执行输出验证</button>
+        </div>
+    `;
+    $('runOutputTest').addEventListener('click', () => runOutputTest(node, fields));
+}
+
+async function startInputTest(node) {
+    const deviceId = $('device').value;
+    const body = {
+        nodeType: node.nodeType,
+        capabilityId: node.capabilityId,
+        eventId: $('eventId').value,
+        nodeId: $('nodeId').value,
+        timeoutMs: Number($('timeoutMs').value || 30000)
+    };
+    try {
+        const test = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId)}/node-tests/input`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+        showResult(test);
+        pollTest(deviceId, test.testId);
+    } catch (e) {
+        showResult({error: e.message});
+    }
+}
+
+function pollTest(deviceId, testId) {
+    clearPoll();
+    state.pollTimer = setInterval(async () => {
+        try {
+            const test = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId)}/node-tests/${encodeURIComponent(testId)}`);
+            showResult(test);
+            if (test.status !== 'waiting') clearPoll();
+        } catch (e) {
+            showResult({error: e.message});
+            clearPoll();
+        }
+    }, 1000);
+}
+
+async function runOutputTest(node, fields) {
+    const deviceId = $('device').value;
+    const params = {};
+    for (const field of fields) {
+        const el = document.querySelector(`[data-param="${cssEscape(field.name)}"]`);
+        if (!el) continue;
+        let value = el.value;
+        if (value === '' && !field.required) continue;
+        if (field.type === 'int' || field.type === 'number') value = Number(value);
+        params[field.name] = value;
+    }
+    try {
+        const result = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId)}/node-tests/output`, {
+            method: 'POST',
+            body: JSON.stringify({nodeType: node.nodeType, params})
+        });
+        showResult(result);
+    } catch (e) {
+        showResult({error: e.message});
+    }
+}
+
+function findEvents(node) {
+    const output = (node.outputPorts || []).find(port => port.id === 'event') || (node.outputPorts || [])[0];
+    return output?.schema?.events || [];
+}
+
+function outputFields(node) {
+    if (node.nodeType === 'audio.record') {
+        return [{name: 'control', type: 'enum', required: true, values: ['toggle', 'start', 'stop'], default: 'toggle'}];
+    }
+    if (node.nodeType === 'audio.play') {
+        return [
+            {name: 'text', type: 'string', required: false},
+            {name: 'preset', type: 'enum', required: false, values: ['notification', 'success', 'error', 'warning', 'click', 'beep']},
+            {name: 'artifact_id', type: 'string', required: false}
+        ];
+    }
+    return node.parameters || [];
+}
+
+function fieldHtml(field) {
+    const label = escapeHtml(field.label || field.name);
+    const name = escapeHtml(field.name);
+    const value = field.default ?? '';
+    if (field.type === 'enum' || field.values) {
+        const values = field.values || [];
+        return `<div class="field"><label>${label}</label><select data-param="${name}">
+            ${values.map(v => `<option value="${escapeHtml(String(v.value || v))}" ${(v.value || v) === value ? 'selected' : ''}>${escapeHtml(String(v.label || v.displayName || v.value || v))}</option>`).join('')}
+        </select></div>`;
+    }
+    if (field.type === 'boolean') {
+        return `<div class="field"><label>${label}</label><select data-param="${name}">
+            <option value="false" ${value === true ? '' : 'selected'}>否</option>
+            <option value="true" ${value === true ? 'selected' : ''}>是</option>
+        </select></div>`;
+    }
+    const type = field.type === 'int' || field.type === 'number' ? 'number' : 'text';
+    return `<div class="field"><label>${label}</label><input data-param="${name}" type="${type}" value="${escapeHtml(String(value))}"></div>`;
+}
+
+function clearPoll() {
+    if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+    }
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function cssEscape(value) {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/"/g, '\\"');
+}
+
+$('refresh').addEventListener('click', loadBasics);
+$('loadNodes').addEventListener('click', loadNodes);
+$('apiBase').value = location.protocol.startsWith('http') && location.port === '8080'
+    ? location.origin
+    : 'http://127.0.0.1:8080';
+loadBasics();
+</script>
+</body>
+</html>

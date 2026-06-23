@@ -3,6 +3,8 @@ package com.zwbd.agentnexus.sdui.controller;
 import com.zwbd.agentnexus.common.web.ApiResponse;
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
+import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
+import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
 import com.zwbd.agentnexus.sdui.event.EventDefinition;
 import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
@@ -37,6 +39,7 @@ public class BoardTypeController {
     private final SectionEditorService sectionEditorService;
     private final EventRegistry eventRegistry;
     private final DeviceSessionManager sessionManager;
+    private final CapabilityNodeCatalogService nodeCatalogService;
 
     // ── List all device types ──
 
@@ -223,6 +226,24 @@ public class BoardTypeController {
             }
             data.put("availableTriggers", availableTriggers);
 
+            return ApiResponse.ok(data);
+        });
+    }
+
+    @GetMapping("/{typeKey}/capability-nodes")
+    public ApiResponse<Map<String, Object>> capabilityNodesByType(@PathVariable String typeKey) {
+        return resolveExampleDevice(typeKey, (deviceId) -> {
+            CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
+            CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("typeKey", typeKey);
+            data.put("board", typeInfo != null ? typeInfo.board() : null);
+            data.put("label", typeInfo != null ? typeInfo.label() : null);
+            data.put("exampleDeviceId", deviceId);
+            data.put("online", sessionManager.isDeviceOnline(deviceId));
+            data.put("status", catalog.status());
+            data.put("nodes", catalog.nodes());
+            data.put("unresolvedNodes", catalog.unresolvedNodes());
             return ApiResponse.ok(data);
         });
     }

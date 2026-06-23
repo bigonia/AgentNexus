@@ -29,6 +29,15 @@ public class CommandService {
     private final ObjectMapper objectMapper;
 
     private static final long COMMAND_TIMEOUT_SECONDS = 10L;
+    private static final String AUDIO_PCM_ACK_DETAIL = "audio_pcm";
+    private static final long AUDIO_ACK_LOG_INTERVAL_MS = 5_000L;
+    private static final long AUDIO_ACK_LOG_BATCH_SIZE = 100L;
+
+    private final Object audioAckLogLock = new Object();
+    private long pendingAudioAckCount;
+    private int firstPendingAudioAckSeq;
+    private int lastPendingAudioAckSeq;
+    private long lastAudioAckLogAt;
 
     @Transactional
     public SduiControlDispatchResult dispatchCommand(String deviceId, String action, Object value) {
@@ -82,6 +91,21 @@ public class CommandService {
     }
 
     private SduiControlDispatchResult dispatchDeviceHandledCommand(String deviceId, String action, Object value) {
+        if ("rgb.off".equals(action)) {
+            CommandDispatcher.DispatchResult result = dispatcher.dispatchWithAction(deviceId, action, "rgb_off", Map.of());
+            SduiDeviceCommand command = new SduiDeviceCommand();
+            command.setDeviceId(deviceId);
+            command.setTopic(result.topic());
+            command.setCmdId(result.cmdId());
+            command.setCommand(action);
+            command.setAction(result.action());
+            command.setPayload(result.payload());
+            command.setStatus(result.sent() ? "SENT" : "FAILED");
+            commandRepository.save(command);
+            commandResultStreamService.publishCommand(command, "dispatch");
+            return new SduiControlDispatchResult(result.cmdId(), result.action(), null, result.sent(), command.getStatus());
+        }
+
         if (!"rgb.effect.set".equals(action)) {
             return null;
         }
@@ -161,7 +185,65 @@ public class CommandService {
 
     @Transactional
     public void handleBinaryAck(int seq, int code, String detail) {
-        log.info("Binary ACK seq={} code={} detail={}", seq, code, detail);
+        if (code == 0 && AUDIO_PCM_ACK_DETAIL.equals(detail)) {
+            handleAudioPcmAck(seq);
+            return;
+        }
+
+        if (code == 0) {
+            log.debug("Binary ACK seq={} code={} detail={}", seq, code, detail);
+        } else {
+            log.warn("Binary ACK seq={} code={} detail={}", seq, code, detail);
+        }
+    }
+
+    private void handleAudioPcmAck(int seq) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        synchronized (audioAckLogLock) {
+            if (pendingAudioAckCount == 0) {
+                firstPendingAudioAckSeq = seq;
+                if (lastAudioAckLogAt == 0) {
+                    lastAudioAckLogAt = now;
+                }
+            }
+            pendingAudioAckCount++;
+            lastPendingAudioAckSeq = seq;
+
+            boolean batchReached = pendingAudioAckCount >= AUDIO_ACK_LOG_BATCH_SIZE;
+            boolean intervalReached = now - lastAudioAckLogAt >= AUDIO_ACK_LOG_INTERVAL_MS;
+            if (!batchReached && !intervalReached) {
+                return;
+            }
+
+            log.debug("Binary ACK audio_pcm merged: count={} seq={}..{}",
+                    pendingAudioAckCount, firstPendingAudioAckSeq, lastPendingAudioAckSeq);
+            pendingAudioAckCount = 0;
+            lastAudioAckLogAt = now;
+        }
+    }
+
+    public String waitForControlAck(String deviceId, String cmdId, long timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() <= deadline) {
+            String status = commandRepository.findFirstByDeviceIdAndCmdIdOrderByCreatedAtDesc(deviceId, cmdId)
+                    .map(SduiDeviceCommand::getStatus)
+                    .orElse("");
+            if ("ACKED".equals(status) || "REJECTED".equals(status)
+                    || "ERROR".equals(status) || "TIMEOUT".equals(status) || "FAILED".equals(status)) {
+                return status;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return "INTERRUPTED";
+            }
+        }
+        return "ACK_TIMEOUT";
     }
 
     @Transactional

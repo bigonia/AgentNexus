@@ -43,6 +43,7 @@ public class FfmpegSttProvider implements SttProvider {
     private final AudioConversionService conversionService;
     private final String whisperPath;
     private final String whisperModel;
+    private final String whisperLanguage;
 
     private volatile boolean checked;
     private volatile boolean available;
@@ -50,10 +51,12 @@ public class FfmpegSttProvider implements SttProvider {
     public FfmpegSttProvider(
             @Value("${sdui.tts.ffmpeg-path:ffmpeg}") String ffmpegPath,
             @Value("${sdui.stt.whisper-path:whisper}") String whisperPath,
-            @Value("${sdui.stt.whisper-model:base}") String whisperModel) {
+            @Value("${sdui.stt.whisper-model:base}") String whisperModel,
+            @Value("${sdui.stt.language:zh}") String whisperLanguage) {
         this.conversionService = new AudioConversionService(ffmpegPath);
         this.whisperPath = whisperPath;
         this.whisperModel = whisperModel;
+        this.whisperLanguage = normalizeLanguage(whisperLanguage);
     }
 
     @Override
@@ -77,6 +80,7 @@ public class FfmpegSttProvider implements SttProvider {
             }
 
             // Step 2: Whisper recognition
+            warnIfEnglishOnlyModel();
             if (!runWhisper(wavFile, tempDir)) {
                 log.warn("STT: whisper recognition failed");
                 return null;
@@ -122,6 +126,7 @@ public class FfmpegSttProvider implements SttProvider {
         ProcessBuilder pb = new ProcessBuilder(
                 whisperPath,
                 "-m", whisperModel,
+                "-l", whisperLanguage,
                 "-f", wavFile.toAbsolutePath().toString(),
                 "-otxt",
                 "-of", outputDir.resolve("output").toAbsolutePath().toString())
@@ -145,6 +150,7 @@ public class FfmpegSttProvider implements SttProvider {
                 whisperPath,
                 wavFile.toAbsolutePath().toString(),
                 "--model", whisperModel,
+                "--language", languageForOpenAiCli(),
                 "--output_dir", outputDir.toAbsolutePath().toString(),
                 "--output_format", "txt")
                 .redirectErrorStream(true);
@@ -173,13 +179,21 @@ public class FfmpegSttProvider implements SttProvider {
             return false;
         }
 
+        if (looksLikeFilePath(whisperModel) && !Files.exists(Path.of(whisperModel))) {
+            log.warn("Whisper model not found: {}. "
+                    + "Download a multilingual model for Chinese, for example ggml-tiny.bin or ggml-base.bin, "
+                    + "or update sdui.stt.whisper-model.", whisperModel);
+            return false;
+        }
+
         try {
             Process p = new ProcessBuilder(whisperPath, "--help")
                     .redirectErrorStream(true)
                     .start();
             if (p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0) {
                 available = true;
-                log.info("Whisper STT provider ready: {} (model={})", whisperPath, whisperModel);
+                log.info("Whisper STT provider ready: {} (model={}, language={})",
+                        whisperPath, whisperModel, whisperLanguage);
             } else {
                 // Try whisper -h (shorthand)
                 Process p2 = new ProcessBuilder(whisperPath, "-h")
@@ -187,7 +201,8 @@ public class FfmpegSttProvider implements SttProvider {
                         .start();
                 if (p2.waitFor(5, TimeUnit.SECONDS) && p2.exitValue() == 0) {
                     available = true;
-                    log.info("Whisper STT provider ready: {} (model={})", whisperPath, whisperModel);
+                    log.info("Whisper STT provider ready: {} (model={}, language={})",
+                            whisperPath, whisperModel, whisperLanguage);
                 } else {
                     log.info("Whisper not available at '{}' — STT disabled. "
                             + "Install via: brew install whisper-cpp", whisperPath);
@@ -197,5 +212,36 @@ public class FfmpegSttProvider implements SttProvider {
             log.info("Whisper not available at '{}': {} — STT disabled", whisperPath, e.getMessage());
         }
         return available;
+    }
+
+    private String normalizeLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return "zh";
+        }
+        String normalized = language.trim();
+        if ("chinese".equalsIgnoreCase(normalized) || "cn".equalsIgnoreCase(normalized)) {
+            return "zh";
+        }
+        return normalized;
+    }
+
+    private String languageForOpenAiCli() {
+        if ("zh".equalsIgnoreCase(whisperLanguage)) {
+            return "Chinese";
+        }
+        return whisperLanguage;
+    }
+
+    private void warnIfEnglishOnlyModel() {
+        String model = whisperModel == null ? "" : whisperModel.toLowerCase();
+        if (model.contains(".en.") || model.endsWith(".en") || model.endsWith(".en.bin")) {
+            log.warn("STT model appears to be English-only: {}. "
+                    + "Use a multilingual Whisper model such as ggml-tiny.bin, ggml-base.bin, or ggml-small.bin for Chinese.",
+                    whisperModel);
+        }
+    }
+
+    private boolean looksLikeFilePath(String model) {
+        return model != null && (model.contains("/") || model.contains("\\") || model.endsWith(".bin"));
     }
 }

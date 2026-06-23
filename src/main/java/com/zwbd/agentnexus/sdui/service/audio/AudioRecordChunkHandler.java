@@ -65,7 +65,6 @@ public class AudioRecordChunkHandler implements BinaryFrameHandler {
             return;
         }
 
-        log.debug("Audio record chunk: device={}, bytes={}, seq={}", deviceId, pcmChunk.length, frame.seq());
         recordSessionManager.appendChunk(deviceId, pcmChunk);
 
         // Throttled progress event: at most once per second

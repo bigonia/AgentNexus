@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SDUI 设备互联验证</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f5f7fb;
+            --panel: #ffffff;
+            --line: #d8dee9;
+            --text: #18202c;
+            --muted: #667085;
+            --accent: #1769e0;
+            --ok: #087443;
+            --warn: #9a6700;
+            --bad: #b42318;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        header {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 650;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 360px minmax(0, 1fr);
+            min-height: calc(100vh - 56px);
+        }
+
+        aside {
+            padding: 18px;
+            border-right: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        section {
+            padding: 18px 22px;
+        }
+
+        .field {
+            display: grid;
+            gap: 6px;
+            margin-bottom: 13px;
+        }
+
+        label {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 650;
+        }
+
+        input, select, textarea, button {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #fff;
+            color: var(--text);
+            font: inherit;
+        }
+
+        input, select {
+            height: 36px;
+            padding: 0 10px;
+        }
+
+        textarea {
+            min-height: 82px;
+            padding: 10px;
+            resize: vertical;
+        }
+
+        button {
+            height: 36px;
+            padding: 0 12px;
+            cursor: pointer;
+            font-weight: 650;
+        }
+
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        button.secondary {
+            background: #eef4ff;
+            border-color: #b8cdf8;
+            color: #174ea6;
+        }
+
+        button.danger {
+            background: #fff1f0;
+            border-color: #fecdca;
+            color: var(--bad);
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .toolbar button {
+            width: auto;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 999px;
+            background: #eef2f6;
+            color: #344054;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .pill.ok { background: #dcfae6; color: var(--ok); }
+        .pill.warn { background: #fef0c7; color: var(--warn); }
+        .pill.bad { background: #fee4e2; color: var(--bad); }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+
+        .panel h2 {
+            margin: 0 0 12px;
+            font-size: 15px;
+        }
+
+        .split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 420px;
+            gap: 14px;
+        }
+
+        .small-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .muted { color: var(--muted); }
+
+        pre {
+            margin: 0;
+            padding: 12px;
+            border-radius: 6px;
+            background: #101828;
+            color: #e4e7ec;
+            overflow: auto;
+            max-height: 460px;
+            font-size: 12px;
+        }
+
+        .run {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+            margin-bottom: 10px;
+        }
+
+        .run-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .empty {
+            border: 1px dashed var(--line);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            color: var(--muted);
+            background: rgba(255,255,255,.65);
+        }
+
+        @media (max-width: 980px) {
+            main, .split, .small-grid {
+                grid-template-columns: 1fr;
+            }
+            aside {
+                border-right: 0;
+                border-bottom: 1px solid var(--line);
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>SDUI 设备互联验证</h1>
+    <span id="status" class="pill">ready</span>
+</header>
+<main>
+    <aside>
+        <div class="field">
+            <label for="apiBase">API Base</label>
+            <input id="apiBase" placeholder="http://127.0.0.1:8080">
+        </div>
+        <div class="toolbar">
+            <button id="refresh" class="secondary">刷新设备</button>
+            <button id="clear" class="danger">清空</button>
+        </div>
+        <div class="field">
+            <label for="workflowList">已有工作流</label>
+            <select id="workflowList"></select>
+        </div>
+        <div class="field">
+            <label for="deploymentList">已有部署</label>
+            <select id="deploymentList"></select>
+        </div>
+        <div class="toolbar">
+            <button id="loadWorkflows" class="secondary">加载工作流</button>
+            <button id="useDeployment" class="secondary">使用部署</button>
+        </div>
+        <div class="field">
+            <label for="sourceDevice">source 触发设备</label>
+            <select id="sourceDevice"></select>
+        </div>
+        <div class="field">
+            <label for="targetDevice">target 响应设备</label>
+            <select id="targetDevice"></select>
+        </div>
+        <div class="field">
+            <label for="triggerEvent">触发事件</label>
+            <select id="triggerEvent"></select>
+        </div>
+        <div class="field">
+            <label for="triggerNodeId">触发 nodeId</label>
+            <input id="triggerNodeId" placeholder="pwr">
+        </div>
+        <div class="field">
+            <label for="targetNodeType">目标输出节点</label>
+            <select id="targetNodeType">
+                <option value="rgb.effect">RGB 灯光</option>
+                <option value="audio.play">音频播放</option>
+                <option value="audio.record">音频录制</option>
+                <option value="ui.update">UI 更新</option>
+                <option value="display.section">Section 更新</option>
+            </select>
+        </div>
+        <div class="toolbar">
+            <button id="createDeploy" class="primary">创建并部署</button>
+            <button id="createArtifactFlow" class="secondary">产物引用模板</button>
+            <button id="testTrigger" class="secondary" disabled>手动触发</button>
+        </div>
+        <button id="stopDeployment" class="danger" disabled>停止部署</button>
+    </aside>
+
+    <section>
+        <div class="split">
+            <div>
+                <div class="panel">
+                    <h2>输出参数</h2>
+                    <div id="params"></div>
+                </div>
+                <div class="panel">
+                    <h2>运行记录</h2>
+                    <div class="toolbar">
+                        <button id="loadRuns" class="secondary" disabled>刷新 Runs</button>
+                    </div>
+                    <div id="runs" class="empty">暂无部署</div>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>当前状态</h2>
+                <pre id="output">{}</pre>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const state = {
+    devices: [],
+    workflows: [],
+    deployments: [],
+    sourceCatalog: null,
+    targetCatalog: null,
+    workflowId: '',
+    deploymentId: '',
+    pollTimer: null
+};
+
+function apiBase() {
+    return $('apiBase').value.replace(/\/$/, '');
+}
+
+function defaultApiBase() {
+    const origin = window.location.origin;
+    if (window.location.port === '8080') return origin;
+    return 'http://127.0.0.1:8080';
+}
+
+function setStatus(text, kind = '') {
+    $('status').textContent = text;
+    $('status').className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+function show(data) {
+    $('output').textContent = JSON.stringify(data, null, 2);
+}
+
+async function request(path, options = {}) {
+    const res = await fetch(apiBase() + path, {
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options
+    });
+    const json = await res.json();
+    if (!res.ok || json.code !== 20000) {
+        throw new Error(json.message || res.statusText);
+    }
+    return json.data;
+}
+
+function fillSelect(select, items, getValue, getLabel) {
+    select.innerHTML = '';
+    for (const item of items) {
+        const option = document.createElement('option');
+        option.value = getValue(item);
+        option.textContent = getLabel(item);
+        select.appendChild(option);
+    }
+}
+
+async function refreshDevices() {
+    setStatus('loading', 'warn');
+    const data = await request('/api/v1/sdui/devices?size=200');
+    const raw = Array.isArray(data) ? data : (data.content || data.items || data.devices || []);
+    state.devices = raw.map((item) => ({
+        id: item.deviceId || item.id || item.mac || item.device_id,
+        name: item.name || item.displayName || item.deviceName || '',
+        status: item.status || item.onlineStatus || ''
+    })).filter((item) => item.id);
+    fillSelect($('sourceDevice'), state.devices, d => d.id, d => `${d.id}${d.name ? ' / ' + d.name : ''}`);
+    fillSelect($('targetDevice'), state.devices, d => d.id, d => `${d.id}${d.name ? ' / ' + d.name : ''}`);
+    if (state.devices.length > 1) $('targetDevice').selectedIndex = 1;
+    await loadCatalogs();
+    setStatus('ready', 'ok');
+}
+
+async function loadWorkflows() {
+    const workflows = await request('/api/v1/sdui/node-workflows');
+    state.workflows = workflows;
+    fillSelect($('workflowList'), workflows, w => w.workflowId || w.id, w => {
+        const version = w.version ? ` v${w.version}` : '';
+        return `${w.name || w.workflowId}${version}`;
+    });
+    await loadDeployments();
+}
+
+async function loadDeployments() {
+    const workflowId = $('workflowList').value;
+    state.deployments = [];
+    $('deploymentList').innerHTML = '';
+    if (!workflowId) return;
+    const deployments = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments`);
+    state.deployments = deployments;
+    fillSelect($('deploymentList'), deployments, d => d.deploymentId, d => {
+        const source = d.slotBindings?.source || '-';
+        const target = d.slotBindings?.target || '-';
+        return `${d.status} / ${source} -> ${target}`;
+    });
+}
+
+async function loadCatalogs() {
+    const source = $('sourceDevice').value;
+    const target = $('targetDevice').value;
+    state.sourceCatalog = source ? await request(`/api/v1/sdui/capability-nodes/${encodeURIComponent(source)}`) : null;
+    state.targetCatalog = target ? await request(`/api/v1/sdui/capability-nodes/${encodeURIComponent(target)}`) : null;
+    renderTriggerEvents();
+    renderParams();
+}
+
+function renderTriggerEvents() {
+    const buttonNodes = (state.sourceCatalog?.nodes || []).filter(n => n.nodeType === 'button.trigger');
+    const events = [];
+    for (const node of buttonNodes) {
+        const portEvents = node.outputPorts?.[0]?.schema?.events || node.outputPorts?.[0]?.options?.events || node.source?.events || [];
+        for (const event of portEvents) {
+            events.push({
+                eventId: event.eventId,
+                nodeId: node.instanceId,
+                label: `${node.displayName || node.instanceId} / ${event.displayName || event.eventName || event.eventId}`
+            });
+        }
+    }
+    if (!events.length) {
+        events.push({ eventId: 'input:buttons.pwr.short_press', nodeId: 'pwr', label: 'PWR / short_press' });
+    }
+    fillSelect($('triggerEvent'), events, e => e.eventId, e => e.label);
+    $('triggerEvent').dataset.events = JSON.stringify(events);
+    $('triggerNodeId').value = events[0]?.nodeId || 'pwr';
+}
+
+function currentTrigger() {
+    const events = JSON.parse($('triggerEvent').dataset.events || '[]');
+    return events.find(e => e.eventId === $('triggerEvent').value) || {
+        eventId: $('triggerEvent').value,
+        nodeId: $('triggerNodeId').value
+    };
+}
+
+function renderParams() {
+    const type = $('targetNodeType').value;
+    if (type === 'rgb.effect') {
+        $('params').innerHTML = `
+            <div class="small-grid">
+                <div class="field"><label>mode</label><select id="rgbMode"><option value="solid">solid</option><option value="breathe">breathe</option><option value="blink">blink</option><option value="off">off</option></select></div>
+                <div class="field"><label>off</label><select id="rgbOff"><option value="false">false</option><option value="true">true</option></select></div>
+                <div class="field"><label>r</label><input id="rgbR" type="number" min="0" max="255" value="0"></div>
+                <div class="field"><label>g</label><input id="rgbG" type="number" min="0" max="255" value="120"></div>
+                <div class="field"><label>b</label><input id="rgbB" type="number" min="0" max="255" value="255"></div>
+                <div class="field"><label>brightness</label><input id="rgbBrightness" type="number" min="0" max="255" value="80"></div>
+                <div class="field"><label>period_ms</label><input id="rgbPeriod" type="number" value="1200"></div>
+                <div class="field"><label>step_ms</label><input id="rgbStep" type="number" value="40"></div>
+            </div>`;
+        return;
+    }
+    if (type === 'audio.play') {
+        $('params').innerHTML = `
+            <div class="field"><label>text</label><textarea id="audioText">测试设备互联播放</textarea></div>
+            <div class="field"><label>preset</label><input id="audioPreset" placeholder="notification"></div>
+            <div class="field"><label>artifact_id</label><input id="audioArtifact" placeholder="audio-record-latest"></div>`;
+        return;
+    }
+    if (type === 'ui.update' || type === 'display.section') {
+        $('params').innerHTML = `
+            <div class="field"><label>body</label><textarea id="uiBody">触发：$event.nodeId</textarea></div>`;
+        return;
+    }
+    $('params').innerHTML = `
+        <div class="field"><label>control</label><select id="recordControl"><option value="toggle">toggle</option><option value="start">start</option><option value="stop">stop</option></select></div>`;
+}
+
+function targetParams() {
+    const type = $('targetNodeType').value;
+    if (type === 'rgb.effect') {
+        return {
+            mode: $('rgbMode').value,
+            off: $('rgbOff').value === 'true',
+            r: Number($('rgbR').value || 0),
+            g: Number($('rgbG').value || 0),
+            b: Number($('rgbB').value || 0),
+            brightness: Number($('rgbBrightness').value || 0),
+            period_ms: Number($('rgbPeriod').value || 1200),
+            step_ms: Number($('rgbStep').value || 40)
+        };
+    }
+    if (type === 'audio.play') {
+        return {
+            text: $('audioText').value.trim(),
+            preset: $('audioPreset').value.trim(),
+            artifact_id: $('audioArtifact').value.trim()
+        };
+    }
+    if (type === 'ui.update' || type === 'display.section') {
+        return {
+            patch: {
+                pageId: 'main',
+                patches: [{
+                    sectionId: 'workflow_text',
+                    op: 'update',
+                    sectionType: 'text_section',
+                    fields: {
+                        title: 'Workflow',
+                        body: $('uiBody').value
+                    }
+                }]
+            }
+        };
+    }
+    return { control: $('recordControl').value };
+}
+
+function workflowBody() {
+    const trigger = currentTrigger();
+    const targetNodeType = $('targetNodeType').value;
+    return {
+        name: `debug-${Date.now()}`,
+        slots: [
+            { slotId: 'source', typeKey: '', displayName: '触发设备' },
+            { slotId: 'target', typeKey: '', displayName: '响应设备' }
+        ],
+        nodes: [
+            {
+                nodeId: 'source_button',
+                slotId: 'source',
+                nodeType: 'button.trigger',
+                params: {
+                    eventId: trigger.eventId,
+                    nodeId: $('triggerNodeId').value.trim() || trigger.nodeId || ''
+                }
+            },
+            {
+                nodeId: 'target_action',
+                slotId: 'target',
+                nodeType: targetNodeType,
+                params: targetParams()
+            }
+        ],
+        edges: [{ from: 'source_button', to: 'target_action' }]
+    };
+}
+
+function artifactWorkflowBody() {
+    const trigger = currentTrigger();
+    return {
+        name: `artifact-ref-${Date.now()}`,
+        slots: [
+            { slotId: 'source', typeKey: '', displayName: '触发设备' },
+            { slotId: 'target', typeKey: '', displayName: '响应设备' }
+        ],
+        nodes: [
+            {
+                nodeId: 'source_button',
+                slotId: 'source',
+                nodeType: 'button.trigger',
+                params: {
+                    eventId: trigger.eventId,
+                    nodeId: $('triggerNodeId').value.trim() || trigger.nodeId || ''
+                }
+            },
+            {
+                nodeId: 'record_stop',
+                slotId: 'target',
+                nodeType: 'audio.record',
+                params: { control: 'stop' }
+            },
+            {
+                nodeId: 'play_recording',
+                slotId: 'target',
+                nodeType: 'audio.play',
+                params: { artifact_id: '$nodes.record_stop.artifact.artifactRef' }
+            },
+            {
+                nodeId: 'show_text',
+                slotId: 'target',
+                nodeType: 'ui.update',
+                params: {
+                    patch: {
+                        pageId: 'main',
+                        patches: [{
+                            sectionId: 'workflow_text',
+                            op: 'update',
+                            sectionType: 'text_section',
+                            fields: {
+                                title: 'STT',
+                                body: '$nodes.record_stop.artifact.text'
+                            }
+                        }]
+                    }
+                }
+            }
+        ],
+        edges: [
+            { from: 'source_button', to: 'record_stop' },
+            { from: 'source_button', to: 'play_recording' },
+            { from: 'source_button', to: 'show_text' }
+        ]
+    };
+}
+
+async function createAndDeploy() {
+    await createWorkflowAndDeploy(workflowBody());
+}
+
+async function createArtifactFlow() {
+    await createWorkflowAndDeploy(artifactWorkflowBody());
+}
+
+async function createWorkflowAndDeploy(body) {
+    setStatus('deploying', 'warn');
+    const workflow = await request('/api/v1/sdui/node-workflows', {
+        method: 'POST',
+        body: JSON.stringify(body)
+    });
+    state.workflowId = workflow.workflowId;
+    const deployment = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(state.workflowId)}/deployments`, {
+        method: 'POST',
+        body: JSON.stringify({
+            slotBindings: {
+                source: $('sourceDevice').value,
+                target: $('targetDevice').value
+            }
+        })
+    });
+    state.deploymentId = deployment.deploymentId;
+    $('testTrigger').disabled = false;
+    $('stopDeployment').disabled = false;
+    $('loadRuns').disabled = false;
+    show({ workflow, deployment });
+    startPolling();
+    setStatus('active', 'ok');
+}
+
+async function testTrigger() {
+    if (!state.workflowId || !state.deploymentId) return;
+    setStatus('triggering', 'warn');
+    const run = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(state.workflowId)}/deployments/${encodeURIComponent(state.deploymentId)}/test-trigger`, {
+        method: 'POST',
+        body: JSON.stringify({ triggerNodeId: 'source_button' })
+    });
+    show(run);
+    await loadRuns();
+    setStatus('active', 'ok');
+}
+
+async function stopDeployment() {
+    if (!state.workflowId || !state.deploymentId) return;
+    const result = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(state.workflowId)}/deployments/${encodeURIComponent(state.deploymentId)}`, {
+        method: 'DELETE'
+    });
+    show(result);
+    state.deploymentId = '';
+    $('testTrigger').disabled = true;
+    $('stopDeployment').disabled = true;
+    $('loadRuns').disabled = true;
+    stopPolling();
+    setStatus('stopped', 'warn');
+}
+
+async function loadRuns() {
+    if (!state.workflowId || !state.deploymentId) return;
+    const runs = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(state.workflowId)}/deployments/${encodeURIComponent(state.deploymentId)}/runs`);
+    renderRuns(runs);
+}
+
+function renderRuns(runs) {
+    if (!runs.length) {
+        $('runs').className = 'empty';
+        $('runs').textContent = '暂无运行记录';
+        return;
+    }
+    $('runs').className = '';
+    $('runs').innerHTML = runs.map(run => {
+        const cls = run.status === 'passed' ? 'ok' : (run.status === 'failed' ? 'bad' : 'warn');
+        const steps = (run.steps || []).map(step => `${step.nodeId} -> ${step.deviceId} / ${step.status}`).join('\\n');
+        return `<div class="run">
+            <div class="run-head">
+                <strong>${run.runId}</strong>
+                <span class="pill ${cls}">${run.status}</span>
+            </div>
+            <div class="muted">${run.createdAtIso || ''}</div>
+            <pre>${escapeHtml(steps || JSON.stringify(run, null, 2))}</pre>
+        </div>`;
+    }).join('');
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function startPolling() {
+    stopPolling();
+    state.pollTimer = setInterval(() => {
+        loadRuns().catch(err => setStatus(err.message, 'bad'));
+    }, 1500);
+}
+
+function stopPolling() {
+    if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+    }
+}
+
+function clearState() {
+    stopPolling();
+    state.workflowId = '';
+    state.deploymentId = '';
+    $('testTrigger').disabled = true;
+    $('stopDeployment').disabled = true;
+    $('loadRuns').disabled = true;
+    $('runs').className = 'empty';
+    $('runs').textContent = '暂无部署';
+    show({});
+    setStatus('ready');
+}
+
+async function useDeployment() {
+    const workflowId = $('workflowList').value;
+    const deploymentId = $('deploymentList').value;
+    if (!workflowId || !deploymentId) return;
+    state.workflowId = workflowId;
+    state.deploymentId = deploymentId;
+    $('testTrigger').disabled = false;
+    $('stopDeployment').disabled = false;
+    $('loadRuns').disabled = false;
+    const deployment = await request(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments/${encodeURIComponent(deploymentId)}`);
+    show(deployment);
+    await loadRuns();
+    startPolling();
+    setStatus('active', 'ok');
+}
+
+function bind() {
+    $('apiBase').value = defaultApiBase();
+    $('refresh').addEventListener('click', () => refreshDevices().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('clear').addEventListener('click', clearState);
+    $('loadWorkflows').addEventListener('click', () => loadWorkflows().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('workflowList').addEventListener('change', () => loadDeployments().catch(err => setStatus(err.message, 'bad')));
+    $('useDeployment').addEventListener('click', () => useDeployment().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('sourceDevice').addEventListener('change', () => loadCatalogs().catch(err => setStatus(err.message, 'bad')));
+    $('targetDevice').addEventListener('change', () => loadCatalogs().catch(err => setStatus(err.message, 'bad')));
+    $('triggerEvent').addEventListener('change', () => {
+        const trigger = currentTrigger();
+        $('triggerNodeId').value = trigger.nodeId || '';
+    });
+    $('targetNodeType').addEventListener('change', renderParams);
+    $('createDeploy').addEventListener('click', () => createAndDeploy().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('createArtifactFlow').addEventListener('click', () => createArtifactFlow().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('testTrigger').addEventListener('click', () => testTrigger().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('stopDeployment').addEventListener('click', () => stopDeployment().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    }));
+    $('loadRuns').addEventListener('click', () => loadRuns().catch(err => setStatus(err.message, 'bad')));
+    renderParams();
+    refreshDevices().catch(err => {
+        setStatus(err.message, 'bad');
+        show({ error: err.message });
+    });
+    loadWorkflows().catch(() => {});
+}
+
+bind();
+</script>
+</body>
+</html>

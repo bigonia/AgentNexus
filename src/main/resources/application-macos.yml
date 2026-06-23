@@ -17,4 +17,5 @@ sdui:
     ffmpeg-path: ffmpeg
   stt:
     whisper-path: /opt/homebrew/bin/whisper-cli
-    whisper-model: /opt/homebrew/share/whisper-cpp/models/ggml-tiny.en.bin
+    whisper-model: /opt/homebrew/share/whisper-cpp/models/ggml-tiny.bin
+    language: zh

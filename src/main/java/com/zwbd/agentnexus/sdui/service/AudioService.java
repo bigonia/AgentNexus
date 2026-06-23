@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -131,6 +132,20 @@ public class AudioService {
         return new PlayResult(null, pcm.length / 2, 0, sent);
     }
 
+    public PlayResult playWav(String deviceId, byte[] wavBytes) {
+        byte[] pcm = extractPcmFromWav(wavBytes);
+        if (pcm == null || pcm.length == 0) {
+            log.warn("WAV playback requested but no PCM data could be extracted: device={}", deviceId);
+            return new PlayResult(null, 0, 0, false);
+        }
+        boolean sent = sendAudioChunked(deviceId, pcm);
+        int durationMs = pcm.length * 1000 / (SAMPLE_RATE * 2);
+        log.info("WAV artifact sent to device {}: {} samples ({} frames), sent={}",
+                deviceId, pcm.length / 2,
+                (pcm.length + PCM_CHUNK_BYTES - 1) / PCM_CHUNK_BYTES, sent);
+        return new PlayResult(null, pcm.length / 2, durationMs, sent);
+    }
+
     public boolean isTtsAvailable() {
         return ttsProvider != null;
     }
@@ -187,6 +202,34 @@ public class AudioService {
         System.arraycopy(tone1, 0, combined, 0, tone1.length);
         System.arraycopy(tone2, 0, combined, tone1.length, tone2.length);
         return combined;
+    }
+
+    private byte[] extractPcmFromWav(byte[] wavBytes) {
+        if (wavBytes == null || wavBytes.length < 44) {
+            return wavBytes;
+        }
+        String riff = new String(wavBytes, 0, 4, StandardCharsets.US_ASCII);
+        String wave = new String(wavBytes, 8, 4, StandardCharsets.US_ASCII);
+        if (!"RIFF".equals(riff) || !"WAVE".equals(wave)) {
+            return wavBytes;
+        }
+
+        int offset = 12;
+        while (offset + 8 <= wavBytes.length) {
+            String chunkId = new String(wavBytes, offset, 4, StandardCharsets.US_ASCII);
+            int chunkSize = ByteBuffer.wrap(wavBytes, offset + 4, 4)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                    .getInt();
+            int dataStart = offset + 8;
+            if ("data".equals(chunkId)) {
+                int dataSize = Math.max(0, Math.min(chunkSize, wavBytes.length - dataStart));
+                byte[] pcm = new byte[dataSize];
+                System.arraycopy(wavBytes, dataStart, pcm, 0, dataSize);
+                return pcm;
+            }
+            offset = dataStart + chunkSize + (chunkSize % 2);
+        }
+        return null;
     }
 
     private record PresetDef(String name, double freqHz, double freq2Hz, int durationMs, boolean dual) {}

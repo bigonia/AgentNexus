@@ -66,6 +66,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/",
+                                "/sdui-node-test.html",
+                                "/sdui-workflow-test.html",
+                                "/sdui-workflow-editor.html",
                                 "/api/auth/login",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

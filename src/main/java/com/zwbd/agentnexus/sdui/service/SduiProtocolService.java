@@ -55,7 +55,7 @@ public class SduiProtocolService {
     public boolean sendAudioPcm(String deviceId, byte[] pcm) {
         byte[] frame = BinaryProtocolCodec.encode(
                 BinaryProtocolCodec.MSG_TYPE_AUDIO_PCM, audioSeq.incrementAndGet(), pcm);
-        log.info("Sending audio PCM to device={}, samples={}, frameSize={}",
+        log.debug("Sending audio PCM to device={}, samples={}, frameSize={}",
                 deviceId, pcm.length / 2, frame.length);
         return sessionManager.sendBinaryFrame(deviceId, frame);
     }

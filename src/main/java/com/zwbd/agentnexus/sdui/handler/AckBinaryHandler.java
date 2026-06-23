@@ -3,11 +3,9 @@ package com.zwbd.agentnexus.sdui.handler;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec.DecodedFrame;
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec.TlvEntry;
 import com.zwbd.agentnexus.sdui.service.CommandService;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
 
-@Slf4j
 @Component
 public class AckBinaryHandler implements BinaryFrameHandler {
 
@@ -28,7 +26,6 @@ public class AckBinaryHandler implements BinaryFrameHandler {
         String detail = frame.tlvs().stream()
                 .filter(t -> t.type() == 201)
                 .findFirst().map(TlvEntry::asString).orElse("");
-        log.info("ACK received: code={}, detail={}", code, detail);
         commandService.handleBinaryAck(frame.seq(), code, detail);
     }
 }

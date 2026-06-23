@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.SduiMessage;
 import com.zwbd.agentnexus.sdui.TopicHandler;
+import com.zwbd.agentnexus.sdui.artifact.SduiArtifactService;
 import com.zwbd.agentnexus.sdui.debug.DebugArtifactStore;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
 import com.zwbd.agentnexus.sdui.handler.EventInputHandler;
@@ -52,6 +53,7 @@ public class AudioRecordHandler implements TopicHandler {
     private final DeviceLifecycleService lifecycleService;
     private final AudioRecordSessionManager recordSessionManager;
     private final DebugArtifactStore artifactStore;
+    private final SduiArtifactService artifactService;
     private final EventInputHandler eventInputHandler;
 
     /**
@@ -76,11 +78,13 @@ public class AudioRecordHandler implements TopicHandler {
                               DeviceLifecycleService lifecycleService,
                               AudioRecordSessionManager recordSessionManager,
                               DebugArtifactStore artifactStore,
+                              SduiArtifactService artifactService,
                               EventInputHandler eventInputHandler) {
         this.sessionManager = sessionManager;
         this.lifecycleService = lifecycleService;
         this.recordSessionManager = recordSessionManager;
         this.artifactStore = artifactStore;
+        this.artifactService = artifactService;
         this.eventInputHandler = eventInputHandler;
     }
 
@@ -190,16 +194,19 @@ public class AudioRecordHandler implements TopicHandler {
         // 4. Store as generic artifact for debug endpoints
         int durationMs = (int) ((long) pcm.length * 1000
                 / (PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_BITS_PER_SAMPLE / 8));
+        Map<String, Object> metadata = Map.of("text", transcription != null ? transcription : "",
+                "sttText", transcription != null ? transcription : "",
+                "pcmSize", pcm.length,
+                "sampleRate", PCM_SAMPLE_RATE,
+                "channels", PCM_CHANNELS,
+                "bitsPerSample", PCM_BITS_PER_SAMPLE,
+                "durationMs", durationMs);
+        artifactService.save(deviceId, SduiArtifactService.AUDIO_RECORDING, "audio/wav", metadata, wav);
         artifactStore.put(deviceId, new DebugArtifactStore.Artifact(
                 "audio-record-latest",
                 "audio/recording",
                 "audio/wav",
-                Map.of("sttText", transcription != null ? transcription : "",
-                        "pcmSize", pcm.length,
-                        "sampleRate", PCM_SAMPLE_RATE,
-                        "channels", PCM_CHANNELS,
-                        "bitsPerSample", PCM_BITS_PER_SAMPLE,
-                        "durationMs", durationMs),
+                metadata,
                 wav,
                 System.currentTimeMillis()
         ));

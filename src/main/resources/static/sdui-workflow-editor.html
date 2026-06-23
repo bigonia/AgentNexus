@@ -1,0 +1,1496 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDUI Workflow Editor</title>
+    <style>
+        :root {
+            --bg: #f6f7f9;
+            --panel: #ffffff;
+            --line: #d8dde5;
+            --text: #1f2937;
+            --muted: #657085;
+            --accent: #2563eb;
+            --danger: #b91c1c;
+            --ok: #047857;
+            --warn: #a16207;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text);
+            background: var(--bg);
+        }
+        header {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+        }
+        h1 { font-size: 18px; margin: 0; }
+        main {
+            display: grid;
+            grid-template-columns: 420px minmax(0, 1fr);
+            min-height: calc(100vh - 56px);
+        }
+        aside {
+            border-right: 1px solid var(--line);
+            background: var(--panel);
+            padding: 16px;
+            overflow: auto;
+        }
+        section {
+            padding: 16px;
+            overflow: auto;
+        }
+        h2 {
+            font-size: 15px;
+            margin: 0 0 10px;
+        }
+        label {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+        input, select, textarea, button {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: inherit;
+            background: #fff;
+        }
+        textarea {
+            min-height: 86px;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+        button {
+            cursor: pointer;
+            color: #fff;
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+        button.secondary {
+            color: var(--text);
+            border-color: var(--line);
+            background: #fff;
+        }
+        button.danger {
+            border-color: var(--danger);
+            background: var(--danger);
+        }
+        .toolbar {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .field { margin-bottom: 10px; }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+        .slot-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 72px;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+        .node-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 8px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .param-panel {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 10px;
+            background: #f9fafb;
+        }
+        .param-row {
+            display: grid;
+            grid-template-columns: 120px 92px minmax(0, 1fr);
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+        .param-row:last-child { margin-bottom: 0; }
+        .param-row.single {
+            grid-template-columns: 120px minmax(0, 1fr);
+        }
+        .inline {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .inline input[type="checkbox"] {
+            width: auto;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 12px;
+            user-select: none;
+        }
+        .edge-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px;
+            gap: 8px;
+            align-items: end;
+            margin-bottom: 8px;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            background: #fff;
+            font-size: 12px;
+        }
+        .pill.ok { color: var(--ok); border-color: #a7f3d0; background: #ecfdf5; }
+        .pill.bad { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+        .pill.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+        .notice {
+            margin: 8px 0;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #fde68a;
+            color: var(--warn);
+            background: #fffbeb;
+            font-size: 12px;
+        }
+        pre {
+            margin: 0;
+            overflow: auto;
+            max-height: 420px;
+            padding: 12px;
+            border-radius: 6px;
+            background: #101827;
+            color: #dbeafe;
+            font-size: 12px;
+        }
+        .run {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #fff;
+        }
+        .run-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        a { color: var(--accent); }
+        @media (max-width: 980px) {
+            main { grid-template-columns: 1fr; }
+            aside { border-right: 0; border-bottom: 1px solid var(--line); }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>SDUI Workflow Editor</h1>
+    <span id="status" class="pill">ready</span>
+</header>
+<main>
+    <aside>
+        <div class="field">
+            <label>API Base</label>
+            <input id="apiBase">
+        </div>
+        <div class="toolbar">
+            <button id="refresh" class="secondary">刷新设备</button>
+            <button id="validate" class="secondary">校验流程</button>
+        </div>
+        <div class="toolbar">
+            <button id="tplRgb" class="secondary">模板 RGB</button>
+            <button id="tplRecordPlay" class="secondary">模板录音播放</button>
+        </div>
+        <div class="toolbar">
+            <button id="tplRecordUi" class="secondary">模板 STT UI</button>
+            <button id="addSlot" class="secondary">新增槽位</button>
+        </div>
+
+        <div class="panel">
+            <h2>UI 模板</h2>
+            <div class="grid">
+                <div><label>templateKey</label><input id="uiTemplateKey" value="record_result_view"></div>
+                <div><label>名称</label><input id="uiTemplateName" value="录音结果展示"></div>
+                <div><label>sectionId</label><input id="uiTemplateSectionId" value="workflow_text"></div>
+                <div><label>变量</label><input id="uiTemplateVariableKey" value="recordText"></div>
+            </div>
+            <div class="field">
+                <label>标题</label>
+                <input id="uiTemplateTitle" value="录音结果">
+            </div>
+            <div class="field">
+                <label>默认正文</label>
+                <textarea id="uiTemplateBody">等待录音...</textarea>
+            </div>
+            <div class="toolbar">
+                <button id="saveUiTemplate" class="secondary">新增模板</button>
+                <button id="previewUiTemplate" class="secondary">预览模板</button>
+            </div>
+            <div id="uiTemplates"></div>
+        </div>
+
+        <div class="panel">
+            <h2>槽位与设备</h2>
+            <div id="slots"></div>
+        </div>
+
+        <div class="panel">
+            <h2>节点</h2>
+            <button id="addNode" class="secondary">新增节点</button>
+            <div id="nodes" style="margin-top:10px"></div>
+        </div>
+
+        <div class="panel">
+            <h2>连线</h2>
+            <button id="addEdge" class="secondary">新增连线</button>
+            <div id="edges" style="margin-top:10px"></div>
+        </div>
+    </aside>
+
+    <section>
+        <div class="grid">
+            <div class="panel">
+                <h2>流程 JSON</h2>
+                <div class="field"><input id="workflowName" placeholder="workflow name"></div>
+                <textarea id="workflowJson"></textarea>
+                <div class="toolbar" style="margin-top:10px">
+                    <button id="syncFromForm" class="secondary">表单生成 JSON</button>
+                    <button id="syncToForm" class="secondary">JSON 回填表单</button>
+                </div>
+                <div class="toolbar">
+                    <button id="createWorkflow">创建 Workflow</button>
+                    <button id="inspectDeployment" class="secondary">部署前检查</button>
+                </div>
+                <div class="toolbar">
+                    <button id="deployWorkflow" class="secondary">部署</button>
+                    <button id="testTrigger" class="secondary">手动触发</button>
+                </div>
+                <div class="toolbar">
+                    <button id="stopDeployment" class="danger">停止部署</button>
+                    <button id="loadManagement" class="secondary">刷新管理</button>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>当前状态</h2>
+                <div class="field">
+                    <label>workflowId</label>
+                    <input id="workflowId">
+                </div>
+                <div class="field">
+                    <label>deploymentId</label>
+                    <input id="deploymentId">
+                </div>
+                <pre id="output">{}</pre>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <h2>Runs</h2>
+                <button id="loadRuns" class="secondary">刷新 Runs</button>
+                <div id="runs" style="margin-top:10px"></div>
+            </div>
+            <div class="panel">
+                <h2>Run Detail</h2>
+                <div id="artifacts"></div>
+                <pre id="runDetail">{}</pre>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <h2>Workflow 管理</h2>
+                <div id="managementOverview" class="run">暂无数据</div>
+                <h2 style="margin-top:14px">Active Deployments</h2>
+                <div id="managementDeployments"></div>
+            </div>
+            <div class="panel">
+                <h2>检查与错误</h2>
+                <div id="managementConflicts" class="run">暂无冲突数据</div>
+                <h2 style="margin-top:14px">最近失败 Runs</h2>
+                <div id="managementFailures"></div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NODE_TYPES = ['button.trigger', 'rgb.effect', 'audio.record', 'audio.play', 'ui.update', 'display.section'];
+const NODE_LABELS = {
+    'button.trigger': '按钮触发',
+    'rgb.effect': 'RGB 灯光',
+    'audio.record': '音频采集',
+    'audio.play': '音频播放',
+    'ui.update': 'UI 更新',
+    'display.section': 'Section 场景'
+};
+const state = {
+    devices: [],
+    catalogs: {},
+    uiTemplates: [],
+    slots: [],
+    nodes: [],
+    edges: []
+};
+
+function apiBase() {
+    return $('apiBase').value.replace(/\/$/, '');
+}
+
+function setStatus(text, kind = '') {
+    $('status').textContent = text;
+    $('status').className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+async function api(path, options = {}) {
+    const res = await fetch(apiBase() + path, {
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options
+    });
+    const json = await res.json();
+    if (!res.ok || json.code !== 20000) throw new Error(json.message || res.statusText);
+    return json.data;
+}
+
+function deviceOptions(selected = '') {
+    return state.devices.map(d => `<option value="${esc(d.id)}" ${d.id === selected ? 'selected' : ''}>${esc(d.id)}${d.name ? ' / ' + esc(d.name) : ''}</option>`).join('');
+}
+
+function selectOptions(values, selected = '') {
+    return values.map(v => `<option value="${esc(v)}" ${v === selected ? 'selected' : ''}>${esc(optionLabel(v))}</option>`).join('');
+}
+
+function optionLabel(value) {
+    return NODE_LABELS[value] ? `${NODE_LABELS[value]} / ${value}` : value;
+}
+
+function render() {
+    $('slots').innerHTML = state.slots.map((slot, i) => `
+        <div class="slot-row">
+            <div><label>slotId</label><input data-slot="${i}" data-key="slotId" value="${esc(slot.slotId)}"></div>
+            <div><label>device</label><select data-slot="${i}" data-key="deviceId">${deviceOptions(slot.deviceId)}</select></div>
+            <div><label>UI 模板</label><select data-slot="${i}" data-key="uiTemplateKey">${templateOptions(slot.uiTemplateKey)}</select></div>
+            <button class="danger" data-remove-slot="${i}">删除</button>
+        </div>`).join('');
+    renderUiTemplates();
+
+    $('nodes').innerHTML = state.nodes.map((node, i) => `
+        <div class="node-row">
+            <div class="grid">
+                <div><label>nodeId</label><input data-node="${i}" data-key="nodeId" value="${esc(node.nodeId)}"></div>
+                <div><label>nodeType</label><select data-node="${i}" data-key="nodeType">${selectOptions(NODE_TYPES, node.nodeType)}</select></div>
+                <div><label>slotId</label><select data-node="${i}" data-key="slotId">${selectOptions(state.slots.map(s => s.slotId), node.slotId)}</select></div>
+                <div><label>操作</label><button class="danger" data-remove-node="${i}">删除节点</button></div>
+            </div>
+            ${renderParamPanel(node, i)}
+            <details>
+                <summary>高级：params JSON</summary>
+                <div style="margin-top:8px"><textarea data-node="${i}" data-key="params">${esc(JSON.stringify(node.params || {}, null, 2))}</textarea></div>
+            </details>
+        </div>`).join('');
+
+    $('edges').innerHTML = state.edges.map((edge, i) => `
+        <div class="edge-row">
+            <div><label>from</label><select data-edge="${i}" data-key="from">${selectOptions(state.nodes.map(n => n.nodeId), edge.from)}</select></div>
+            <div><label>to</label><select data-edge="${i}" data-key="to">${selectOptions(state.nodes.map(n => n.nodeId), edge.to)}</select></div>
+            <button class="danger" data-remove-edge="${i}">删除</button>
+        </div>`).join('');
+
+    syncJson();
+}
+
+function renderParamPanel(node, index) {
+    const params = node.params || {};
+    const warning = renderCapabilityWarning(node);
+    if (node.nodeType === 'button.trigger') {
+        const selection = buttonSelection(node);
+        return `<div class="param-panel">
+            ${warning}
+            <div class="param-row single">
+                <label>按钮</label>
+                <select data-button-node="${index}" data-button-part="button">
+                    ${buttonSelectOptions(node, selection.buttonId)}
+                </select>
+            </div>
+            <div class="param-row single">
+                <label>事件</label>
+                <select data-button-node="${index}" data-button-part="event">
+                    ${buttonEventOptions(node, selection.buttonId, selection.eventName)}
+                </select>
+            </div>
+            <div class="param-row single">
+                <label>实际 eventId</label>
+                <input value="${esc(params.eventId || '')}" readonly>
+            </div>
+        </div>`;
+    }
+    if (node.nodeType === 'rgb.effect') {
+        return `<div class="param-panel">
+            ${warning}
+            ${renderValueField(index, 'off', '关闭灯光', params.off ?? false, { type: 'boolean', allowRef: true })}
+            ${renderValueField(index, 'mode', '模式', params.mode || rgbDefault('mode', 'solid'), { type: 'enum', options: rgbOptions('mode', ['solid', 'breath', 'blink', 'rainbow', 'off']), allowRef: true })}
+            <div class="grid">
+                ${renderValueField(index, 'r', 'R', params.r ?? rgbDefault('r', 0), { type: 'number', allowRef: true })}
+                ${renderValueField(index, 'g', 'G', params.g ?? rgbDefault('g', 120), { type: 'number', allowRef: true })}
+                ${renderValueField(index, 'b', 'B', params.b ?? rgbDefault('b', 255), { type: 'number', allowRef: true })}
+                ${renderValueField(index, 'brightness', '亮度', params.brightness ?? rgbDefault('brightness', 80), { type: 'number', allowRef: true })}
+                ${renderValueField(index, 'period_ms', '周期 ms', params.period_ms ?? rgbDefault('period_ms', ''), { type: 'number', allowRef: true })}
+                ${renderValueField(index, 'step_ms', '步进 ms', params.step_ms ?? rgbDefault('step_ms', ''), { type: 'number', allowRef: true })}
+            </div>
+        </div>`;
+    }
+    if (node.nodeType === 'audio.record') {
+        return `<div class="param-panel">
+            ${warning}
+            ${renderValueField(index, 'control', '控制', params.control || 'toggle', { type: 'enum', options: audioRecordControls(), allowRef: true })}
+        </div>`;
+    }
+    if (node.nodeType === 'audio.play') {
+        const source = audioPlaySource(params);
+        const key = source === 'text' ? 'text' : source === 'preset' ? 'preset' : 'artifact_id';
+        const defaults = { text: '测试语音播放', preset: 'notification', artifact_id: '$nodes.record_stop.artifact.artifactRef' };
+        const artifactValue = params[key] || firstArtifactReference(index);
+        return `<div class="param-panel">
+            ${warning}
+            <div class="param-row single">
+                <label>播放来源</label>
+                <select data-audio-source-node="${index}">
+                    ${selectOptions(['text', 'preset', 'artifact'], source)}
+                </select>
+            </div>
+            ${source === 'artifact'
+                ? renderArtifactField(index, key, artifactValue)
+                : renderValueField(index, key, source, params[key] || defaults[key], { type: source === 'preset' ? 'enum' : 'text', options: audioPresetOptions(), allowRef: true })}
+        </div>`;
+    }
+    if (node.nodeType === 'ui.update' || node.nodeType === 'display.section') {
+        if (node.nodeType === 'ui.update' && (params.variableKey || (!params.scene && !params.patch))) {
+            const ui = uiVariableParams(node);
+            return `<div class="param-panel">
+                ${warning}
+                <div class="param-row single">
+                    <label>UI 槽位</label>
+                    <select data-ui-var-node="${index}" data-ui-var-key="slotId">${selectOptions(state.slots.map(s => s.slotId), ui.slotId)}</select>
+                </div>
+                <div class="param-row single">
+                    <label>模板</label>
+                    <select data-ui-var-node="${index}" data-ui-var-key="templateKey">${templateOptions(ui.templateKey)}</select>
+                </div>
+                <div class="param-row single">
+                    <label>变量</label>
+                    <select data-ui-var-node="${index}" data-ui-var-key="variableKey">${uiVariableOptions(ui.templateKey, ui.variableKey)}</select>
+                </div>
+                ${renderValueField(index, 'value', '变量值', ui.value ?? '$nodes.record_stop.artifact.text', { type: 'textarea', allowRef: true })}
+            </div>`;
+        }
+        const operation = params.scene ? 'scene' : 'patch';
+        const ui = extractUiParams(params, operation);
+        return `<div class="param-panel">
+            ${warning}
+            <div class="param-row single">
+                <label>操作</label>
+                <select data-ui-operation-node="${index}">
+                    ${selectOptions(['patch', 'scene'], operation)}
+                </select>
+            </div>
+            ${renderValueField(index, 'ui.pageId', 'pageId', ui.pageId || 'main', { type: 'text', allowRef: true })}
+            ${renderValueField(index, 'ui.sectionId', 'sectionId', ui.sectionId || 'workflow_text', { type: 'text', allowRef: true })}
+            ${renderValueField(index, 'ui.title', '标题', ui.title || 'Workflow', { type: 'text', allowRef: true })}
+            ${renderValueField(index, 'ui.body', '正文', ui.body || '$nodes.record_stop.artifact.text', { type: 'textarea', allowRef: true })}
+        </div>`;
+    }
+    return `<div class="param-panel"><span class="pill warn">未知节点类型，请使用 params JSON</span></div>`;
+}
+
+function renderValueField(nodeIndex, key, label, value, config = {}) {
+    const refs = referenceOptionsForParam(nodeIndex, key, config);
+    const mode = config.allowRef && isReference(value) ? 'ref' : 'fixed';
+    const safeValue = value ?? '';
+    const valueControl = mode === 'ref'
+            ? `<select data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="ref">${referenceSelectOptions(refs, safeValue)}</select>`
+            : renderFixedInput(nodeIndex, key, safeValue, config);
+    if (!config.allowRef) {
+        return `<div class="param-row single"><label>${esc(label)}</label>${valueControl}</div>`;
+    }
+    return `<div class="param-row">
+        <label>${esc(label)}</label>
+        <select data-param-mode-node="${nodeIndex}" data-param="${esc(key)}">
+            ${selectOptions(['fixed', 'ref'], mode)}
+        </select>
+        ${valueControl}
+    </div>`;
+}
+
+function renderFixedInput(nodeIndex, key, value, config) {
+    const type = config.type || 'text';
+    if (type === 'boolean') {
+        return `<div class="inline"><input type="checkbox" data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="boolean" ${value === true || value === 'true' ? 'checked' : ''}><span class="pill">${value === true || value === 'true' ? 'true' : 'false'}</span></div>`;
+    }
+    if (type === 'enum') {
+        return `<select data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="string">${selectOptions(config.options || [], value)}</select>`;
+    }
+    if (type === 'textarea') {
+        return `<textarea data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="string">${esc(value)}</textarea>`;
+    }
+    if (type === 'number') {
+        return `<input type="number" data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="number" value="${esc(value)}">`;
+    }
+    return `<input data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="string" value="${esc(value)}">`;
+}
+
+function referenceSelectOptions(refs, selected = '') {
+    const all = [...refs];
+    if (selected && !all.some(ref => ref.value === selected)) {
+        all.unshift({ label: selected, value: selected });
+    }
+    if (!all.length) {
+        all.push({ label: '无可用上游引用', value: selected || '$event.eventId' });
+    }
+    return all.map(ref => `<option value="${esc(ref.value)}" ${ref.value === selected ? 'selected' : ''}>${esc(ref.label || ref.value)}</option>`).join('');
+}
+
+function renderArtifactField(nodeIndex, key, value) {
+    const options = audioArtifactOptions(nodeIndex);
+    const selected = value || options[0]?.value || 'audio-record-latest';
+    return `<div class="param-row single">
+        <label>音频产物</label>
+        <select data-param-node="${nodeIndex}" data-param="${esc(key)}" data-param-type="string">
+            ${artifactSelectOptions(options, selected)}
+        </select>
+    </div>`;
+}
+
+function artifactSelectOptions(options, selected = '') {
+    const all = [...options];
+    if (selected && !all.some(option => option.value === selected)) {
+        all.unshift({ label: selected, value: selected });
+    }
+    if (!all.length) {
+        all.push({ label: '当前设备最新录音 / audio-record-latest', value: 'audio-record-latest' });
+    }
+    return all.map(option => `<option value="${esc(option.value)}" ${option.value === selected ? 'selected' : ''}>${esc(option.label)}</option>`).join('');
+}
+
+function audioArtifactOptions(nodeIndex) {
+    const options = upstreamNodes(state.nodes[nodeIndex]?.nodeId)
+            .filter(node => node.nodeType === 'audio.record' || node.nodeType === 'audio.play')
+            .map(node => ({
+                label: `${node.nodeId} 的音频产物`,
+                value: `$nodes.${node.nodeId}.artifact.artifactRef`
+            }));
+    options.push({ label: '当前目标设备最新录音', value: 'audio-record-latest' });
+    return dedupeRefs(options);
+}
+
+function buttonSelection(node) {
+    const params = node.params || {};
+    const fromEvent = parseButtonEventId(params.eventId || '');
+    return {
+        buttonId: params.nodeId || fromEvent.buttonId || 'pwr',
+        eventName: fromEvent.eventName || 'short_press'
+    };
+}
+
+function buttonSelectOptions(node, selected = '') {
+    const buttons = buttonCapabilities(node);
+    if (!buttons.length) return '<option value="">当前槽位设备无按钮能力</option>';
+    return buttons.map(button =>
+            `<option value="${esc(button.buttonId)}" ${button.buttonId === selected ? 'selected' : ''}>${esc(button.displayName || button.buttonId)}</option>`
+    ).join('');
+}
+
+function buttonEventOptions(node, buttonId, selected = '') {
+    const buttons = buttonCapabilities(node);
+    const button = buttons.find(item => item.buttonId === buttonId) || buttons[0];
+    if (!button) return '<option value="">当前按钮无事件</option>';
+    return (button.events || fallbackButtonEvents(button.buttonId)).map(event =>
+            `<option value="${esc(event.eventName)}" ${event.eventName === selected ? 'selected' : ''}>${esc(event.displayName || event.eventName)}</option>`
+    ).join('');
+}
+
+function buttonCapabilities(node) {
+    const slot = state.slots.find(item => item.slotId === node.slotId);
+    const catalog = slot?.deviceId ? state.catalogs[slot.deviceId] : null;
+    const buttons = nodeDefinitionsForSlot(node.slotId, 'button.trigger')
+            .map(item => ({
+                buttonId: item.instanceId || String(item.capabilityId || '').replace(/^buttons\./, ''),
+                displayName: item.displayName || item.instanceId || item.capabilityId,
+                events: normalizeButtonEvents(item)
+            }))
+            .filter(item => item.buttonId);
+    if (buttons.length) return buttons;
+    return catalog ? [] : fallbackButtons();
+}
+
+function normalizeButtonEvents(definition) {
+    const sourceEvents = Array.isArray(definition.source?.events) ? definition.source.events : [];
+    if (sourceEvents.length) {
+        return sourceEvents.map(event => ({
+            eventId: event.eventId,
+            eventName: event.eventName || parseButtonEventId(event.eventId || '').eventName,
+            displayName: event.displayName || event.eventName || event.eventId
+        }));
+    }
+    const portEvents = (definition.outputPorts || [])
+            .flatMap(port => Array.isArray(port.schema?.events) ? port.schema.events : []);
+    if (portEvents.length) {
+        return portEvents.map(event => ({
+            eventId: event.eventId,
+            eventName: event.eventName || parseButtonEventId(event.eventId || '').eventName,
+            displayName: event.displayName || event.eventName || event.eventId
+        }));
+    }
+    return fallbackButtonEvents(definition.instanceId || 'pwr');
+}
+
+function fallbackButtons() {
+    return ['pwr', 'plus', 'minus'].map(buttonId => ({
+        buttonId,
+        displayName: buttonId.toUpperCase(),
+        events: fallbackButtonEvents(buttonId)
+    }));
+}
+
+function fallbackButtonEvents(buttonId) {
+    return [
+        { eventId: `input:buttons.${buttonId}.short_press`, eventName: 'short_press', displayName: '短按' },
+        { eventId: `input:buttons.${buttonId}.long_press`, eventName: 'long_press', displayName: '长按' }
+    ];
+}
+
+function renderCapabilityWarning(node) {
+    const slot = state.slots.find(item => item.slotId === node.slotId);
+    if (!slot?.deviceId) return '<div class="notice">请先为槽位绑定设备，编辑器才能读取真实能力。</div>';
+    const catalog = state.catalogs[slot.deviceId];
+    if (!catalog) return '<div class="notice">能力清单尚未加载，刷新设备或切换设备后重试。</div>';
+    if (nodeDefinitionsForSlot(node.slotId, node.nodeType).length) return '';
+    return `<div class="notice">设备 ${esc(slot.deviceId)} 未声明 ${esc(node.nodeType)} 能力，当前节点可能无法部署执行。</div>`;
+}
+
+function catalogForSlot(slotId) {
+    const slot = state.slots.find(item => item.slotId === slotId);
+    return slot?.deviceId ? state.catalogs[slot.deviceId] : null;
+}
+
+function nodeDefinitionsForSlot(slotId, nodeType) {
+    return (catalogForSlot(slotId)?.nodes || []).filter(item => item.nodeType === nodeType);
+}
+
+function firstNodeDefinition(slotId, nodeType) {
+    return nodeDefinitionsForSlot(slotId, nodeType)[0] || null;
+}
+
+function nodeParamDefinition(slotId, nodeType, name) {
+    const definition = firstNodeDefinition(slotId, nodeType);
+    return (definition?.parameters || []).find(item => item.name === name) || null;
+}
+
+function rgbDefault(name, fallback) {
+    const target = state.nodes.find(node => node.nodeType === 'rgb.effect');
+    const field = nodeParamDefinition(target?.slotId || 'target', 'rgb.effect', name);
+    return field && field.default !== undefined ? field.default : fallback;
+}
+
+function rgbOptions(name, fallback) {
+    const target = state.nodes.find(node => node.nodeType === 'rgb.effect');
+    const field = nodeParamDefinition(target?.slotId || 'target', 'rgb.effect', name);
+    return Array.isArray(field?.values) && field.values.length ? field.values : fallback;
+}
+
+function rgbDefaultParams(slotId = 'target') {
+    const definition = firstNodeDefinition(slotId, 'rgb.effect');
+    const params = {};
+    (definition?.parameters || []).forEach(field => {
+        if (field.default !== undefined) params[field.name] = field.default;
+    });
+    return {
+        mode: params.mode || 'solid',
+        r: params.r ?? 0,
+        g: params.g ?? 120,
+        b: params.b ?? 255,
+        brightness: params.brightness ?? 80
+    };
+}
+
+function audioRecordControls(slotId = 'target') {
+    const field = nodeParamDefinition(slotId, 'audio.record', 'control');
+    const values = Array.isArray(field?.values) ? field.values : [];
+    const normalized = values.map(item => item.value || item).filter(Boolean);
+    return normalized.length ? normalized : ['toggle', 'start', 'stop'];
+}
+
+function audioPresetOptions(slotId = 'target') {
+    const field = nodeParamDefinition(slotId, 'audio.play', 'preset');
+    return Array.isArray(field?.values) && field.values.length
+            ? field.values
+            : ['notification', 'success', 'error', 'warning', 'click', 'beep'];
+}
+
+function buttonParamsFromCapability(slotId = 'source') {
+    const node = { slotId, params: {} };
+    const button = buttonCapabilities(node)[0];
+    const event = button?.events?.[0];
+    if (!button || !event) return null;
+    return {
+        nodeId: button.buttonId,
+        eventId: event.eventId || `input:buttons.${button.buttonId}.${event.eventName}`
+    };
+}
+
+function parseButtonEventId(eventId) {
+    const match = String(eventId || '').match(/^input:buttons\.([^.]+)\.(.+)$/);
+    return match ? { buttonId: match[1], eventName: match[2] } : {};
+}
+
+function updateButtonParam(target) {
+    const index = Number(target.dataset.buttonNode);
+    const node = state.nodes[index];
+    const selection = buttonSelection(node);
+    if (target.dataset.buttonPart === 'button') selection.buttonId = target.value;
+    if (target.dataset.buttonPart === 'event') selection.eventName = target.value;
+    const capabilities = buttonCapabilities(node);
+    const button = capabilities.find(item => item.buttonId === selection.buttonId) || capabilities[0] || fallbackButtons()[0];
+    const event = (button.events || []).find(item => item.eventName === selection.eventName) || button.events?.[0] || fallbackButtonEvents(button.buttonId)[0];
+    node.params = {
+        ...(node.params || {}),
+        nodeId: button.buttonId,
+        eventId: event.eventId || `input:buttons.${button.buttonId}.${event.eventName}`
+    };
+    render();
+}
+
+function bindDynamicEdits() {
+    document.addEventListener('input', (e) => {
+        const target = e.target;
+        if (target.dataset.slot) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
+        if (target.dataset.node) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
+        if (target.dataset.edge) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
+        if (target.dataset.paramNode) updateParam(target);
+        syncJson();
+    });
+    document.addEventListener('change', (e) => {
+        const target = e.target;
+        if (target.dataset.slot) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
+        if (target.dataset.node) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
+        if (target.dataset.edge) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
+        if (target.dataset.paramNode) updateParam(target);
+        if (target.dataset.paramModeNode) updateParamMode(target);
+        if (target.dataset.audioSourceNode) updateAudioSource(target);
+        if (target.dataset.uiOperationNode) updateUiOperation(target);
+        if (target.dataset.uiVarNode) updateUiVariableParam(target);
+        if (target.dataset.buttonNode) updateButtonParam(target);
+        if (target.dataset.slot && target.dataset.key === 'deviceId') {
+            ensureCatalog(target.value).then(render).catch(err => setStatus(err.message, 'bad'));
+        }
+        syncJson();
+    });
+    document.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target.dataset.removeSlot) { state.slots.splice(Number(target.dataset.removeSlot), 1); render(); }
+        if (target.dataset.removeNode) { state.nodes.splice(Number(target.dataset.removeNode), 1); render(); }
+        if (target.dataset.removeEdge) { state.edges.splice(Number(target.dataset.removeEdge), 1); render(); }
+    });
+}
+
+function updateNode(index, key, value) {
+    if (key === 'params') {
+        try { state.nodes[index].params = JSON.parse(value || '{}'); } catch (_) {}
+    } else {
+        state.nodes[index][key] = value;
+        if (key === 'nodeType') state.nodes[index].params = defaultParams(value);
+    }
+}
+
+function updateParam(target) {
+    const index = Number(target.dataset.paramNode);
+    const key = target.dataset.param;
+    let value = target.type === 'checkbox' ? target.checked : target.value;
+    if (target.dataset.paramType === 'number') {
+        value = value === '' ? undefined : Number(value);
+    }
+    if (target.dataset.paramType === 'boolean') {
+        value = Boolean(value);
+    }
+    setParamValue(index, key, value);
+}
+
+function updateParamMode(target) {
+    const index = Number(target.dataset.paramModeNode);
+    const key = target.dataset.param;
+    const refs = referenceOptionsForParam(index, key, paramConfigForKey(state.nodes[index]?.nodeType, key));
+    if (target.value === 'ref') {
+        setParamValue(index, key, refs[0]?.value || '$event.eventId');
+    } else {
+        setParamValue(index, key, fixedDefaultForParam(state.nodes[index].nodeType, key));
+    }
+    render();
+}
+
+function updateAudioSource(target) {
+    const index = Number(target.dataset.audioSourceNode);
+    const source = target.value;
+    const params = {};
+    if (source === 'text') params.text = '测试语音播放';
+    if (source === 'preset') params.preset = 'notification';
+    if (source === 'artifact') params.artifact_id = firstArtifactReference(index);
+    state.nodes[index].params = params;
+    render();
+}
+
+function updateUiOperation(target) {
+    const index = Number(target.dataset.uiOperationNode);
+    state.nodes[index].params = buildUiParams(target.value, extractUiParams(state.nodes[index].params || {}, target.value));
+    render();
+}
+
+function setParamValue(index, key, value) {
+    if (key.startsWith('ui.')) {
+        const operation = state.nodes[index].params?.scene ? 'scene' : 'patch';
+        const ui = extractUiParams(state.nodes[index].params || {}, operation);
+        ui[key.slice(3)] = value;
+        state.nodes[index].params = buildUiParams(operation, ui);
+        return;
+    }
+    const params = { ...(state.nodes[index].params || {}) };
+    if (value === undefined || value === '') {
+        delete params[key];
+    } else {
+        params[key] = value;
+    }
+    state.nodes[index].params = params;
+}
+
+function defaultParams(nodeType) {
+    if (nodeType === 'button.trigger') return buttonParamsFromCapability('source') || { eventId: 'input:buttons.pwr.short_press', nodeId: 'pwr' };
+    if (nodeType === 'rgb.effect') return rgbDefaultParams();
+    if (nodeType === 'audio.record') return { control: 'toggle' };
+    if (nodeType === 'audio.play') return { text: '测试语音播放' };
+    if (nodeType === 'ui.update') return buildUiVariableParams({});
+    if (nodeType === 'display.section') return buildUiParams('scene', {});
+    return {};
+}
+
+function fixedDefaultForParam(nodeType, key) {
+    const defaults = defaultParams(nodeType);
+    if (key.startsWith('ui.')) return extractUiParams(defaults, defaults.scene ? 'scene' : 'patch')[key.slice(3)] || '';
+    return defaults[key] ?? '';
+}
+
+function paramConfigForKey(nodeType, key) {
+    if (key === 'off') return { type: 'boolean' };
+    if (['r', 'g', 'b', 'brightness', 'period_ms', 'step_ms'].includes(key)) return { type: 'number' };
+    if (key === 'artifact_id' || key === 'audio_file') return { refKind: 'artifact' };
+    if (key === 'control' || key === 'mode' || key === 'preset') return { type: 'enum' };
+    if (key.startsWith('ui.')) return { type: key === 'ui.body' ? 'textarea' : 'text' };
+    return { type: 'text' };
+}
+
+function refKindForParam(nodeType, key, type) {
+    if (key === 'off' || type === 'boolean') return 'boolean';
+    if (['r', 'g', 'b', 'brightness', 'period_ms', 'step_ms'].includes(key) || type === 'number') return 'number';
+    if (key === 'artifact_id' || key === 'audio_file') return 'artifact';
+    if (key === 'text' || key === 'ui.body') return 'string';
+    if (key === 'preset' || key === 'control' || key === 'mode') return 'string';
+    return 'any';
+}
+
+function isReference(value) {
+    return typeof value === 'string' && value.startsWith('$');
+}
+
+function audioPlaySource(params) {
+    if (params.artifact_id || params.audio_file) return 'artifact';
+    if (params.preset) return 'preset';
+    return 'text';
+}
+
+function firstArtifactReference(index) {
+    const refs = referenceOptions(index).map(r => r.value);
+    return refs.find(v => v.includes('.artifact.artifactRef')) || refs.find(v => v.includes('.artifactRef')) || 'audio-record-latest';
+}
+
+function referenceOptionsForParam(nodeIndex, key, config = {}) {
+    const refs = referenceOptions(nodeIndex);
+    const kind = config.refKind || refKindForParam(state.nodes[nodeIndex]?.nodeType, key, config.type);
+    if (!kind || kind === 'any') return refs;
+    const filtered = refs.filter(ref => ref.kind === kind || ref.kind === 'any');
+    return filtered.length ? filtered : refs;
+}
+
+function referenceOptions(nodeIndex) {
+    const node = state.nodes[nodeIndex];
+    const options = [
+        { label: '事件 eventId', value: '$event.eventId', kind: 'string' },
+        { label: '事件 nodeId', value: '$event.nodeId', kind: 'string' },
+        { label: '事件 deviceId', value: '$event.deviceId', kind: 'deviceId' },
+        { label: '运行 runId', value: '$run.runId', kind: 'string' }
+    ];
+    state.slots.forEach(slot => {
+        if (slot.slotId) options.push({ label: `槽位 ${slot.slotId} 设备`, value: `$slots.${slot.slotId}.deviceId`, kind: 'deviceId' });
+    });
+    upstreamNodes(node?.nodeId).forEach(upstream => {
+        standardNodeRefs(upstream).forEach(ref => options.push(ref));
+    });
+    return dedupeRefs(options);
+}
+
+function upstreamNodes(nodeId) {
+    if (!nodeId) return [];
+    const byId = new Map(state.nodes.map(n => [n.nodeId, n]));
+    const reverse = new Map();
+    state.edges.forEach(edge => {
+        if (!reverse.has(edge.to)) reverse.set(edge.to, []);
+        reverse.get(edge.to).push(edge.from);
+    });
+    const seen = new Set();
+    const result = [];
+    function visit(id) {
+        (reverse.get(id) || []).forEach(parentId => {
+            if (seen.has(parentId)) return;
+            seen.add(parentId);
+            visit(parentId);
+            const parent = byId.get(parentId);
+            if (parent) result.push(parent);
+        });
+    }
+    visit(nodeId);
+    return result;
+}
+
+function standardNodeRefs(node) {
+    const prefix = `$nodes.${node.nodeId}`;
+    const refs = [
+        { label: `${node.nodeId} status`, value: `${prefix}.status`, kind: 'string' },
+        { label: `${node.nodeId} sent`, value: `${prefix}.sent`, kind: 'boolean' }
+    ];
+    if (node.nodeType === 'button.trigger') {
+        refs.push(
+            { label: `${node.nodeId} eventId`, value: `${prefix}.eventId`, kind: 'string' },
+            { label: `${node.nodeId} nodeId`, value: `${prefix}.nodeId`, kind: 'string' }
+        );
+    }
+    if (node.nodeType === 'rgb.effect') {
+        refs.push(
+            { label: `${node.nodeId} cmdId`, value: `${prefix}.cmdId`, kind: 'string' },
+            { label: `${node.nodeId} ackStatus`, value: `${prefix}.ackStatus`, kind: 'string' }
+        );
+    }
+    if (node.nodeType === 'audio.record' || node.nodeType === 'audio.play') {
+        refs.push(
+            { label: `${node.nodeId} artifactRef`, value: `${prefix}.artifact.artifactRef`, kind: 'artifact' },
+            { label: `${node.nodeId} artifactId`, value: `${prefix}.artifact.artifactId`, kind: 'artifact' },
+            { label: `${node.nodeId} text`, value: `${prefix}.artifact.text`, kind: 'string' },
+            { label: `${node.nodeId} durationMs`, value: `${prefix}.artifact.durationMs`, kind: 'number' },
+            { label: `${node.nodeId} sampleRate`, value: `${prefix}.artifact.sampleRate`, kind: 'number' },
+            { label: `${node.nodeId} artifactRef short`, value: `$artifacts.${node.nodeId}.artifactRef`, kind: 'artifact' },
+            { label: `${node.nodeId} text short`, value: `$artifacts.${node.nodeId}.text`, kind: 'string' }
+        );
+    }
+    if (node.nodeType === 'ui.update' || node.nodeType === 'display.section') {
+        refs.push(
+            { label: `${node.nodeId} pageId`, value: `${prefix}.pageId`, kind: 'string' },
+            { label: `${node.nodeId} operation`, value: `${prefix}.operation`, kind: 'string' }
+        );
+    }
+    return refs;
+}
+
+function dedupeRefs(refs) {
+    const seen = new Set();
+    return refs.filter(ref => {
+        if (seen.has(ref.value)) return false;
+        seen.add(ref.value);
+        return true;
+    });
+}
+
+function extractUiParams(params, operation) {
+    if (params.scene) {
+        const section = (params.scene.sections || [])[0] || {};
+        return {
+            pageId: params.scene.pageId || 'main',
+            sectionId: section.sectionId || 'workflow_text',
+            title: section.fields?.title || 'Workflow',
+            body: section.fields?.body || section.fields?.text || '$nodes.record_stop.artifact.text'
+        };
+    }
+    if (params.patch) {
+        const patch = (params.patch.patches || [])[0] || {};
+        return {
+            pageId: params.patch.pageId || 'main',
+            sectionId: patch.sectionId || 'workflow_text',
+            title: patch.fields?.title || 'Workflow',
+            body: patch.fields?.body || patch.fields?.text || '$nodes.record_stop.artifact.text'
+        };
+    }
+    return {
+        pageId: 'main',
+        sectionId: 'workflow_text',
+        title: 'Workflow',
+        body: '$nodes.record_stop.artifact.text'
+    };
+}
+
+function buildUiParams(operation, ui) {
+    const pageId = ui.pageId || 'main';
+    const sectionId = ui.sectionId || 'workflow_text';
+    const fields = {
+        title: ui.title || 'Workflow',
+        body: ui.body || ''
+    };
+    if (operation === 'scene') {
+        return {
+            scene: {
+                pageId,
+                layout: 'vertical_scroll',
+                sections: [{ sectionId, sectionType: 'text_section', fields }]
+            }
+        };
+    }
+    return {
+        patch: {
+            pageId,
+            patches: [{ sectionId, op: 'update', sectionType: 'text_section', fields }]
+        }
+    };
+}
+
+function buildUiVariableParams(ui = {}) {
+    const slotId = ui.slotId || state.slots.find(slot => slot.uiTemplateKey)?.slotId || 'target';
+    const templateKey = ui.templateKey || state.slots.find(slot => slot.slotId === slotId)?.uiTemplateKey || state.uiTemplates[0]?.templateKey || 'record_result_view';
+    const variableKey = ui.variableKey || firstTemplateVariable(templateKey)?.variableKey || 'recordText';
+    return {
+        slotId,
+        templateKey,
+        variableKey,
+        value: ui.value ?? '$nodes.record_stop.artifact.text'
+    };
+}
+
+function uiVariableParams(node) {
+    return buildUiVariableParams(node.params || {});
+}
+
+function updateUiVariableParam(target) {
+    const index = Number(target.dataset.uiVarNode);
+    const key = target.dataset.uiVarKey;
+    const params = buildUiVariableParams(state.nodes[index].params || {});
+    params[key] = target.value;
+    if (key === 'slotId') {
+        params.templateKey = state.slots.find(slot => slot.slotId === target.value)?.uiTemplateKey || params.templateKey;
+    }
+    if (key === 'templateKey') {
+        params.variableKey = firstTemplateVariable(target.value)?.variableKey || params.variableKey;
+    }
+    state.nodes[index].params = buildUiVariableParams(params);
+    render();
+}
+
+function templateOptions(selected = '') {
+    const values = [''].concat(state.uiTemplates.map(t => t.templateKey));
+    return values.map(value => `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(value || '不绑定')}</option>`).join('');
+}
+
+function templateByKey(templateKey) {
+    return state.uiTemplates.find(item => item.templateKey === templateKey);
+}
+
+function renderUiTemplates() {
+    const box = $('uiTemplates');
+    if (!box) return;
+    box.innerHTML = state.uiTemplates.length ? state.uiTemplates.map(template => `
+        <div class="run">
+            <div class="run-head"><strong>${esc(template.templateKey)}</strong><span class="pill">${esc(template.name || '')}</span></div>
+            <div>variables: ${esc((template.definition?.variables || []).map(v => v.variableKey).join(', ') || '-')}</div>
+        </div>`).join('') : '<div class="run">暂无模板</div>';
+}
+
+function templateVariables(templateKey) {
+    return templateByKey(templateKey)?.definition?.variables || [];
+}
+
+function firstTemplateVariable(templateKey) {
+    return templateVariables(templateKey)[0] || null;
+}
+
+function uiVariableOptions(templateKey, selected = '') {
+    const variables = templateVariables(templateKey);
+    if (!variables.length) return `<option value="${esc(selected || 'recordText')}">${esc(selected || 'recordText')}</option>`;
+    return variables.map(variable => {
+        const value = variable.variableKey;
+        return `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(value)} / ${esc(variable.sectionId)}.${esc(variable.field)}</option>`;
+    }).join('');
+}
+
+function workflowBody() {
+    return {
+        name: $('workflowName').value || `editor-${Date.now()}`,
+        slots: state.slots.map(s => ({ slotId: s.slotId, typeKey: '', displayName: s.slotId })),
+        nodes: state.nodes.map(n => ({ nodeId: n.nodeId, slotId: n.slotId, nodeType: n.nodeType, params: n.params || {} })),
+        edges: state.edges.map(e => ({ from: e.from, to: e.to })),
+        uiTemplates: state.slots
+                .filter(s => s.uiTemplateKey)
+                .map(s => ({ slotId: s.slotId, templateKey: s.uiTemplateKey }))
+    };
+}
+
+function slotBindings() {
+    const bindings = {};
+    state.slots.forEach(s => bindings[s.slotId] = s.deviceId);
+    return bindings;
+}
+
+function syncJson() {
+    $('workflowJson').value = JSON.stringify(workflowBody(), null, 2);
+}
+
+function loadJsonToForm() {
+    const body = JSON.parse($('workflowJson').value || '{}');
+    $('workflowName').value = body.name || '';
+    const uiBySlot = new Map((body.uiTemplates || []).map(item => [item.slotId, item.templateKey]));
+    state.slots = (body.slots || []).map(s => ({
+        slotId: s.slotId,
+        deviceId: state.slots.find(x => x.slotId === s.slotId)?.deviceId || state.devices[0]?.id || '',
+        uiTemplateKey: uiBySlot.get(s.slotId) || ''
+    }));
+    state.nodes = (body.nodes || []).map(n => ({ nodeId: n.nodeId, slotId: n.slotId, nodeType: n.nodeType, params: n.params || {} }));
+    state.edges = (body.edges || []).map(e => ({ from: e.from, to: e.to }));
+    render();
+}
+
+async function refreshDevices() {
+    setStatus('loading', 'warn');
+    const data = await api('/api/v1/sdui/devices?size=200');
+    const raw = Array.isArray(data) ? data : (data.content || data.items || data.devices || []);
+    state.devices = raw.map(item => ({
+        id: item.deviceId || item.id || item.mac || item.device_id,
+        name: item.name || item.displayName || item.deviceName || ''
+    })).filter(d => d.id);
+    if (!state.slots.length) await applyTemplate('rgb');
+    await refreshSlotCatalogs();
+    render();
+    setStatus('ready', 'ok');
+}
+
+async function refreshSlotCatalogs() {
+    const deviceIds = [...new Set(state.slots.map(slot => slot.deviceId).filter(Boolean))];
+    await Promise.all(deviceIds.map(deviceId => ensureCatalog(deviceId).catch(() => null)));
+}
+
+async function ensureCatalog(deviceId) {
+    if (!deviceId || state.catalogs[deviceId]) return state.catalogs[deviceId];
+    state.catalogs[deviceId] = await api(`/api/v1/sdui/capability-nodes/${encodeURIComponent(deviceId)}`);
+    return state.catalogs[deviceId];
+}
+
+async function applyTemplate(name) {
+    setStatus('loading template', 'warn');
+    prepareTemplateSlots();
+    await refreshSlotCatalogs();
+    const missing = missingTemplateCapabilities(name);
+    if (missing.length) {
+        state.nodes = [];
+        state.edges = [];
+        render();
+        show({ template: name, status: 'missing_capabilities', missingCapabilities: missing });
+        setStatus('模板缺少能力', 'bad');
+        return;
+    }
+
+    const buttonParams = buttonParamsFromCapability('source') || { eventId: 'input:buttons.pwr.short_press', nodeId: 'pwr' };
+    const trigger = { nodeId: 'source_button', slotId: 'source', nodeType: 'button.trigger', params: buttonParams };
+    if (name === 'recordPlay') {
+        state.nodes = [
+            trigger,
+            { nodeId: 'record_stop', slotId: 'target', nodeType: 'audio.record', params: { control: preferredAudioRecordStopControl('target') } },
+            { nodeId: 'play_recording', slotId: 'target', nodeType: 'audio.play', params: { artifact_id: '$nodes.record_stop.artifact.artifactRef' } }
+        ];
+        state.edges = [
+            { from: 'source_button', to: 'record_stop' },
+            { from: 'record_stop', to: 'play_recording' }
+        ];
+    } else if (name === 'recordUi') {
+        state.nodes = [
+            trigger,
+            { nodeId: 'record_stop', slotId: 'target', nodeType: 'audio.record', params: { control: preferredAudioRecordStopControl('target') } },
+            { nodeId: 'show_text', slotId: 'target', nodeType: 'ui.update', params: buildUiParams('patch', { pageId: 'main', sectionId: 'workflow_text', title: 'STT', body: '$nodes.record_stop.artifact.text' }) }
+        ];
+        state.edges = [
+            { from: 'source_button', to: 'record_stop' },
+            { from: 'record_stop', to: 'show_text' }
+        ];
+    } else {
+        state.nodes = [
+            trigger,
+            { nodeId: 'target_rgb', slotId: 'target', nodeType: 'rgb.effect', params: rgbDefaultParams('target') }
+        ];
+        state.edges = [{ from: 'source_button', to: 'target_rgb' }];
+    }
+    render();
+    setStatus('template ready', 'ok');
+}
+
+function prepareTemplateSlots() {
+    const existingSource = state.slots.find(slot => slot.slotId === 'source');
+    const existingTarget = state.slots.find(slot => slot.slotId === 'target');
+    const a = existingSource?.deviceId || state.devices[0]?.id || '';
+    const b = existingTarget?.deviceId || state.devices[1]?.id || a;
+    state.slots = [
+        { slotId: 'source', deviceId: a },
+        { slotId: 'target', deviceId: b }
+    ];
+}
+
+function missingTemplateCapabilities(name) {
+    if (!state.devices.length) return [];
+    const requirements = [
+        ['source', 'button.trigger', 'source 按钮输入']
+    ];
+    if (name === 'recordPlay') {
+        requirements.push(['target', 'audio.record', 'target 音频采集']);
+        requirements.push(['target', 'audio.play', 'target 音频播放']);
+    } else if (name === 'recordUi') {
+        requirements.push(['target', 'audio.record', 'target 音频采集']);
+        requirements.push(['target', 'ui.update', 'target UI 更新']);
+    } else {
+        requirements.push(['target', 'rgb.effect', 'target RGB 输出']);
+    }
+    return requirements
+            .filter(([slotId, nodeType]) => !nodeDefinitionsForSlot(slotId, nodeType).length)
+            .map(([slotId, nodeType, label]) => ({ slotId, nodeType, label }));
+}
+
+function preferredAudioRecordStopControl(slotId) {
+    const values = audioRecordControls(slotId);
+    return values.includes('stop') ? 'stop' : values[0] || 'stop';
+}
+
+async function validateWorkflow() {
+    const result = await api('/api/v1/sdui/node-workflows/validate', { method: 'POST', body: JSON.stringify(JSON.parse($('workflowJson').value)) });
+    show(result);
+    setStatus(result.valid ? 'valid' : 'invalid', result.valid ? 'ok' : 'bad');
+}
+
+async function createWorkflow() {
+    const workflow = await api('/api/v1/sdui/node-workflows', { method: 'POST', body: JSON.stringify(JSON.parse($('workflowJson').value)) });
+    $('workflowId').value = workflow.workflowId;
+    show(workflow);
+    setStatus('created', 'ok');
+    await loadManagement().catch(() => null);
+}
+
+async function deployWorkflow() {
+    const workflowId = $('workflowId').value;
+    const inspection = await inspectDeployment(false);
+    if (inspection && !inspection.valid) {
+        show(inspection);
+        setStatus('inspect failed', 'bad');
+        return;
+    }
+    const deployment = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments`, {
+        method: 'POST',
+        body: JSON.stringify({ slotBindings: slotBindings() })
+    });
+    $('deploymentId').value = deployment.deploymentId;
+    show(deployment);
+    setStatus('deployed', 'ok');
+    await loadManagement();
+}
+
+async function inspectDeployment(display = true) {
+    const workflowId = $('workflowId').value;
+    if (!workflowId) {
+        throw new Error('workflowId is required');
+    }
+    const inspection = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments/inspect`, {
+        method: 'POST',
+        body: JSON.stringify({ slotBindings: slotBindings() })
+    });
+    if (display) {
+        show(inspection);
+        setStatus(inspection.valid ? 'inspect ok' : 'inspect failed', inspection.valid ? inspection.health === 'warning' ? 'warn' : 'ok' : 'bad');
+    }
+    return inspection;
+}
+
+async function testTrigger() {
+    const workflowId = $('workflowId').value;
+    const deploymentId = $('deploymentId').value;
+    const run = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments/${encodeURIComponent(deploymentId)}/test-trigger`, {
+        method: 'POST',
+        body: JSON.stringify({ triggerNodeId: firstTriggerId() })
+    });
+    show(run);
+    await loadRunDetail(run.runId);
+    await loadRuns();
+    setStatus(run.status, run.status === 'passed' ? 'ok' : 'warn');
+}
+
+async function stopDeployment() {
+    const workflowId = $('workflowId').value;
+    const deploymentId = $('deploymentId').value;
+    const result = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments/${encodeURIComponent(deploymentId)}`, { method: 'DELETE' });
+    show(result);
+    setStatus('stopped', 'warn');
+    await loadManagement();
+}
+
+async function loadRuns() {
+    const workflowId = $('workflowId').value;
+    const deploymentId = $('deploymentId').value;
+    if (!workflowId || !deploymentId) return;
+    const runs = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/deployments/${encodeURIComponent(deploymentId)}/runs`);
+    $('runs').innerHTML = runs.map(run => `<div class="run">
+        <div class="run-head"><strong>${esc(run.runId)}</strong><span class="pill ${run.status === 'passed' ? 'ok' : run.status === 'failed' ? 'bad' : 'warn'}">${esc(run.status)}</span></div>
+        <button class="secondary" onclick="loadRunDetail('${esc(run.runId)}')">查看详情</button>
+    </div>`).join('');
+}
+
+async function loadRunDetail(runId) {
+    const workflowId = $('workflowId').value;
+    const detail = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}`);
+    const artifacts = await api(`/api/v1/sdui/node-workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/artifacts`);
+    $('runDetail').textContent = JSON.stringify(detail, null, 2);
+    $('artifacts').innerHTML = artifacts.map(a => `<div class="run"><strong>${esc(a.artifactId)}</strong><br><a href="${apiBase()}${esc(a.blobUrl)}" target="_blank">blob</a> ${esc(a.type || '')} ${esc(a.text || '')}</div>`).join('');
+}
+
+async function loadManagement() {
+    const [overview, deployments, conflicts, failures] = await Promise.all([
+        api('/api/v1/sdui/node-workflows/management/overview'),
+        api('/api/v1/sdui/node-workflows/management/deployments?status=active'),
+        api('/api/v1/sdui/node-workflows/management/conflicts'),
+        api('/api/v1/sdui/node-workflows/management/runs/recent?status=failed&limit=10')
+    ]);
+    renderManagementOverview(overview);
+    renderManagementDeployments(deployments);
+    renderManagementConflicts(conflicts);
+    renderManagementFailures(failures);
+    setStatus('management loaded', overview.health === 'error' ? 'bad' : overview.health === 'warning' ? 'warn' : 'ok');
+}
+
+function renderManagementOverview(overview) {
+    $('managementOverview').innerHTML = `
+        <div class="run-head">
+            <strong>总览</strong>
+            <span class="pill ${overview.health === 'error' ? 'bad' : overview.health === 'warning' ? 'warn' : 'ok'}">${esc(overview.health || 'ok')}</span>
+        </div>
+        <div>Workflows: ${esc(overview.workflowCount)} / Active Deployments: ${esc(overview.activeDeploymentCount)} / Conflicts: ${esc(overview.conflictCount)}</div>
+        <div>Runs: ${esc(overview.runCount)} / Failed: ${esc(overview.failedRunCount)}</div>
+        <div>Latest: ${esc(overview.latestRun?.runId || '-')} ${esc(overview.latestRun?.status || '')}</div>
+        <div>Latest Failed: ${esc(overview.latestFailedRun?.runId || '-')} ${esc(overview.latestFailedRun?.error || '')}</div>`;
+}
+
+function renderManagementDeployments(deployments) {
+    $('managementDeployments').innerHTML = deployments.length ? deployments.map(dep => `
+        <div class="run">
+            <div class="run-head">
+                <strong>${esc(dep.workflowName || dep.workflowId)}</strong>
+                <span class="pill ${dep.health === 'error' ? 'bad' : dep.health === 'warning' ? 'warn' : dep.health === 'inactive' ? 'warn' : 'ok'}">${esc(dep.health || dep.status)}</span>
+            </div>
+            <div>deployment: ${esc(dep.deploymentId)} / v${esc(dep.workflowVersion)} / ${esc(dep.status)}</div>
+            <div>slots: ${esc(JSON.stringify(dep.slotBindings || {}))}</div>
+            <div>last: ${esc(dep.lastStatus || '-')} ${esc(dep.lastError || '')}</div>
+            <div>runs: ${esc(dep.runCount)} / failed: ${esc(dep.failedRunCount)}</div>
+        </div>`).join('') : '<div class="run">暂无 active deployment</div>';
+}
+
+function renderManagementConflicts(conflicts) {
+    $('managementConflicts').innerHTML = conflicts.length ? conflicts.map(conflict => `
+        <div class="run">
+            <div class="run-head"><strong>${esc(conflict.type)}</strong><span class="pill bad">conflict</span></div>
+            <div>${esc(conflict.message || '')}</div>
+            <pre>${esc(JSON.stringify(conflict, null, 2))}</pre>
+        </div>`).join('') : '<div class="run"><span class="pill ok">无 active 触发冲突</span></div>';
+}
+
+function renderManagementFailures(failures) {
+    $('managementFailures').innerHTML = failures.length ? failures.map(run => `
+        <div class="run">
+            <div class="run-head"><strong>${esc(run.runId)}</strong><span class="pill bad">${esc(run.status)}</span></div>
+            <div>${esc(run.error || '')}</div>
+            <button class="secondary" onclick="loadRunDetail('${esc(run.runId)}')">查看详情</button>
+        </div>`).join('') : '<div class="run">暂无失败运行</div>';
+}
+
+function firstTriggerId() {
+    return state.nodes.find(n => n.nodeType === 'button.trigger')?.nodeId || '';
+}
+
+function show(data) {
+    $('output').textContent = JSON.stringify(data, null, 2);
+}
+
+function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function bind() {
+    $('apiBase').value = window.location.port === '8080' ? window.location.origin : 'http://127.0.0.1:8080';
+    $('refresh').onclick = () => refreshDevices().catch(err => setStatus(err.message, 'bad'));
+    $('validate').onclick = () => validateWorkflow().catch(err => setStatus(err.message, 'bad'));
+    $('tplRgb').onclick = () => applyTemplate('rgb').catch(err => setStatus(err.message, 'bad'));
+    $('tplRecordPlay').onclick = () => applyTemplate('recordPlay').catch(err => setStatus(err.message, 'bad'));
+    $('tplRecordUi').onclick = () => applyTemplate('recordUi').catch(err => setStatus(err.message, 'bad'));
+    $('addSlot').onclick = () => { state.slots.push({ slotId: `slot${state.slots.length + 1}`, deviceId: state.devices[0]?.id || '' }); render(); };
+    $('addNode').onclick = () => { state.nodes.push({ nodeId: `node_${state.nodes.length + 1}`, slotId: state.slots[0]?.slotId || '', nodeType: 'rgb.effect', params: {} }); render(); };
+    $('addEdge').onclick = () => { state.edges.push({ from: state.nodes[0]?.nodeId || '', to: state.nodes[1]?.nodeId || '' }); render(); };
+    $('syncFromForm').onclick = syncJson;
+    $('syncToForm').onclick = () => { try { loadJsonToForm(); } catch (e) { setStatus(e.message, 'bad'); } };
+    $('createWorkflow').onclick = () => createWorkflow().catch(err => setStatus(err.message, 'bad'));
+    $('inspectDeployment').onclick = () => inspectDeployment(true).catch(err => setStatus(err.message, 'bad'));
+    $('deployWorkflow').onclick = () => deployWorkflow().catch(err => setStatus(err.message, 'bad'));
+    $('testTrigger').onclick = () => testTrigger().catch(err => setStatus(err.message, 'bad'));
+    $('stopDeployment').onclick = () => stopDeployment().catch(err => setStatus(err.message, 'bad'));
+    $('loadRuns').onclick = () => loadRuns().catch(err => setStatus(err.message, 'bad'));
+    $('loadManagement').onclick = () => loadManagement().catch(err => setStatus(err.message, 'bad'));
+    bindDynamicEdits();
+    refreshDevices().catch(err => {
+        applyTemplate('rgb').catch(() => null);
+        setStatus(err.message, 'bad');
+    });
+}
+
+bind();
+</script>
+</body>
+</html>
