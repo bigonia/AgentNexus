@@ -5,7 +5,6 @@ import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
-import com.zwbd.agentnexus.sdui.event.EventDefinition;
 import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
@@ -15,17 +14,18 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.*;
 
 /**
- * Board-type-level capability query API.
+ * Board-level capability query API.
  *
- * Resolves a board type key (e.g., "board:ESP32-S3-LCD-0.85:0") to an example
- * online device of that type, then delegates to the same capability projection
+ * Resolves a board identifier (e.g., "ESP32-S3-LCD-0.85") to an example
+ * online device of that board, then delegates to the same capability projection
  * used by the debug endpoints.  This closes the loop for the state-machine
- * editor: when a user selects a board type, the editor can fetch all available
+ * editor: when a user selects a board, the editor can fetch all available
  * commands, sections, and events *before* binding a specific device.
  */
 @Slf4j
@@ -41,23 +41,20 @@ public class BoardTypeController {
     private final DeviceSessionManager sessionManager;
     private final CapabilityNodeCatalogService nodeCatalogService;
 
-    // ── List all device types ──
+    // ── List all boards ──
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> listTypes() {
-        return ApiResponse.ok(capabilityRegistry.getDeviceTypesAsList());
+    public ApiResponse<List<Map<String, Object>>> listBoards() {
+        return ApiResponse.ok(capabilityRegistry.getBoardTypesAsList());
     }
 
-    @GetMapping("/{typeKey}")
-    public ApiResponse<Map<String, Object>> getType(@PathVariable String typeKey) {
-        return capabilityRegistry.getDeviceType(typeKey)
+    @GetMapping("/{board}")
+    public ApiResponse<Map<String, Object>> getBoard(@PathVariable String board) {
+        return capabilityRegistry.getBoardType(board)
                 .map(info -> {
                     Map<String, Object> map = new LinkedHashMap<>();
-                    map.put("key", info.key());
                     map.put("board", info.board());
                     map.put("label", info.label());
-                    map.put("labelSource", info.labelSource());
-                    map.put("hasVariants", info.hasVariants());
                     map.put("inputEvents", new ArrayList<>(info.inputEvents()));
                     map.put("outputCommands", new ArrayList<>(info.outputCommands()));
                     map.put("sectionTypes", new ArrayList<>(info.sectionTypes()));
@@ -67,14 +64,14 @@ public class BoardTypeController {
                     map.put("lastSeen", info.lastSeen().toString());
                     return ApiResponse.ok(map);
                 })
-                .orElse(ApiResponse.error(40400, "board type not found: " + typeKey));
+                .orElse(ApiResponse.error(40400, "board not found: " + board));
     }
 
-    // ── Commands by board type ──
+    // ── Commands by board ──
 
-    @GetMapping("/{typeKey}/commands")
-    public ApiResponse<Map<String, Object>> commandsByType(@PathVariable String typeKey) {
-        return resolveExampleDevice(typeKey, (deviceId) -> {
+    @GetMapping("/{board}/commands")
+    public ApiResponse<Map<String, Object>> commandsByBoard(@PathVariable String board) {
+        return resolveExampleDevice(board, (deviceId) -> {
             List<Map<String, Object>> deviceCommands = new ArrayList<>();
             for (CommandSpec command : capabilityProjection.commands(deviceId)) {
                 Map<String, Object> entry = new LinkedHashMap<>();
@@ -85,12 +82,11 @@ public class BoardTypeController {
                 deviceCommands.add(entry);
             }
 
-            CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
+            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
 
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("typeKey", typeKey);
-            data.put("board", typeInfo != null ? typeInfo.board() : null);
-            data.put("label", typeInfo != null ? typeInfo.label() : null);
+            data.put("board", board);
+            data.put("label", boardInfo != null ? boardInfo.label() : null);
             data.put("exampleDeviceId", deviceId);
             data.put("online", sessionManager.isDeviceOnline(deviceId));
             data.put("deviceCommands", deviceCommands);
@@ -98,147 +94,63 @@ public class BoardTypeController {
         });
     }
 
-    // ── Sections / section-editor by board type ──
+    // ── Sections / section-editor by board ──
 
-    @GetMapping("/{typeKey}/sections")
-    public ApiResponse<Map<String, Object>> sectionsByType(@PathVariable String typeKey) {
-        return resolveExampleDevice(typeKey, (deviceId) -> {
+    @GetMapping("/{board}/sections")
+    public ApiResponse<Map<String, Object>> sectionsByBoard(@PathVariable String board) {
+        return resolveExampleDevice(board, (deviceId) -> {
             Map<String, Object> editor = new LinkedHashMap<>(sectionEditorService.buildSectionEditor(deviceId));
 
-            CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
+            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
 
-            editor.put("typeKey", typeKey);
-            editor.put("board", typeInfo != null ? typeInfo.board() : null);
-            editor.put("label", typeInfo != null ? typeInfo.label() : null);
+            editor.put("board", board);
+            editor.put("label", boardInfo != null ? boardInfo.label() : null);
             editor.put("exampleDeviceId", deviceId);
             editor.put("online", sessionManager.isDeviceOnline(deviceId));
             return ApiResponse.ok(editor);
         });
     }
 
-    // ── Events by board type ──
+    // ── Events by board ──
 
-    @GetMapping("/{typeKey}/events")
-    public ApiResponse<Map<String, Object>> eventsByType(@PathVariable String typeKey) {
-        return resolveExampleDevice(typeKey, (deviceId) -> {
-            // Device-specific public trigger events (user interactions + system events)
-            List<EventDefinition> deviceEventDefs = capabilityRegistry.getDeviceEventDefinitions(deviceId);
-            List<Map<String, Object>> deviceEvents = new ArrayList<>();
-            for (EventDefinition def : deviceEventDefs) {
-                if (def.isPublicTrigger()) {
-                    deviceEvents.add(def.toPublicMap());
-                }
-            }
+    @GetMapping("/{board}/events")
+    public ApiResponse<Map<String, Object>> eventsByBoard(
+            @PathVariable String board,
+            @RequestParam(required = false) List<String> sectionTypes) {
+        return resolveExampleDevice(board, (deviceId) -> {
+            // Build unified event catalog via CapabilityRegistry (single source of truth)
+            Set<String> filter = sectionTypes != null && !sectionTypes.isEmpty()
+                    ? new LinkedHashSet<>(sectionTypes) : Set.of();
+            Map<String, Object> catalog2 = capabilityRegistry.buildEventCatalog(deviceId, filter);
 
-            // Physical input events (buttons, motion sensors) — grouped, no params
-            List<Map<String, Object>> physicalInputs = capabilityRegistry.getDevicePhysicalInputs(deviceId);
-
-            // Platform-mediated media capabilities (audio recording, etc.)
-            List<Map<String, Object>> mediaCapabilities = capabilityRegistry.getDeviceMediaCapabilities(deviceId);
-
-            CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
+            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
 
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("typeKey", typeKey);
-            data.put("board", typeInfo != null ? typeInfo.board() : null);
-            data.put("label", typeInfo != null ? typeInfo.label() : null);
+            data.put("board", board);
+            data.put("label", boardInfo != null ? boardInfo.label() : null);
             data.put("exampleDeviceId", deviceId);
             data.put("online", sessionManager.isDeviceOnline(deviceId));
 
-            // deviceEvents: section interaction events this device supports
-            data.put("deviceEvents", deviceEvents);
-            // physicalInputs: device physical inputs (buttons, motion) — grouped by input
-            data.put("physicalInputs", physicalInputs);
-            // mediaCapabilities: platform-mediated capabilities (audio recording, etc.)
-            data.put("mediaCapabilities", mediaCapabilities);
-            // eventOptions: flat list of all public trigger events for editor dropdowns
+            // Backward-compatible keys
+            data.put("deviceEvents", catalog2.get("sectionEvents"));
+            data.put("physicalInputs", catalog2.get("physicalInputs"));
+            data.put("mediaCapabilities", catalog2.get("mediaCapabilities"));
             data.put("eventOptions", eventRegistry.getFlatEventOptions());
-            // eventTree: categorized public trigger event tree (user interaction + system)
             data.put("eventTree", eventRegistry.getPublicInboundEventTree());
-
-            // ── Build merged availableTriggers (deduped, ready for dropdown) ──
-            List<Map<String, Object>> availableTriggers = new ArrayList<>();
-            java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
-
-            // Section interaction events
-            for (Map<String, Object> dev : deviceEvents) {
-                String eid = string(dev.get("eventId"));
-                if (!eid.isBlank() && seen.add(eid)) {
-                    availableTriggers.add(Map.of(
-                            "eventId", eid,
-                            "displayName", string(dev.get("displayName")),
-                            "category", string(dev.get("category")),
-                            "source", string(dev.get("sourceCapability"))
-                    ));
-                }
-            }
-            // Physical input events (flatten grouped structure)
-            for (Map<String, Object> input : physicalInputs) {
-                String inputName = string(input.get("inputName"));
-                String inputLabel = string(input.get("displayName"));
-                if (input.get("events") instanceof List<?> evts) {
-                    for (Object e : evts) {
-                        if (e instanceof Map<?, ?> em) {
-                            String eid = string(em.get("eventId"));
-                            if (!eid.isBlank() && seen.add(eid)) {
-                                availableTriggers.add(Map.of(
-                                        "eventId", eid,
-                                        "displayName", inputLabel + " · " + string(em.get("displayName")),
-                                        "category", "USER_INTERACTION",
-                                        "source", inputName
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            // Media trigger events
-            for (Map<String, Object> mc : mediaCapabilities) {
-                String capName = string(mc.get("capabilityName"));
-                String capLabel = string(mc.get("displayName"));
-                if (mc.get("triggerEvents") instanceof List<?> triggers) {
-                    for (Object t : triggers) {
-                        if (t instanceof Map<?, ?> tm) {
-                            String eid = string(tm.get("eventId"));
-                            if (!eid.isBlank() && seen.add(eid)) {
-                                availableTriggers.add(Map.of(
-                                        "eventId", eid,
-                                        "displayName", capLabel + " · " + string(tm.get("displayName")),
-                                        "category", "SYSTEM_EVENT",
-                                        "source", capName
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            // System events from EventRegistry (dedup — already in eventOptions)
-            for (Map<String, String> opt : eventRegistry.getFlatEventOptions()) {
-                String eid = opt.get("value");
-                if (eid != null && seen.add(eid)) {
-                    availableTriggers.add(Map.of(
-                            "eventId", eid,
-                            "displayName", opt.getOrDefault("label", eid),
-                            "category", opt.getOrDefault("category", ""),
-                            "source", opt.getOrDefault("source", "")
-                    ));
-                }
-            }
-            data.put("availableTriggers", availableTriggers);
+            data.put("availableTriggers", catalog2.get("availableTriggers"));
 
             return ApiResponse.ok(data);
         });
     }
 
-    @GetMapping("/{typeKey}/capability-nodes")
-    public ApiResponse<Map<String, Object>> capabilityNodesByType(@PathVariable String typeKey) {
-        return resolveExampleDevice(typeKey, (deviceId) -> {
-            CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
+    @GetMapping("/{board}/capability-nodes")
+    public ApiResponse<Map<String, Object>> capabilityNodesByBoard(@PathVariable String board) {
+        return resolveExampleDevice(board, (deviceId) -> {
+            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
             CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId);
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("typeKey", typeKey);
-            data.put("board", typeInfo != null ? typeInfo.board() : null);
-            data.put("label", typeInfo != null ? typeInfo.label() : null);
+            data.put("board", board);
+            data.put("label", boardInfo != null ? boardInfo.label() : null);
             data.put("exampleDeviceId", deviceId);
             data.put("online", sessionManager.isDeviceOnline(deviceId));
             data.put("status", catalog.status());
@@ -251,33 +163,33 @@ public class BoardTypeController {
     // ── Internal ──
 
     /**
-     * Resolve a board type key to an example online device and execute the callback.
-     * Falls back to any device of that type if no online device is available.
+     * Resolve a board identifier to an example online device and execute the callback.
+     * Falls back to any device of that board if no online device is available.
      */
     private ApiResponse<Map<String, Object>> resolveExampleDevice(
-            String typeKey,
+            String board,
             java.util.function.Function<String, ApiResponse<Map<String, Object>>> callback) {
 
-        CapabilityRegistry.DeviceTypeInfo typeInfo = capabilityRegistry.getDeviceType(typeKey).orElse(null);
-        if (typeInfo == null) {
-            return ApiResponse.error(40400, "board type not found: " + typeKey);
+        CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
+        if (boardInfo == null) {
+            return ApiResponse.error(40400, "board not found: " + board);
         }
 
         // Prefer an online device
-        String deviceId = typeInfo.exampleDeviceIds().stream()
+        String deviceId = boardInfo.exampleDeviceIds().stream()
                 .filter(sessionManager::isDeviceOnline)
                 .findFirst()
                 .orElse(null);
 
         // Fall back to any example device
-        if (deviceId == null && !typeInfo.exampleDeviceIds().isEmpty()) {
-            deviceId = typeInfo.exampleDeviceIds().get(0);
+        if (deviceId == null && !boardInfo.exampleDeviceIds().isEmpty()) {
+            deviceId = boardInfo.exampleDeviceIds().get(0);
         }
 
         if (deviceId == null) {
             return ApiResponse.error(40400,
-                    "no example device available for board type: " + typeKey
-                    + ". Wait for a device of this type to connect.");
+                    "no example device available for board: " + board
+                    + ". Wait for a device of this board to connect.");
         }
 
         return callback.apply(deviceId);

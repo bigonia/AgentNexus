@@ -1,5 +1,6 @@
 package com.zwbd.agentnexus.sdui.event;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -16,12 +17,18 @@ import java.util.Set;
 @Component
 public class EventRegistry {
 
+    private final EventCatalogLoader loader;
     private final Map<String, EventDefinition> commandEvents = new LinkedHashMap<>();
     private final Map<String, EventDefinition> sectionEvents = new LinkedHashMap<>();
-    private final Map<String, EventCatalogProperties.SectionTypeEntry> sectionTypes;
+    private Map<String, EventCatalogProperties.SectionTypeEntry> sectionTypes = Map.of();
     private final Map<String, String> rawEventAliases = new LinkedHashMap<>();
 
     public EventRegistry(EventCatalogLoader loader) {
+        this.loader = loader;
+    }
+
+    @PostConstruct
+    public void init() {
         for (EventDefinition def : loader.commandEvents()) {
             commandEvents.put(def.eventId(), def);
             registerAlias(def);
@@ -162,6 +169,15 @@ public class EventRegistry {
 
     public boolean isKnownSectionType(String sectionType) {
         return sectionTypes.containsKey(sectionType);
+    }
+
+    /** All section type entries loaded from YAML — consumed by SectionTypeCatalog. */
+    public Collection<EventCatalogProperties.SectionTypeEntry> getSectionTypes() {
+        return List.copyOf(sectionTypes.values());
+    }
+
+    public Collection<EventDefinition> getSectionEvents() {
+        return List.copyOf(sectionEvents.values());
     }
 
     public Map<String, Object> catalogForEditor() {
@@ -345,6 +361,9 @@ public class EventRegistry {
             map.put("operations", section.getOperations());
             map.put("fields", section.getFields().stream().map(this::fieldToMap).toList());
             map.put("constraints", section.getConstraints());
+            if (section.getCompactHiddenFields() != null && !section.getCompactHiddenFields().isEmpty()) {
+                map.put("compactHiddenFields", section.getCompactHiddenFields());
+            }
             map.put("events", sectionEvents.values().stream()
                     .filter(def -> section.getType().equals(def.sourceCapability()))
                     .map(EventDefinition::toMap)
@@ -401,6 +420,8 @@ public class EventRegistry {
         map.put("name", field.getName());
         map.put("type", normalizeType(field.getType()));
         map.put("required", field.isRequired());
+        if (field.getLabel() != null) map.put("label", field.getLabel());
+        if (field.getDefaultValue() != null) map.put("default", field.getDefaultValue());
         if (field.getMin() != null) map.put("min", field.getMin());
         if (field.getMax() != null) map.put("max", field.getMax());
         if (field.getValues() != null && !field.getValues().isEmpty()) map.put("values", field.getValues());

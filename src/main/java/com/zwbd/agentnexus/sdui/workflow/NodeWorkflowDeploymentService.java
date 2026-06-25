@@ -269,7 +269,8 @@ public class NodeWorkflowDeploymentService {
                     node.nodeId(),
                     deviceId,
                     NodeWorkflowSupport.string(node.params().get("eventId")),
-                    NodeWorkflowSupport.string(node.params().get("nodeId"))
+                    NodeWorkflowSupport.string(node.params().get("nodeId")),
+                    NodeWorkflowSupport.string(node.params().get("sectionId"))
             ));
         }
         return result;
@@ -281,11 +282,13 @@ public class NodeWorkflowDeploymentService {
                           String triggerNodeId,
                           String deviceId,
                           String eventId,
-                          String nodeId) {
+                          String nodeId,
+                          String sectionId) {
         boolean conflictsWith(TriggerBinding other) {
-            return deviceId.equals(other.deviceId)
-                    && NodeWorkflowSupport.eventMatches(eventId, other.eventId)
-                    && (nodeId.isBlank() || other.nodeId.isBlank() || nodeId.equals(other.nodeId));
+            if (!deviceId.equals(other.deviceId)) return false;
+            if (!NodeWorkflowSupport.eventMatches(eventId, other.eventId)) return false;
+            if (!nodeId.isBlank() && !other.nodeId.isBlank() && !nodeId.equals(other.nodeId)) return false;
+            return sectionId.isBlank() || other.sectionId.isBlank() || sectionId.equals(other.sectionId);
         }
 
         Map<String, Object> toMap() {
@@ -297,6 +300,7 @@ public class NodeWorkflowDeploymentService {
             data.put("deviceId", deviceId);
             data.put("eventId", eventId);
             data.put("nodeId", nodeId);
+            data.put("sectionId", sectionId);
             return data;
         }
     }

@@ -14,11 +14,14 @@ public class SectionEditorService {
 
     private final CapabilityContractService contractService;
     private final DeviceCapabilityProjection capabilityProjection;
+    private final SectionTypeCatalog catalog;
 
     public SectionEditorService(CapabilityContractService contractService,
-                                DeviceCapabilityProjection capabilityProjection) {
+                                DeviceCapabilityProjection capabilityProjection,
+                                SectionTypeCatalog catalog) {
         this.contractService = contractService;
         this.capabilityProjection = capabilityProjection;
+        this.catalog = catalog;
     }
 
     public Map<String, Object> buildSectionEditor(String deviceId) {
@@ -47,7 +50,7 @@ public class SectionEditorService {
     }
 
     private List<Map<String, Object>> toDisplayFields(SectionSpec spec, SectionRenderMode renderMode) {
-        return SectionTypeCatalog.get(spec.type())
+        return catalog.get(spec.type())
                 .map(def -> filterFields(spec.fields(), renderMode, def.compactHiddenFields(), ""))
                 .orElseGet(() -> spec.fields().stream().map(this::toFieldMap).toList());
     }
@@ -57,7 +60,7 @@ public class SectionEditorService {
                                                    Set<String> compactHiddenFields,
                                                    String parentPath) {
         if (renderMode == SectionRenderMode.RICH || compactHiddenFields.isEmpty()) {
-            return fields.stream().map(this::toFieldMap).toList();
+            return fields.stream().map(FieldSpec::toMap).toList();
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
@@ -67,23 +70,17 @@ public class SectionEditorService {
                 continue;
             }
 
+            Map<String, Object> m = new LinkedHashMap<>(field.toMap());
             List<Map<String, Object>> children = filterFields(
                     field.children(), renderMode, compactHiddenFields, field.name());
-            result.add(Map.of(
-                    "name", field.name(),
-                    "type", field.type(),
-                    "children", children
-            ));
+            m.put("children", children);
+            result.add(m);
         }
         return result;
     }
 
     private Map<String, Object> toFieldMap(FieldSpec spec) {
-        return Map.of(
-                "name", spec.name(),
-                "type", spec.type(),
-                "children", spec.children().stream().map(this::toFieldMap).toList()
-        );
+        return spec.toMap();
     }
 
 }

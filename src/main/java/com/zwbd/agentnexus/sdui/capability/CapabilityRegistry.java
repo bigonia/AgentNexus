@@ -8,15 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.stream.Collectors;
 
 /**
  * Fully dynamic capability registry — all knowledge comes from device reports.
@@ -28,7 +24,7 @@ import java.util.stream.Collectors;
  * 2. Device snapshots: per-device precise capabilities (for validation)
  * 3. Command schemas: parameter definitions per command (from device output params)
  * 4. Event definitions: enriched via {@link EventRegistry}
- * 5. Device types: auto-discovered from capability fingerprints (for workflow targeting)
+ * 5. Board types: grouped by hardware board identifier (for workflow targeting)
  */
 @Slf4j
 @Component
@@ -36,6 +32,7 @@ public class CapabilityRegistry {
 
     private final CapabilityCatalog catalog;
     private EventRegistry eventRegistry;
+    private SectionTypeCatalog sectionCatalog;
 
     public CapabilityRegistry(CapabilityCatalog catalog) {
         this.catalog = catalog;
@@ -45,6 +42,12 @@ public class CapabilityRegistry {
     @Autowired(required = false)
     public void setEventRegistry(EventRegistry eventRegistry) {
         this.eventRegistry = eventRegistry;
+    }
+
+    /** Setter injection to avoid circular dependency. */
+    @Autowired(required = false)
+    public void setSectionTypeCatalog(SectionTypeCatalog sectionCatalog) {
+        this.sectionCatalog = sectionCatalog;
     }
 
     // ── Global catalog (union of all device reports) ──
@@ -61,13 +64,13 @@ public class CapabilityRegistry {
 
     private final Map<String, Map<String, CommandParamSchema>> deviceCommandSchemas = new ConcurrentHashMap<>();
 
-    // ── Device type auto-discovery ──
+    // ── Board type grouping ──
 
-    /** Maps deviceId → typeKey for quick lookup. */
-    private final Map<String, String> deviceToType = new ConcurrentHashMap<>();
+    /** Maps deviceId → board for quick lookup. */
+    private final Map<String, String> deviceToBoard = new ConcurrentHashMap<>();
 
-    /** Maps typeKey → DeviceTypeInfo. Types are auto-discovered from device reports. */
-    private final Map<String, DeviceTypeInfo> deviceTypes = new ConcurrentHashMap<>();
+    /** Maps board → BoardInfo. Boards are auto-discovered from device reports. */
+    private final Map<String, BoardInfo> boardTypes = new ConcurrentHashMap<>();
 
     // ── Event listeners ──
 
@@ -76,28 +79,22 @@ public class CapabilityRegistry {
     // ── Data records ──
 
     /**
-     * Auto-discovered device type, derived from capability reports.
-     * Types naturally emerge as devices connect — no manual configuration needed.
+     * Auto-discovered board type, derived from capability reports.
+     * All devices with the same board are merged into one entry (union of capabilities).
      *
-     * @param key             unique type key: "board:{board}:{variant}" or "fp:{fingerprint}"
-     * @param board           hardware board identifier from capability snapshot (may be null)
-     * @param label           human-readable label with auto-generated suffixes
-     * @param labelSource     "board" if derived from board field, "fingerprint" otherwise
-     * @param hasVariants     true if this board has multiple capability variants
-     * @param inputEvents     all supported input event IDs for this type
-     * @param outputCommands  all supported output command IDs for this type
-     * @param sectionTypes    all supported section types for this type
-     * @param deviceCount     total devices of this type ever seen
-     * @param onlineCount     devices of this type currently tracked (have snapshots)
-     * @param exampleDeviceIds  up to 3 example device IDs for this type
-     * @param lastSeen        when a device of this type was last seen
+     * @param board           hardware board identifier from capability snapshot
+     * @param label           human-readable label
+     * @param inputEvents     all supported input event IDs for this board (union)
+     * @param outputCommands  all supported output command IDs for this board (union)
+     * @param sectionTypes    all supported section types for this board (union)
+     * @param deviceCount     total devices of this board ever seen
+     * @param onlineCount     devices of this board currently tracked (have snapshots)
+     * @param exampleDeviceIds  up to 3 example device IDs for this board
+     * @param lastSeen        when a device of this board was last seen
      */
-    public record DeviceTypeInfo(
-            String key,
+    public record BoardInfo(
             String board,
             String label,
-            String labelSource,
-            boolean hasVariants,
             Set<String> inputEvents,
             Set<String> outputCommands,
             Set<String> sectionTypes,
@@ -195,7 +192,7 @@ public class CapabilityRegistry {
 
             for (String stype : caps.display().sectionTypes()) {
                 List<SectionTypeCatalog.InteractionEvent> interactionEvents =
-                        SectionTypeCatalog.getInteractionEvents(stype);
+                        sectionCatalog != null ? sectionCatalog.getInteractionEvents(stype) : List.of();
                 for (SectionTypeCatalog.InteractionEvent ievt : interactionEvents) {
                     events.add(ievt.eventId());
                 }
@@ -240,8 +237,8 @@ public class CapabilityRegistry {
             }
         }
 
-        // Auto-discover / update device type
-        discoverDeviceType(deviceId, caps, deviceCaps);
+        // Auto-discover / update board type
+        discoverBoardType(deviceId, caps, deviceCaps);
     }
 
     /**
@@ -275,7 +272,7 @@ public class CapabilityRegistry {
         catalog.put("events", new ArrayList<>(knownEvents));
         catalog.put("commands", new ArrayList<>(knownCommands));
         catalog.put("sectionTypes", new ArrayList<>(knownSectionTypes));
-        catalog.put("interactionEvents", new ArrayList<>(SectionTypeCatalog.allInteractionEventIds()));
+        catalog.put("interactionEvents", new ArrayList<>(sectionCatalog != null ? sectionCatalog.allInteractionEventIds() : List.of()));
         catalog.put("deviceCount", deviceSnapshots.size());
         return catalog;
     }
@@ -339,7 +336,7 @@ public class CapabilityRegistry {
         Set<String> events = new LinkedHashSet<>();
         for (String stype : caps.sectionTypes()) {
             for (SectionTypeCatalog.InteractionEvent ievt :
-                    SectionTypeCatalog.getInteractionEvents(stype)) {
+                    sectionCatalog != null ? sectionCatalog.getInteractionEvents(stype) : List.<SectionTypeCatalog.InteractionEvent>of()) {
                 events.add(ievt.eventId());
             }
         }
@@ -370,6 +367,7 @@ public class CapabilityRegistry {
                 if (inputDef.platform()) continue; // skip platform-mediated capabilities
                 if (inputDef.events() == null) continue;
                 for (String eventName : inputDef.events()) {
+                    if (inputDef.isInternalEvent(eventName)) continue; // skip internal/tech events
                     String normalizedId = normalizeInputEventId(entry.getKey(), eventName);
                     if (inputEventId.equals(normalizedId)) {
                         inputDefsSeen.putIfAbsent(entry.getKey(), inputDef);
@@ -452,10 +450,11 @@ public class CapabilityRegistry {
             }
             cap.put("commands", commands);
 
-            // Inbound lifecycle events
+            // Inbound lifecycle events (excluding internal/tech events)
             List<Map<String, Object>> events = new ArrayList<>();
             if (inputDef.events() != null) {
                 for (String eventName : inputDef.events()) {
+                    if (inputDef.isInternalEvent(eventName)) continue; // skip internal/tech events
                     String normalizedId = normalizeInputEventId(entry.getKey(), eventName);
                     if (caps.inputEvents().contains(normalizedId)) {
                         Map<String, Object> evt = new LinkedHashMap<>();
@@ -468,20 +467,135 @@ public class CapabilityRegistry {
             }
             cap.put("events", events);
 
-            // Trigger events: subset of events usable as state-machine triggers.
-            // Currently, only audio.stt.result (transcribed text) qualifies.
-            List<Map<String, Object>> triggerEvents = new ArrayList<>();
-            for (Map<String, Object> evt : events) {
-                String evtName = (String) evt.get("eventName");
-                if ("audio.stt.result".equals(evtName)) {
-                    triggerEvents.add(evt);
-                }
-            }
-            cap.put("triggerEvents", triggerEvents);
+            // Trigger events: all business-facing events are usable as state-machine triggers.
+            cap.put("triggerEvents", new ArrayList<>(events));
 
             result.add(cap);
         }
         return result;
+    }
+
+    /**
+     * Build a complete input event catalog for a device, optionally filtered by
+     * section types. This is the single source of truth for event listings —
+     * consumed by the board-type events API, debug SSE catalog, and workflow
+     * trigger configuration.
+     *
+     * @param deviceId           the device to query
+     * @param sectionTypesFilter if non-empty, only include interaction events
+     *                           from these section types; if empty, include all
+     *                           device-supported interaction events
+     * @return structured map with keys: sectionEvents, physicalInputs,
+     *         mediaCapabilities, availableTriggers
+     */
+    public Map<String, Object> buildEventCatalog(String deviceId, Set<String> sectionTypesFilter) {
+        Map<String, Object> catalog2 = new LinkedHashMap<>();
+        catalog2.put("deviceId", deviceId);
+
+        // Physical input events (buttons, motion) — always included
+        List<Map<String, Object>> physicalInputs = getDevicePhysicalInputs(deviceId);
+        catalog2.put("physicalInputs", physicalInputs);
+
+        // Platform-mediated media capabilities (audio recording, etc.)
+        List<Map<String, Object>> mediaCapabilities = getDeviceMediaCapabilities(deviceId);
+        catalog2.put("mediaCapabilities", mediaCapabilities);
+
+        // Section interaction events — optionally filtered, uses EventDefinition for full IDs
+        List<Map<String, Object>> sectionEvents = new ArrayList<>();
+        Set<String> filterTypes = sectionTypesFilter != null && !sectionTypesFilter.isEmpty()
+                ? sectionTypesFilter
+                : getBoardInfoForDevice(deviceId)
+                        .map(info -> info.sectionTypes())
+                        .orElse(Set.of());
+
+        for (EventDefinition def : getDeviceEventDefinitions(deviceId)) {
+            if (!def.isPublicTrigger() || def.kind() != com.zwbd.agentnexus.sdui.event.EventDefinition.EventKind.SECTION) continue;
+            String source = def.sourceCapability();
+            if (!filterTypes.isEmpty() && !filterTypes.contains(source)) continue;
+            Map<String, Object> evt = new LinkedHashMap<>();
+            evt.put("eventId", def.eventId());
+            evt.put("displayName", def.displayName() != null ? def.displayName() : def.eventId());
+            evt.put("description", def.description() != null ? def.description() : "");
+            evt.put("sectionType", source);
+            evt.put("category", def.category().name());
+            evt.put("source", source);
+            sectionEvents.add(evt);
+        }
+        catalog2.put("sectionEvents", sectionEvents);
+
+        // Build merged availableTriggers (deduped, ready for dropdown)
+        List<Map<String, Object>> availableTriggers = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        // Section interaction events
+        for (Map<String, Object> evt : sectionEvents) {
+            String eid = string(evt.get("eventId"));
+            if (!eid.isBlank() && seen.add(eid)) {
+                availableTriggers.add(Map.of(
+                        "eventId", eid,
+                        "displayName", string(evt.get("displayName")),
+                        "category", string(evt.get("category")),
+                        "source", string(evt.get("source"))
+                ));
+            }
+        }
+        // Physical input events (flatten grouped structure)
+        for (Map<String, Object> input : physicalInputs) {
+            String inputName = string(input.get("inputName"));
+            String inputLabel = string(input.get("displayName"));
+            if (input.get("events") instanceof List<?> evts) {
+                for (Object e : evts) {
+                    if (e instanceof Map<?, ?> em) {
+                        String eid = string(em.get("eventId"));
+                        if (!eid.isBlank() && seen.add(eid)) {
+                            availableTriggers.add(Map.of(
+                                    "eventId", eid,
+                                    "displayName", inputLabel + " · " + string(em.get("displayName")),
+                                    "category", "USER_INTERACTION",
+                                    "source", inputName
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // Media trigger events
+        for (Map<String, Object> mc : mediaCapabilities) {
+            String capName = string(mc.get("capabilityName"));
+            String capLabel = string(mc.get("displayName"));
+            if (mc.get("triggerEvents") instanceof List<?> triggers) {
+                for (Object t : triggers) {
+                    if (t instanceof Map<?, ?> tm) {
+                        String eid = string(tm.get("eventId"));
+                        if (!eid.isBlank() && seen.add(eid)) {
+                            availableTriggers.add(Map.of(
+                                    "eventId", eid,
+                                    "displayName", capLabel + " · " + string(tm.get("displayName")),
+                                    "category", "SYSTEM_EVENT",
+                                    "source", capName
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // System events from EventRegistry (timer, cron)
+        if (eventRegistry != null) {
+            for (Map<String, String> opt : eventRegistry.getFlatEventOptions()) {
+                String eid = opt.get("value");
+                if (eid != null && seen.add(eid)) {
+                    availableTriggers.add(Map.of(
+                            "eventId", eid,
+                            "displayName", opt.getOrDefault("label", eid),
+                            "category", opt.getOrDefault("category", ""),
+                            "source", opt.getOrDefault("source", "")
+                    ));
+                }
+            }
+        }
+        catalog2.put("availableTriggers", availableTriggers);
+
+        return catalog2;
     }
 
     /**
@@ -639,46 +753,50 @@ public class CapabilityRegistry {
                 "knownEvents", knownEvents.size(),
                 "knownCommands", knownCommands.size(),
                 "knownSectionTypes", knownSectionTypes.size(),
-                "deviceTypes", deviceTypes.size()
+                "boardTypes", boardTypes.size()
         );
     }
 
-    // ── Device type queries ──
+    // ── Board type queries ──
 
     /**
-     * Get all auto-discovered device types.
+     * Get all auto-discovered board types.
      */
-    public List<DeviceTypeInfo> getDeviceTypes() {
-        return List.copyOf(deviceTypes.values());
+    public List<BoardInfo> getBoardTypes() {
+        return List.copyOf(boardTypes.values());
     }
 
     /**
-     * Get a specific device type by its key.
+     * Get a specific board type by its board identifier.
      */
-    public Optional<DeviceTypeInfo> getDeviceType(String key) {
-        return Optional.ofNullable(deviceTypes.get(key));
+    public Optional<BoardInfo> getBoardType(String board) {
+        return Optional.ofNullable(boardTypes.get(board));
     }
 
     /**
-     * Get the device type for a specific device.
+     * Get the board identifier for a specific device.
      */
-    public Optional<DeviceTypeInfo> getDeviceTypeForDevice(String deviceId) {
-        String typeKey = deviceToType.get(deviceId);
-        return typeKey != null ? Optional.ofNullable(deviceTypes.get(typeKey)) : Optional.empty();
+    public Optional<String> getBoardForDevice(String deviceId) {
+        return Optional.ofNullable(deviceToBoard.get(deviceId));
     }
 
     /**
-     * Get all device types as a structured list (for API responses).
+     * Get the BoardInfo for a specific device.
      */
-    public List<Map<String, Object>> getDeviceTypesAsList() {
+    public Optional<BoardInfo> getBoardInfoForDevice(String deviceId) {
+        String board = deviceToBoard.get(deviceId);
+        return board != null ? Optional.ofNullable(boardTypes.get(board)) : Optional.empty();
+    }
+
+    /**
+     * Get all board types as a structured list (for API responses).
+     */
+    public List<Map<String, Object>> getBoardTypesAsList() {
         List<Map<String, Object>> result = new ArrayList<>();
-        for (DeviceTypeInfo info : deviceTypes.values()) {
+        for (BoardInfo info : boardTypes.values()) {
             Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("key", info.key());
             entry.put("board", info.board());
             entry.put("label", info.label());
-            entry.put("labelSource", info.labelSource());
-            entry.put("hasVariants", info.hasVariants());
             entry.put("inputEvents", new ArrayList<>(info.inputEvents()));
             entry.put("outputCommands", new ArrayList<>(info.outputCommands()));
             entry.put("sectionTypes", new ArrayList<>(info.sectionTypes()));
@@ -691,259 +809,125 @@ public class CapabilityRegistry {
         return result;
     }
 
-    // ── Device type auto-discovery ──
+    // ── Board type auto-discovery ──
 
     /**
-     * Discover / update the device type for a newly reported device.
-     * Types are auto-generated from capability fingerprints and board identifiers.
+     * Discover / update the board type for a newly reported device.
+     * All devices with the same board are merged into one entry (union of capabilities).
      */
-    private void discoverDeviceType(String deviceId, CapabilitySchema.CapabilitySnapshot caps,
-                                    DeviceCapabilities deviceCaps) {
+    private void discoverBoardType(String deviceId, CapabilitySchema.CapabilitySnapshot caps,
+                                   DeviceCapabilities deviceCaps) {
         String board = caps.board();
+        if (board == null || board.isBlank()) {
+            log.warn("Device {} reported no board identifier, skipping board type discovery", deviceId);
+            return;
+        }
+
         Set<String> events = deviceCaps.inputEvents();
         Set<String> commands = deviceCaps.outputCommands();
         Set<String> sections = deviceCaps.sectionTypes();
 
-        String fingerprint = computeFingerprint(events, commands, sections);
+        // Check if this device was previously associated with a different board
+        String oldBoard = deviceToBoard.get(deviceId);
 
-        // Check if this device was previously associated with a different type
-        String oldTypeKey = deviceToType.get(deviceId);
-
-        // Find existing type by fingerprint (exact capability match)
-        String existingKey = null;
-        for (var entry : deviceTypes.entrySet()) {
-            String fp = computeFingerprint(entry.getValue().inputEvents(),
-                    entry.getValue().outputCommands(), entry.getValue().sectionTypes());
-            if (fingerprint.equals(fp)) {
-                existingKey = entry.getKey();
-                break;
-            }
-        }
-
-        String typeKey;
-        if (existingKey != null) {
-            typeKey = existingKey;
-        } else if (oldTypeKey != null) {
-            // Same device reported updated capabilities — update existing type in-place
-            // (take union) rather than creating a duplicate variant for the same device.
-            DeviceTypeInfo oldInfo = deviceTypes.get(oldTypeKey);
-            Set<String> mergedEvents = new LinkedHashSet<>(oldInfo.inputEvents());
+        BoardInfo existing = boardTypes.get(board);
+        if (existing != null) {
+            // Merge capabilities into existing board entry (union)
+            Set<String> mergedEvents = new LinkedHashSet<>(existing.inputEvents());
+            int beforeEvents = mergedEvents.size();
             mergedEvents.addAll(events);
-            Set<String> mergedCommands = new LinkedHashSet<>(oldInfo.outputCommands());
+            Set<String> mergedCommands = new LinkedHashSet<>(existing.outputCommands());
+            int beforeCommands = mergedCommands.size();
             mergedCommands.addAll(commands);
-            Set<String> mergedSections = new LinkedHashSet<>(oldInfo.sectionTypes());
+            Set<String> mergedSections = new LinkedHashSet<>(existing.sectionTypes());
+            int beforeSections = mergedSections.size();
             mergedSections.addAll(sections);
 
-            typeKey = oldTypeKey;
-            DeviceTypeInfo updated = new DeviceTypeInfo(
-                    oldTypeKey, board, oldInfo.label(), oldInfo.labelSource(),
-                    false, Set.copyOf(mergedEvents), Set.copyOf(mergedCommands), Set.copyOf(mergedSections),
-                    oldInfo.deviceCount(), oldInfo.onlineCount(), oldInfo.exampleDeviceIds(), Instant.now()
+            List<String> exampleIds = new ArrayList<>(existing.exampleDeviceIds());
+            if (!exampleIds.contains(deviceId) && exampleIds.size() < 3) {
+                exampleIds.add(deviceId);
+            }
+
+            BoardInfo updated = new BoardInfo(
+                    board, existing.label(),
+                    Set.copyOf(mergedEvents), Set.copyOf(mergedCommands), Set.copyOf(mergedSections),
+                    existing.deviceCount(), existing.onlineCount(),
+                    exampleIds, Instant.now()
             );
-            deviceTypes.put(oldTypeKey, updated);
-            log.info("Device type updated (capabilities changed): key={} board={} events={}→{} commands={}→{}",
-                    oldTypeKey, board, oldInfo.inputEvents().size(), mergedEvents.size(),
-                    oldInfo.outputCommands().size(), mergedCommands.size());
+            boardTypes.put(board, updated);
+
+            if (mergedEvents.size() > beforeEvents || mergedCommands.size() > beforeCommands || mergedSections.size() > beforeSections) {
+                log.info("Board type expanded (capabilities merged): board={} events={}→{} commands={}→{}",
+                        board, beforeEvents, mergedEvents.size(), beforeCommands, mergedCommands.size());
+            }
         } else {
-            // New capability fingerprint — create a new type
-            typeKey = generateTypeKey(board, fingerprint);
-            String label = generateTypeLabel(board, fingerprint);
-            DeviceTypeInfo newType = new DeviceTypeInfo(
-                    typeKey, board, label, board != null ? "board" : "fingerprint",
-                    false, Set.copyOf(events), Set.copyOf(commands), Set.copyOf(sections),
+            // New board type
+            String label = board;
+            BoardInfo newBoard = new BoardInfo(
+                    board, label,
+                    Set.copyOf(events), Set.copyOf(commands), Set.copyOf(sections),
                     0, 0, new ArrayList<>(), Instant.now()
             );
-            deviceTypes.put(typeKey, newType);
-            log.info("New device type discovered: key={} label={} board={} events={} commands={}",
-                    typeKey, label, board, events.size(), commands.size());
+            boardTypes.put(board, newBoard);
+            log.info("New board type discovered: board={} events={} commands={} sections={}",
+                    board, events.size(), commands.size(), sections.size());
         }
 
-        // Update device-to-type mapping
-        if (oldTypeKey != null && !oldTypeKey.equals(typeKey)) {
-            // Device moved to a different type — update old type counts and clean up if orphaned
-            DeviceTypeInfo oldInfo = updateTypeStats(oldTypeKey, -1, 0);
+        // Update device-to-board mapping
+        if (oldBoard != null && !oldBoard.equals(board)) {
+            // Device moved to a different board — update old board counts
+            updateBoardStats(oldBoard, -1, 0);
+            BoardInfo oldInfo = boardTypes.get(oldBoard);
             if (oldInfo != null && oldInfo.deviceCount() <= 1) {
-                // Last device left this type — remove orphaned type
-                deviceTypes.remove(oldTypeKey);
-                log.info("Removed orphaned device type: key={}", oldTypeKey);
+                boardTypes.remove(oldBoard);
+                log.info("Removed orphaned board type: board={}", oldBoard);
             }
         }
-        deviceToType.put(deviceId, typeKey);
+        deviceToBoard.put(deviceId, board);
 
-        // Update type stats
-        DeviceTypeInfo info = deviceTypes.get(typeKey);
-        int deltaCount = (oldTypeKey == null || !oldTypeKey.equals(typeKey)) ? 1 : 0;
-        updateTypeStats(typeKey, deltaCount, 0);
+        // Update board stats
+        BoardInfo info = boardTypes.get(board);
+        int deltaCount = (oldBoard == null || !oldBoard.equals(board)) ? 1 : 0;
+        updateBoardStats(board, deltaCount, 0);
 
         // Update example device IDs
-        int newDeviceCount = info.deviceCount() + deltaCount;
-        List<String> exampleIds = new ArrayList<>(info.exampleDeviceIds());
+        int newDeviceCount = (info != null ? info.deviceCount() : 0) + deltaCount;
+        List<String> exampleIds = new ArrayList<>(info != null ? info.exampleDeviceIds() : List.of());
         if (!exampleIds.contains(deviceId) && exampleIds.size() < 3) {
             exampleIds.add(deviceId);
         }
 
-        // If board-based, check for variants and regenerate labels
-        boolean hasVariants = false;
-        if (board != null && !board.isBlank()) {
-            long boardVariantCount = deviceTypes.values().stream()
-                    .filter(t -> board.equals(t.board())).count();
-            hasVariants = boardVariantCount > 1;
-        }
-
-        deviceTypes.put(typeKey, new DeviceTypeInfo(
-                info.key(), info.board(), info.label(), info.labelSource(),
-                hasVariants, info.inputEvents(), info.outputCommands(), info.sectionTypes(),
-                newDeviceCount, info.onlineCount(), exampleIds, Instant.now()
-        ));
-
-        // Regenerate labels for all variants of this board (to add suffixes)
-        if (board != null && !board.isBlank() && hasVariants) {
-            regenerateBoardLabels(board);
-        }
-    }
-
-    /**
-     * Called when a device disconnects to update type online counts.
-     */
-    public void markDeviceOffline(String deviceId) {
-        String typeKey = deviceToType.get(deviceId);
-        if (typeKey != null) {
-            updateTypeStats(typeKey, 0, -1);
-        }
-    }
-
-    private DeviceTypeInfo updateTypeStats(String typeKey, int countDelta, int onlineDelta) {
-        DeviceTypeInfo info = deviceTypes.get(typeKey);
-        if (info == null) return null;
-        DeviceTypeInfo updated = new DeviceTypeInfo(
-                info.key(), info.board(), info.label(), info.labelSource(),
-                info.hasVariants(), info.inputEvents(), info.outputCommands(), info.sectionTypes(),
-                Math.max(0, info.deviceCount() + countDelta),
-                Math.max(0, info.onlineCount() + onlineDelta),
-                info.exampleDeviceIds(), info.lastSeen()
-        );
-        deviceTypes.put(typeKey, updated);
-        return updated;
-    }
-
-    /**
-     * Compute a stable capability fingerprint from sorted event/command/section sets.
-     */
-    private String computeFingerprint(Set<String> events, Set<String> commands, Set<String> sections) {
-        String canonical = events.stream().sorted().collect(Collectors.joining(","))
-                + "|" + commands.stream().sorted().collect(Collectors.joining(","))
-                + "|" + sections.stream().sorted().collect(Collectors.joining(","));
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(canonical.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < 4; i++) {
-                sb.append(String.format("%02x", hash[i]));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            return Integer.toHexString(canonical.hashCode());
-        }
-    }
-
-    /**
-     * Generate a stable type key from board + fingerprint.
-     */
-    private String generateTypeKey(String board, String fingerprint) {
-        if (board != null && !board.isBlank()) {
-            // Count existing variants for this board to assign variant index
-            long existing = deviceTypes.values().stream()
-                    .filter(t -> board.equals(t.board())).count();
-            return "board:" + board + ":" + existing;
-        }
-        return "fp:" + fingerprint;
-    }
-
-    /**
-     * Generate a human-readable label for a device type.
-     */
-    private String generateTypeLabel(String board, String fingerprint) {
-        if (board != null && !board.isBlank()) {
-            return board; // base label, suffix added later if variants exist
-        }
-        // Fallback: describe by features
-        return "未知设备";
-    }
-
-    /**
-     * Regenerate labels for all variants of a board after a new variant is discovered.
-     * The variant with the most capabilities gets a special suffix; others describe
-     * what they're missing or what's unique.
-     */
-    private void regenerateBoardLabels(String board) {
-        List<DeviceTypeInfo> variants = deviceTypes.values().stream()
-                .filter(t -> board.equals(t.board()))
-                .sorted(Comparator.comparingInt((DeviceTypeInfo t) ->
-                        t.inputEvents().size() + t.outputCommands().size() + t.sectionTypes().size()).reversed())
-                .toList();
-
-        if (variants.size() <= 1) return;
-
-        // First (most capable) is the reference
-        DeviceTypeInfo reference = variants.get(0);
-        for (int i = 0; i < variants.size(); i++) {
-            DeviceTypeInfo info = variants.get(i);
-            String newLabel;
-            if (i == 0) {
-                newLabel = board + " (全功能版)";
-            } else {
-                String feature = describeFeatureDiff(info, reference);
-                newLabel = board + " (" + feature + ")";
-            }
-            deviceTypes.put(info.key(), new DeviceTypeInfo(
-                    info.key(), info.board(), newLabel, info.labelSource(),
-                    true, info.inputEvents(), info.outputCommands(), info.sectionTypes(),
-                    info.deviceCount(), info.onlineCount(), info.exampleDeviceIds(), info.lastSeen()
+        if (info != null) {
+            boardTypes.put(board, new BoardInfo(
+                    info.board(), info.label(),
+                    info.inputEvents(), info.outputCommands(), info.sectionTypes(),
+                    newDeviceCount, info.onlineCount(),
+                    exampleIds, Instant.now()
             ));
         }
     }
 
     /**
-     * Describe the most notable capability difference between a variant and reference.
+     * Called when a device disconnects to update board online counts.
      */
-    private String describeFeatureDiff(DeviceTypeInfo variant, DeviceTypeInfo reference) {
-        // Check for major capability group differences
-        boolean refPwr = hasInput(reference, "buttons.pwr");
-        boolean varPwr = hasInput(variant, "buttons.pwr");
-        boolean refPlus = hasInput(reference, "buttons.plus");
-        boolean varPlus = hasInput(variant, "buttons.plus");
-        boolean refMotion = hasInput(reference, "motion");
-        boolean varMotion = hasInput(variant, "motion");
-        boolean refAudio = hasInput(reference, "audio.record");
-        boolean varAudio = hasInput(variant, "audio.record");
-        boolean refRgb = hasOutput(reference, "rgb.effect");
-        boolean varRgb = hasOutput(variant, "rgb.effect");
-
-        List<String> missing = new ArrayList<>();
-        if ((refPwr && !varPwr) || (refPlus && !varPlus)) missing.add("单按钮");
-        if (refMotion && !varMotion) missing.add("无运动");
-        if (refAudio && !varAudio) missing.add("无语音");
-        if (refRgb && !varRgb) missing.add("无灯光");
-
-        if (!missing.isEmpty()) {
-            return String.join("/", missing.stream().limit(2).toList());
+    public void markDeviceOffline(String deviceId) {
+        String board = deviceToBoard.get(deviceId);
+        if (board != null) {
+            updateBoardStats(board, 0, -1);
         }
-
-        // Fewer events overall
-        int totalRef = reference.inputEvents().size() + reference.outputCommands().size();
-        int totalVar = variant.inputEvents().size() + variant.outputCommands().size();
-        if (totalVar < totalRef) {
-            return "精简版 (" + totalVar + " 能力)";
-        }
-        return "变体";
     }
 
-    private boolean hasInput(DeviceTypeInfo info, String inputName) {
-        return info.inputEvents().stream().anyMatch(e -> e.contains(inputName));
-    }
-
-    private boolean hasOutput(DeviceTypeInfo info, String outputName) {
-        return info.outputCommands().stream().anyMatch(c -> c.startsWith(outputName));
+    private void updateBoardStats(String board, int countDelta, int onlineDelta) {
+        BoardInfo info = boardTypes.get(board);
+        if (info == null) return;
+        BoardInfo updated = new BoardInfo(
+                info.board(), info.label(),
+                info.inputEvents(), info.outputCommands(), info.sectionTypes(),
+                Math.max(0, info.deviceCount() + countDelta),
+                Math.max(0, info.onlineCount() + onlineDelta),
+                info.exampleDeviceIds(), info.lastSeen()
+        );
+        boardTypes.put(board, updated);
     }
 
     // ── Internal ──
@@ -1000,5 +984,9 @@ public class CapabilityRegistry {
             }
         }
         return dp[a.length()][b.length()];
+    }
+
+    private static String string(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 }

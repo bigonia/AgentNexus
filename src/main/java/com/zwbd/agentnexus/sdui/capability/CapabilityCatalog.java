@@ -31,10 +31,11 @@ public class CapabilityCatalog {
                            String displayName, String description,
                            List<PayloadField> payloadSchema,
                            boolean platform,
-                           Map<String, String> eventDisplayNames) {
+                           Map<String, String> eventDisplayNames,
+                           Set<String> internalEvents) {
         /** Backward-compat constructor for code that only provides events list. */
         public InputDef(String name, String protocol, Integer eventKind, String topic, List<String> events) {
-            this(name, protocol, eventKind, topic, events, null, null, List.of(), false, Map.of());
+            this(name, protocol, eventKind, topic, events, null, null, List.of(), false, Map.of(), Set.of());
         }
 
         /** Whether this is a platform-mediated capability (not a simple physical input). */
@@ -45,6 +46,17 @@ public class CapabilityCatalog {
         /** Get the display name for a specific event, falling back to the raw event name. */
         public String eventDisplayName(String eventName) {
             return eventDisplayNames.getOrDefault(eventName, eventName);
+        }
+
+        /** Whether the given event is internal (technical noise, not business-facing). */
+        public boolean isInternalEvent(String eventName) {
+            return internalEvents.contains(eventName);
+        }
+
+        /** Get only the business-facing (non-internal) events from the events list. */
+        public List<String> businessEvents() {
+            if (events == null) return List.of();
+            return events.stream().filter(e -> !internalEvents.contains(e)).toList();
         }
     }
 
@@ -193,13 +205,14 @@ public class CapabilityCatalog {
             // Parse events — supports both old format (List<String>) and new format (Map<String, {displayName}>)
             List<String> events = parseEventList(def.get("events"));
             Map<String, String> eventDisplayNames = parseEventDisplayNames(def.get("events"));
+            Set<String> internalEvents = parseInternalEvents(def.get("events"));
 
             // Parse payloadSchema if present (new in catalog v2)
             List<PayloadField> payloadSchema = parsePayloadSchema(
                     (List<Map<String, Object>>) def.get("payloadSchema"));
 
             inputsByName.put(name, new InputDef(name, protocol, eventKind, topic, events,
-                    displayName, description, payloadSchema, platform, eventDisplayNames));
+                    displayName, description, payloadSchema, platform, eventDisplayNames, internalEvents));
         }
     }
 
@@ -244,6 +257,26 @@ public class CapabilityCatalog {
                 String displayName = (String) eventMeta.get("displayName");
                 if (displayName != null && !displayName.isBlank()) {
                     result.put(eventName, displayName);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Parse per-event internal flags from the events node (new map format only).
+     * Internal events are technical noise (e.g. audio chunk progress) and should
+     * not be surfaced as business events in catalogs or editor dropdowns.
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> parseInternalEvents(Object eventsNode) {
+        if (!(eventsNode instanceof Map<?, ?> map)) return Set.of();
+        Set<String> result = new LinkedHashSet<>();
+        for (var entry : map.entrySet()) {
+            String eventName = String.valueOf(entry.getKey());
+            if (entry.getValue() instanceof Map<?, ?> eventMeta) {
+                if (eventMeta.get("internal") instanceof Boolean b && b) {
+                    result.add(eventName);
                 }
             }
         }

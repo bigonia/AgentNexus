@@ -12,9 +12,11 @@ import java.util.Set;
 public class SectionSceneBuilder {
 
     private final ObjectMapper mapper;
+    private final SectionTypeCatalog catalog;
 
-    public SectionSceneBuilder(ObjectMapper mapper) {
+    public SectionSceneBuilder(ObjectMapper mapper, SectionTypeCatalog catalog) {
         this.mapper = mapper;
+        this.catalog = catalog;
     }
 
     // ── Public API ──
@@ -70,9 +72,9 @@ public class SectionSceneBuilder {
 
     private ObjectNode buildSectionNode(SectionEntry entry, SectionRenderMode mode) {
         ObjectNode n = mapper.createObjectNode();
-        n.put("type", entry.type().wireName());
+        n.put("type", entry.type());
         n.put("section_id", entry.sectionId());
-        n.set("data", buildDataNode(entry.data(), entry.type().wireName(), mode));
+        n.set("data", buildDataNode(entry.data(), entry.type(), mode));
         return n;
     }
 
@@ -265,8 +267,8 @@ public class SectionSceneBuilder {
         return wireName;
     }
 
-    private static Set<String> compactHidden(String sectionType) {
-        return SectionTypeCatalog.get(sectionType)
+    private Set<String> compactHidden(String sectionType) {
+        return catalog.get(sectionType)
                 .map(SectionTypeCatalog.SectionTypeDef::compactHiddenFields)
                 .orElse(Set.of());
     }

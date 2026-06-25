@@ -46,15 +46,18 @@ inputs:
       audio.record.started:
         displayName: "录音已开始"
         description: "终端确认开始麦克风采集"
+        internal: true
       audio.record.chunk:
         displayName: "录音上传中"
         description: "终端上传 PCM 分片进度，节流每秒约1次"
+        internal: true
       audio.record.data:
         displayName: "录音上传完成"
         description: "录音完成后平台发布，包含 PCM 元数据（采样率、声道数、数据大小）"
       audio.stt.processing:
         displayName: "语音识别中"
         description: "PCM 已转 WAV，开始 STT 转写"
+        internal: true
       audio.stt.result:
         displayName: "语音识别结果"
         description: "STT 转写后的文本内容"
@@ -71,11 +74,11 @@ inputs:
     displayName: "运动传感器"
     description: "设备 IMU 运动传感器，支持摇晃/抬腕/翻转检测"
     events:
-      imu.shake:
+      shake:
         displayName: "摇晃"
-      imu.wrist_raise:
+      wrist_raise:
         displayName: "抬腕"
-      imu.flip:
+      flip:
         displayName: "翻转"
     payloadSchema:
       - {name: eventName, type: string, required: true, description: "运动事件类型"}

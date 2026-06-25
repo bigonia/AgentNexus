@@ -5,6 +5,7 @@ import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
 import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
 import com.zwbd.agentnexus.sdui.capability.CapabilityContractService;
 import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
 import org.springframework.stereotype.Service;
 
@@ -17,15 +18,18 @@ public class CapabilityNodeCatalogService {
     private final CapabilityContractService contractService;
     private final CapabilityCatalog catalog;
     private final DeviceSessionManager sessionManager;
+    private final SectionTypeCatalog sectionTypeCatalog;
 
     public CapabilityNodeCatalogService(SduiCapabilityService capabilityService,
                                         CapabilityContractService contractService,
                                         CapabilityCatalog catalog,
-                                        DeviceSessionManager sessionManager) {
+                                        DeviceSessionManager sessionManager,
+                                        SectionTypeCatalog sectionTypeCatalog) {
         this.capabilityService = capabilityService;
         this.contractService = contractService;
         this.catalog = catalog;
         this.sessionManager = sessionManager;
+        this.sectionTypeCatalog = sectionTypeCatalog;
     }
 
     public CapabilityNodeCatalog buildForDevice(String deviceId) {
@@ -67,6 +71,7 @@ public class CapabilityNodeCatalogService {
         if (caps.display() != null) {
             nodes.add(uiUpdateNode(caps.display()));
             nodes.add(displaySectionNode(caps.display()));
+            buildSectionTriggerNodes(caps.display()).forEach(nodes::add);
         }
 
         return new CapabilityNodeCatalog(
@@ -272,6 +277,52 @@ public class CapabilityNodeCatalogService {
                 Map.of("kind", "device_ui_section", "transport", display.transport()),
                 Map.of("sectionTypes", safeList(display.sectionTypes()), "layouts", safeList(display.layouts()))
         );
+    }
+
+    private List<CapabilityNodeDefinition> buildSectionTriggerNodes(CapabilitySchema.DisplayInfo display) {
+        List<CapabilityNodeDefinition> nodes = new ArrayList<>();
+        Set<String> sectionTypes = new LinkedHashSet<>(safeList(display.sectionTypes()));
+        for (String sectionType : sectionTypes) {
+            SectionTypeCatalog.SectionTypeDef def = sectionTypeCatalog.get(sectionType).orElse(null);
+            if (def == null || !def.interactive()) continue;
+            for (SectionTypeCatalog.InteractionEvent evt : def.interactionEvents()) {
+                String nodeId = "section-trigger-" + sectionType + "-" + evt.eventId();
+                nodes.add(new CapabilityNodeDefinition(
+                        "section.trigger",
+                        sectionType,
+                        nodeId,
+                        def.displayName() + " - " + (evt.description() != null ? evt.description() : evt.eventId()),
+                        "Section 交互事件触发器: " + evt.eventId(),
+                        CapabilityNodeRuntimeMode.TRIGGER,
+                        List.of(),
+                        List.of(new CapabilityNodePort("event", "output", "event",
+                                "触发事件", true, Map.of("events", List.of(Map.of(
+                                "eventId", evt.eventId(),
+                                "eventName", evt.eventId(),
+                                "displayName", evt.description()
+                        ))))),
+                        List.of(),
+                        List.of(new CapabilityNodeArtifactSchema("event", "object", "事件负载", true,
+                                Map.of("fields", List.of(
+                                        Map.of("name", "sectionId", "type", "string", "required", true,
+                                                "description", "触发事件的 Section 实例 ID"),
+                                        Map.of("name", "nodeId", "type", "string", "required", false,
+                                                "description", "交互元素 ID"),
+                                        Map.of("name", "value", "type", "any", "required", false,
+                                                "description", "事件附带的值")
+                                )))),
+                        Map.of("kind", "section_interaction",
+                                "sectionType", sectionType,
+                                "events", List.of(Map.of(
+                                        "eventId", evt.eventId(),
+                                        "eventName", evt.eventId(),
+                                        "displayName", evt.description()
+                                ))),
+                        Map.of("triggerOnly", true)
+                ));
+            }
+        }
+        return nodes;
     }
 
     private List<Map<String, Object>> unresolvedFromContract(CapabilityContract contract) {

@@ -58,7 +58,6 @@ public class NodeWorkflowManagementService {
         data.put("conflictCount", conflicts.size());
         data.put("latestRun", latestRun != null ? runSummary(latestRun) : null);
         data.put("latestFailedRun", latestFailedRun != null ? runSummary(latestFailedRun) : null);
-        data.put("health", conflicts.isEmpty() && latestFailedRun == null ? "ok" : conflicts.isEmpty() ? "warning" : "error");
         return data;
     }
 
@@ -154,7 +153,6 @@ public class NodeWorkflowManagementService {
         data.put("lastError", lastRun != null ? lastRun.getError() : null);
         data.put("runCount", runs.size());
         data.put("failedRunCount", failedRunCount);
-        data.put("health", deploymentHealth(deployment, failedRunCount, lastRun));
         return data;
     }
 
@@ -186,15 +184,6 @@ public class NodeWorkflowManagementService {
                 "online", sessionManager.isDeviceOnline(deviceId)
         )));
         return result;
-    }
-
-    private String deploymentHealth(NodeWorkflowDeploymentEntity deployment, long failedRunCount, NodeWorkflowRunEntity lastRun) {
-        if (!"active".equals(deployment.getStatus())) return "inactive";
-        boolean anyOffline = NodeWorkflowSupport.stringMap(deployment.getSlotBindings()).values().stream()
-                .anyMatch(deviceId -> !sessionManager.isDeviceOnline(deviceId));
-        if (anyOffline || (lastRun != null && "failed".equals(lastRun.getStatus()))) return "error";
-        if (failedRunCount > 0) return "warning";
-        return "ok";
     }
 
     private Map<String, Object> runSummary(NodeWorkflowRunEntity run) {

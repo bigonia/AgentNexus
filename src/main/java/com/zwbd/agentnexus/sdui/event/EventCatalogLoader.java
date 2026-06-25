@@ -2,10 +2,7 @@ package com.zwbd.agentnexus.sdui.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.zwbd.agentnexus.sdui.section.SectionDataCodec;
-import com.zwbd.agentnexus.sdui.section.SectionType;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -20,14 +17,11 @@ import java.util.Set;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class EventCatalogLoader {
 
     private static final Set<String> FIELD_TYPES = Set.of(
             "string", "int", "float", "boolean", "bool", "enum", "array", "object", "color"
     );
-
-    private final SectionDataCodec sectionDataCodec;
 
     private EventCatalogProperties properties = new EventCatalogProperties();
     private final Map<String, EventDefinition> commandEvents = new LinkedHashMap<>();
@@ -219,20 +213,10 @@ public class EventCatalogLoader {
             validationErrors.add("section type is required");
             return;
         }
-        if (SectionType.fromWireName(section.getType()) == null) {
-            validationErrors.add("unknown section type in event catalog: " + section.getType());
-        }
         if (sectionTypes.containsKey(section.getType())) {
             validationErrors.add("duplicate section type: " + section.getType());
         }
         validateFields(section.getFields(), "section " + section.getType());
-        if (!section.getFields().isEmpty()) {
-            try {
-                sectionDataCodec.buildSectionData(section.getType(), defaultFields(section.getFields()), section.getType() + "_probe");
-            } catch (Exception e) {
-                validationErrors.add("section fields do not match codec for " + section.getType() + ": " + e.getMessage());
-            }
-        }
     }
 
     private void validateEventEntry(EventCatalogProperties.EventEntry event, String scope) {
@@ -299,27 +283,6 @@ public class EventCatalogLoader {
             return fallback;
         }
         return EventDefinition.Direction.valueOf(raw.trim().toUpperCase());
-    }
-
-    private Map<String, Object> defaultFields(List<EventCatalogProperties.FieldEntry> fields) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        for (EventCatalogProperties.FieldEntry field : fields) {
-            result.put(field.getName(), defaultValue(field));
-        }
-        return result;
-    }
-
-    private Object defaultValue(EventCatalogProperties.FieldEntry field) {
-        String type = normalizeType(field.getType());
-        if ("array".equals(type)) return List.of();
-        if ("object".equals(type)) return defaultFields(field.getChildren());
-        if ("boolean".equals(type) || "bool".equals(type)) return false;
-        if ("int".equals(type)) return field.getMin() instanceof Number n ? n.intValue() : 0;
-        if ("float".equals(type)) return field.getMin() instanceof Number n ? n.doubleValue() : 0.0d;
-        if ("enum".equals(type) && field.getValues() != null && !field.getValues().isEmpty()) {
-            return field.getValues().get(0);
-        }
-        return "";
     }
 
     private String normalizeType(String type) {

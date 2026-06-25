@@ -24,10 +24,10 @@ public final class BinaryProtocolCodec {
     public static final int TLV_NODE_ID = 121;
     /** TLV 122: Event name string (e.g. "action.click", "press_down"). */
     public static final int TLV_EVENT_NAME = 122;
-    /** TLV 123: Section ID that emitted the event (NEW — firmware should populate). */
-    public static final int TLV_SECTION_ID = 123;
-    /** TLV 124: Page ID where the event occurred (NEW — firmware should populate). */
-    public static final int TLV_PAGE_ID = 124;
+    /** TLV 123: Page ID where the event occurred. */
+    public static final int TLV_PAGE_ID = 123;
+    /** TLV 124: Section ID that emitted the event. */
+    public static final int TLV_SECTION_ID = 124;
     /** TLV 125: Timestamp in milliseconds (u32). */
     public static final int TLV_TS = 125;
     /** TLV 126: Event-specific value (toggle state, input string, etc.) (NEW). */

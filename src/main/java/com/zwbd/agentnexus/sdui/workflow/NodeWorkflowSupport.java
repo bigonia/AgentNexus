@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 final class NodeWorkflowSupport {
 
-    static final Set<String> TRIGGER_NODE_TYPES = Set.of("button.trigger");
+    static final Set<String> TRIGGER_NODE_TYPES = Set.of("button.trigger", "section.trigger");
     static final Set<String> OUTPUT_NODE_TYPES = Set.of("rgb.effect", "audio.play", "audio.record", "ui.update", "display.section");
     private static final Pattern ANY_REF = Pattern.compile("\\$[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_\\-]+)*");
     static final TypeReference<List<NodeWorkflowSlot>> SLOT_LIST = new TypeReference<>() {};
@@ -28,7 +28,7 @@ final class NodeWorkflowSupport {
         List<NodeWorkflowSlot> slots = safeList(raw.slots()).stream()
                 .map(slot -> new NodeWorkflowSlot(
                         string(slot.slotId()),
-                        string(slot.typeKey()),
+                        string(slot.board()),
                         string(slot.displayName()),
                         List.copyOf(safeList(slot.requiredCapabilities()))
                 ))
@@ -80,7 +80,7 @@ final class NodeWorkflowSupport {
             errors.addAll(validateReferenceSyntax(node.nodeId(), node.params()));
             hasTrigger = hasTrigger || TRIGGER_NODE_TYPES.contains(node.nodeType());
         }
-        if (!hasTrigger) errors.add("at least one button.trigger node is required");
+        if (!hasTrigger) errors.add("at least one trigger node is required");
 
         for (NodeWorkflowEdge edge : workflow.edges()) {
             if (!nodeIds.contains(edge.from())) {

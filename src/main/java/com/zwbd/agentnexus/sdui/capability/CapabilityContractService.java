@@ -16,15 +16,18 @@ public class CapabilityContractService {
     private final CapabilityCatalog capabilityCatalog;
     private final PlatformCapabilityRegistry platformCapabilityRegistry;
     private final DeviceCapabilityProjection capabilityProjection;
+    private final SectionTypeCatalog sectionCatalog;
 
     public CapabilityContractService(SduiCapabilityService capabilityService,
                                      CapabilityCatalog capabilityCatalog,
                                      PlatformCapabilityRegistry platformCapabilityRegistry,
-                                     DeviceCapabilityProjection capabilityProjection) {
+                                     DeviceCapabilityProjection capabilityProjection,
+                                     SectionTypeCatalog sectionCatalog) {
         this.capabilityService = capabilityService;
         this.capabilityCatalog = capabilityCatalog;
         this.platformCapabilityRegistry = platformCapabilityRegistry;
         this.capabilityProjection = capabilityProjection;
+        this.sectionCatalog = sectionCatalog;
     }
 
     public CapabilityContract buildContract(String deviceId) {
@@ -185,7 +188,7 @@ public class CapabilityContractService {
 
         List<CapabilityContract.ContractCapability> sectionTypes = new ArrayList<>();
         for (String sectionType : caps.display().sectionTypes()) {
-            SectionTypeCatalog.SectionTypeDef def = SectionTypeCatalog.get(sectionType).orElse(null);
+            SectionTypeCatalog.SectionTypeDef def = sectionCatalog.get(sectionType).orElse(null);
             if (def == null) {
                 unresolved.add(new CapabilityContract.UnresolvedCapability(
                         "display.section_types", sectionType, "section type not found in platform catalog"));
@@ -203,7 +206,7 @@ public class CapabilityContractService {
                     def.displayName(),
                     def.interactive() ? "可交互 Section" : "展示型 Section",
                     Map.of(
-                            "displayFields", SectionTypeCatalog.fieldsToMaps(def.displayFields()),
+                            "displayFields", sectionCatalog.fieldsToMaps(def.displayFields()),
                             "interactionEvents", def.interactionEvents().stream().map(event -> Map.of(
                                     "eventId", event.eventId(),
                                     "description", event.description(),

@@ -6,13 +6,17 @@ import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class SduiCapabilityServiceTest {
@@ -30,6 +34,12 @@ class SduiCapabilityServiceTest {
         registryCatalog = new CapabilityCatalog();
         ReflectionTestUtils.invokeMethod(registryCatalog, "load");
         capabilityRegistry = new CapabilityRegistry(registryCatalog);
+        SectionTypeCatalog mockSectionCatalog = mock(SectionTypeCatalog.class);
+        when(mockSectionCatalog.get(anyString())).thenAnswer(inv -> {
+            String type = inv.getArgument(0);
+            return Optional.of(new SectionTypeCatalog.SectionTypeDef(
+                    type, type, false, List.of(), List.of(), Map.of()));
+        });
         DeviceProtocolCatalog protocolCatalog = new DeviceProtocolCatalog(registryCatalog);
         capabilityService = new SduiCapabilityService(
                 deviceRepository,
@@ -37,7 +47,8 @@ class SduiCapabilityServiceTest {
                 schemaRegistry,
                 capabilityRegistry,
                 registryCatalog,
-                protocolCatalog
+                protocolCatalog,
+                mockSectionCatalog
         );
     }
 
@@ -70,7 +81,7 @@ class SduiCapabilityServiceTest {
         var caps = capabilityService.getCapabilities(deviceId);
 
         assertTrue(caps.isPresent());
-        assertTrue(capabilityRegistry.supportsEvent(deviceId, "input:motion.imu.shake"));
+        assertTrue(capabilityRegistry.supportsEvent(deviceId, "input:motion.shake"));
         verify(schemaRegistry).loadFromCapabilities(eq(deviceId), any());
     }
 

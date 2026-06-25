@@ -10,6 +10,7 @@ import com.zwbd.agentnexus.sdui.protocol.CapabilitySnapshotParser;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.service.CommandSchemaRegistry;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
@@ -17,9 +18,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +42,13 @@ class CapabilityNodeCatalogServiceTest {
         CapabilityCatalog capabilityCatalog = new CapabilityCatalog();
         ReflectionTestUtils.invokeMethod(capabilityCatalog, "load");
         CapabilityRegistry capabilityRegistry = new CapabilityRegistry(capabilityCatalog);
+        SectionTypeCatalog mockSectionCatalog = mock(SectionTypeCatalog.class);
+        when(mockSectionCatalog.get(anyString())).thenAnswer(inv -> {
+            String type = inv.getArgument(0);
+            return Optional.of(new SectionTypeCatalog.SectionTypeDef(
+                    type, type, false, List.of(), List.of(), Map.of()));
+        });
+        when(mockSectionCatalog.fieldsToMaps(anyList())).thenReturn(List.of());
         DeviceProtocolCatalog protocolCatalog = new DeviceProtocolCatalog(capabilityCatalog);
         capabilityService = new SduiCapabilityService(
                 deviceRepository,
@@ -45,7 +56,8 @@ class CapabilityNodeCatalogServiceTest {
                 schemaRegistry,
                 capabilityRegistry,
                 capabilityCatalog,
-                protocolCatalog
+                protocolCatalog,
+                mockSectionCatalog
         );
         PlatformCapabilityRegistry platformCapabilityRegistry =
                 new PlatformCapabilityRegistry(mock(AudioService.class));
@@ -54,7 +66,8 @@ class CapabilityNodeCatalogServiceTest {
                 capabilityService,
                 capabilityCatalog,
                 platformCapabilityRegistry,
-                projection
+                projection,
+                mockSectionCatalog
         );
         DeviceSessionManager sessionManager = mock(DeviceSessionManager.class);
         when(sessionManager.isDeviceOnline(org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
@@ -62,7 +75,8 @@ class CapabilityNodeCatalogServiceTest {
                 capabilityService,
                 contractService,
                 capabilityCatalog,
-                sessionManager
+                sessionManager,
+                mockSectionCatalog
         );
     }
 

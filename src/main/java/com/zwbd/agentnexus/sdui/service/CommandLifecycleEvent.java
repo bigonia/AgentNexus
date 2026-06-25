@@ -1,4 +1,4 @@
-package com.zwbd.agentnexus.sdui.statemachine;
+package com.zwbd.agentnexus.sdui.service;
 
 import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
 

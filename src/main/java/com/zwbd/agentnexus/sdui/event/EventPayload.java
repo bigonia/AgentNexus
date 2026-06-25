@@ -98,6 +98,8 @@ public record EventPayload(
         }
         if (nodeId != null) rawFields.put("nodeId", nodeId);
         if (eventName != null) rawFields.put("eventName", eventName);
+        if (pageId != null && !pageId.isEmpty()) rawFields.put("pageId", pageId);
+        if (sectionId != null && !sectionId.isEmpty()) rawFields.put("sectionId", sectionId);
 
         return new EventPayload(
                 eventName,

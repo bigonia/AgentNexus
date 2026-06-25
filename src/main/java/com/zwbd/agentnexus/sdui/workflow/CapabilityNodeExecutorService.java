@@ -32,6 +32,7 @@ public class CapabilityNodeExecutorService {
     private final SectionOrchestrationService sectionOrchestrationService;
     private final SectionDataCodec sectionDataCodec;
     private final WorkflowUiContextService workflowUiContextService;
+    private final SectionTypeCatalog sectionTypeCatalog;
 
     public CapabilityNodeExecutorService(DeviceSessionManager sessionManager,
                                          CommandService commandService,
@@ -40,7 +41,8 @@ public class CapabilityNodeExecutorService {
                                          SduiArtifactService artifactService,
                                          SectionOrchestrationService sectionOrchestrationService,
                                          SectionDataCodec sectionDataCodec,
-                                         WorkflowUiContextService workflowUiContextService) {
+                                         WorkflowUiContextService workflowUiContextService,
+                                         SectionTypeCatalog sectionTypeCatalog) {
         this.sessionManager = sessionManager;
         this.commandService = commandService;
         this.audioService = audioService;
@@ -49,6 +51,7 @@ public class CapabilityNodeExecutorService {
         this.sectionOrchestrationService = sectionOrchestrationService;
         this.sectionDataCodec = sectionDataCodec;
         this.workflowUiContextService = workflowUiContextService;
+        this.sectionTypeCatalog = sectionTypeCatalog;
     }
 
     public Map<String, Object> execute(String deviceId, String nodeType, Map<String, Object> params) {
@@ -267,16 +270,15 @@ public class CapabilityNodeExecutorService {
             throw new IllegalArgumentException("sectionId is required");
         }
         String typeName = string(raw.getOrDefault("sectionType", raw.getOrDefault("type", "")));
-        SectionType type = SectionType.fromWireName(typeName);
-        if (type == null) {
+        if (!sectionTypeCatalog.isValidType(typeName)) {
             throw new IllegalArgumentException("unsupported section type: " + typeName);
         }
         Map<String, Object> fields = raw.get("fields") instanceof Map<?, ?> map ? normalizeMap(map) : Map.of();
-        SectionData data = sectionDataCodec.buildSectionData(type.wireName(), fields, sectionId);
+        SectionData data = sectionDataCodec.buildSectionData(typeName, fields, sectionId);
         if (data == null) {
-            throw new IllegalArgumentException("invalid section fields for: " + type.wireName());
+            throw new IllegalArgumentException("invalid section fields for: " + typeName);
         }
-        return new SectionEntry(type, sectionId, data);
+        return new SectionEntry(typeName, sectionId, data);
     }
 
     private SectionPatch.PatchEntry toPatchEntry(Map<String, Object> raw) {
@@ -289,16 +291,15 @@ public class CapabilityNodeExecutorService {
             return new SectionPatch.PatchEntry(sectionId, op, null, null);
         }
         String typeName = string(raw.getOrDefault("sectionType", raw.getOrDefault("type", "")));
-        SectionType type = SectionType.fromWireName(typeName);
-        if (type == null) {
+        if (!sectionTypeCatalog.isValidType(typeName)) {
             throw new IllegalArgumentException("unsupported patch section type: " + typeName);
         }
         Map<String, Object> fields = raw.get("fields") instanceof Map<?, ?> map ? normalizeMap(map) : Map.of();
-        SectionData data = sectionDataCodec.buildSectionData(type.wireName(), fields, sectionId);
+        SectionData data = sectionDataCodec.buildSectionData(typeName, fields, sectionId);
         if (data == null) {
-            throw new IllegalArgumentException("invalid patch section fields for: " + type.wireName());
+            throw new IllegalArgumentException("invalid patch section fields for: " + typeName);
         }
-        return new SectionPatch.PatchEntry(sectionId, op, type.wireName(), data);
+        return new SectionPatch.PatchEntry(sectionId, op, typeName, data);
     }
 
     private Map<String, Object> playArtifact(String deviceId, String artifactRef) {

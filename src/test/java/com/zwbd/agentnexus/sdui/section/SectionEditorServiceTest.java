@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -19,13 +20,23 @@ class SectionEditorServiceTest {
 
     private CapabilityContractService contractService;
     private DeviceCapabilityProjection capabilityProjection;
+    private SectionTypeCatalog sectionCatalog;
     private SectionEditorService sectionEditorService;
 
     @BeforeEach
     void setUp() {
         contractService = mock(CapabilityContractService.class);
         capabilityProjection = mock(DeviceCapabilityProjection.class);
-        sectionEditorService = new SectionEditorService(contractService, capabilityProjection);
+        sectionCatalog = mock(SectionTypeCatalog.class);
+        // Return a valid SectionTypeDef for any section type — compact filtering
+        // uses isFieldVisible() which is a no-op in RICH mode regardless.
+        when(sectionCatalog.get(anyString())).thenAnswer(inv -> {
+            String type = inv.getArgument(0);
+            return java.util.Optional.of(new SectionTypeCatalog.SectionTypeDef(
+                    type, type, false, List.of(), List.of(), Map.of(),
+                    java.util.Set.of("subtitle", "iconSrc", "iconSymbol", "progress")));
+        });
+        sectionEditorService = new SectionEditorService(contractService, capabilityProjection, sectionCatalog);
     }
 
     @Test
@@ -107,8 +118,15 @@ class SectionEditorServiceTest {
                 "Hero 数据",
                 "展示型 Section",
                 Map.of(
-                        "displayFields", SectionTypeCatalog.fieldsToMaps(
-                                SectionTypeCatalog.getOrThrow("hero_section").displayFields()),
+                        "displayFields", List.of(
+                                Map.of("name", "value", "type", "string"),
+                                Map.of("name", "label", "type", "string"),
+                                Map.of("name", "subtitle", "type", "string"),
+                                Map.of("name", "tone", "type", "enum"),
+                                Map.of("name", "iconSrc", "type", "enum"),
+                                Map.of("name", "iconSymbol", "type", "enum"),
+                                Map.of("name", "progress", "type", "int")
+                        ),
                         "interactionEvents", List.of()
                 ),
                 Map.of("transport", "mqtt"),

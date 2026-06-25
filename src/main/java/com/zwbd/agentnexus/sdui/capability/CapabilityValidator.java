@@ -22,6 +22,7 @@ public class CapabilityValidator {
 
     private final CapabilityRegistry registry;
     private final DeviceCapabilityProjection capabilityProjection;
+    private final SectionTypeCatalog catalog;
 
     public enum CheckType { EVENT, COMMAND, SECTION }
 
@@ -77,7 +78,7 @@ public class CapabilityValidator {
             boolean isKnownInteractionEvent = eventId != null && eventId.startsWith("ui:");
             String issue;
             if (isKnownInteractionEvent) {
-                List<String> requiredSectionTypes = SectionTypeCatalog.getSectionTypesForEvent(eventId);
+                List<String> requiredSectionTypes = catalog.getSectionTypesForEvent(eventId);
                 issue = "Device does not support this interaction event. "
                         + "Required section types: " + requiredSectionTypes
                         + ". Device section types: " + registry.getDeviceSnapshot(deviceId)
@@ -98,9 +99,9 @@ public class CapabilityValidator {
      */
     public ValidationResult validateSectionType(String deviceId, String sectionType) {
         // First check the section type is known
-        if (SectionTypeCatalog.get(sectionType).isEmpty()) {
+        if (catalog.get(sectionType).isEmpty()) {
             return ValidationResult.fail(sectionType, deviceId, CheckType.SECTION,
-                    "Unknown section type: " + sectionType + ". Known: " + SectionTypeCatalog.allTypes(),
+                    "Unknown section type: " + sectionType + ". Known: " + catalog.allTypes(),
                     List.of());
         }
         // Then check device supports it
@@ -190,7 +191,7 @@ public class CapabilityValidator {
         Map<String, Object> sectionInteractions = new LinkedHashMap<>();
         for (String stype : caps.sectionTypes()) {
             List<SectionTypeCatalog.InteractionEvent> events =
-                    SectionTypeCatalog.getInteractionEvents(stype);
+                    catalog.getInteractionEvents(stype);
             if (!events.isEmpty()) {
                 List<String> eventIds = events.stream()
                         .map(SectionTypeCatalog.InteractionEvent::eventId).toList();

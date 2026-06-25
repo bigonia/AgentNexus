@@ -1,5 +1,7 @@
 package com.zwbd.agentnexus.sdui.event;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +119,7 @@ public class EventCatalogProperties {
         private List<FieldEntry> fields = List.of();
         private List<EventEntry> events = List.of();
         private Map<String, Object> constraints = new LinkedHashMap<>();
+        private List<String> compactHiddenFields = List.of();
 
         public String getType() {
             return type;
@@ -164,6 +167,14 @@ public class EventCatalogProperties {
 
         public void setConstraints(Map<String, Object> constraints) {
             this.constraints = constraints != null ? constraints : new LinkedHashMap<>();
+        }
+
+        public List<String> getCompactHiddenFields() {
+            return compactHiddenFields;
+        }
+
+        public void setCompactHiddenFields(List<String> compactHiddenFields) {
+            this.compactHiddenFields = compactHiddenFields != null ? compactHiddenFields : List.of();
         }
     }
 
@@ -268,6 +279,8 @@ public class EventCatalogProperties {
         private String name;
         private String type = "string";
         private boolean required;
+        private String label;
+        private Object defaultValue;
         private Object min;
         private Object max;
         private List<String> values = List.of();
@@ -296,6 +309,24 @@ public class EventCatalogProperties {
 
         public void setRequired(boolean required) {
             this.required = required;
+        }
+
+        public String getLabel() {
+            return label;
+        }
+
+        public void setLabel(String label) {
+            this.label = label;
+        }
+
+        @JsonProperty("default")
+        public Object getDefaultValue() {
+            return defaultValue;
+        }
+
+        @JsonProperty("default")
+        public void setDefaultValue(Object defaultValue) {
+            this.defaultValue = defaultValue;
         }
 
         public Object getMin() {

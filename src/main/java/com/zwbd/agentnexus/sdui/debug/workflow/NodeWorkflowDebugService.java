@@ -407,7 +407,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
         List<NodeWorkflowSlot> slots = safeList(raw.slots()).stream()
                 .map(slot -> new NodeWorkflowSlot(
                         string(slot.slotId()),
-                        string(slot.typeKey()),
+                        string(slot.board()),
                         string(slot.displayName()),
                         List.copyOf(safeList(slot.requiredCapabilities()))
                 ))

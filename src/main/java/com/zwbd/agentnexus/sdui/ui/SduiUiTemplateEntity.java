@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.ui;
 
-import com.zwbd.agentnexus.sdui.statemachine.model.StateMachineJsonConverter;
+import com.zwbd.agentnexus.common.web.JsonMapConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -34,7 +34,7 @@ public class SduiUiTemplateEntity {
     @Column(nullable = false, length = 24)
     private String status = "active";
 
-    @Convert(converter = StateMachineJsonConverter.class)
+    @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, Object> definition = new LinkedHashMap<>();
 

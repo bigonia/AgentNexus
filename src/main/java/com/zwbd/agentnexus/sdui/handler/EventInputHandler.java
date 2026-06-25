@@ -18,7 +18,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Handles UI3 Binary EVENT_INPUT frames (msgType=9) from devices.
  *
  * Extracts structured event data from TLV fields, builds an {@link EventPayload},
- * and routes it to event listeners (SSE).
+ * and routes it to event listeners (SSE, workflow triggers).
  *
  * TLV fields consumed:
  * <ul>
@@ -39,7 +39,6 @@ public class EventInputHandler implements BinaryFrameHandler {
     private final DeviceLifecycleService lifecycleService;
     private final EventRegistry eventRegistry;
     private final CapabilityRegistry capabilityRegistry;
-    private final List<EventListener> listeners = new CopyOnWriteArrayList<>();
     private final List<PayloadEventListener> payloadListeners = new CopyOnWriteArrayList<>();
 
     public EventInputHandler(DeviceSessionManager sessionManager,
@@ -52,20 +51,8 @@ public class EventInputHandler implements BinaryFrameHandler {
         this.capabilityRegistry = capabilityRegistry;
     }
 
-    public interface EventListener {
-        void onEvent(String deviceId, String event, String nodeId, long ts);
-    }
-
     public interface PayloadEventListener {
         void onEvent(EventPayload payload);
-    }
-
-    public void addListener(EventListener listener) {
-        listeners.add(listener);
-    }
-
-    public void removeListener(EventListener listener) {
-        listeners.remove(listener);
     }
 
     public void addPayloadListener(PayloadEventListener listener) {
@@ -78,21 +65,10 @@ public class EventInputHandler implements BinaryFrameHandler {
 
     /**
      * Publish an event from external code (e.g. audio recording pipeline).
-     * Fires both the simple {@link EventListener} and rich {@link PayloadEventListener} chains.
      */
     public void publishEvent(EventPayload payload) {
         if (payload == null || payload.deviceId() == null) return;
         log.debug("Publishing external event: device={}, eventId={}", payload.deviceId(), payload.eventId());
-        if (!listeners.isEmpty()) {
-            String evt = payload.eventId() != null ? payload.eventId() : "unknown";
-            for (EventListener listener : listeners) {
-                try {
-                    listener.onEvent(payload.deviceId(), evt, payload.nodeId(), payload.ts());
-                } catch (Exception e) {
-                    log.error("EventListener error for device {}: {}", payload.deviceId(), e.getMessage());
-                }
-            }
-        }
         if (!payloadListeners.isEmpty()) {
             for (PayloadEventListener listener : payloadListeners) {
                 try {
@@ -138,18 +114,7 @@ public class EventInputHandler implements BinaryFrameHandler {
             lifecycleService.touchDevice(deviceId);
         }
 
-        // Notify SSE listeners (real-time event monitor)
-        if (deviceId != null && !listeners.isEmpty()) {
-            String evt = payload.eventId() != null ? payload.eventId() : "unknown";
-            for (EventListener listener : listeners) {
-                try {
-                    listener.onEvent(deviceId, evt, payload.nodeId(), payload.ts());
-                } catch (Exception e) {
-                    log.error("EventListener error for device {}: {}", deviceId, e.getMessage());
-                }
-            }
-        }
-
+        // Notify listeners (SSE stream, workflow triggers)
         if (deviceId != null && !payloadListeners.isEmpty()) {
             for (PayloadEventListener listener : payloadListeners) {
                 try {

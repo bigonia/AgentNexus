@@ -80,8 +80,8 @@ public class SectionCapabilityAdapter {
         // 1. Filter unsupported types & truncate data
         List<SectionEntry> adapted = new ArrayList<>();
         for (SectionEntry entry : scene.sections()) {
-            if (!supportedTypes.contains(entry.type().wireName())) {
-                log.info("Skipping unsupported section type: {}", entry.type().wireName());
+            if (!supportedTypes.contains(entry.type())) {
+                log.info("Skipping unsupported section type: {}", entry.type());
                 continue;
             }
             SectionData adaptedData = truncateData(entry.data(), limits, sizeClass);
@@ -121,7 +121,7 @@ public class SectionCapabilityAdapter {
      */
     private List<SectionEntry> applyHeightDegradation(List<SectionEntry> sections, int screenH) {
         int totalRichH = sections.stream()
-                .mapToInt(e -> RICH_HEIGHT_ESTIMATE.getOrDefault(e.type().wireName(), 60))
+                .mapToInt(e -> RICH_HEIGHT_ESTIMATE.getOrDefault(e.type(), 60))
                 .sum();
         if (totalRichH <= screenH) {
             return sections; // fits in rich mode
@@ -136,7 +136,7 @@ public class SectionCapabilityAdapter {
         // Sort sections by degradation priority (lowest priority first = degrade earlier)
         List<SectionEntry> sorted = new ArrayList<>(sections);
         sorted.sort(Comparator.comparingInt(
-                e -> degradeOrder.getOrDefault(e.type().wireName(), Integer.MAX_VALUE)));
+                e -> degradeOrder.getOrDefault(e.type(), Integer.MAX_VALUE)));
 
         int currentH = totalRichH;
         int compactSavings = 30; // approximate height saved per section when degrading
@@ -144,7 +144,7 @@ public class SectionCapabilityAdapter {
 
         for (SectionEntry entry : sorted) {
             if (currentH <= screenH) break;
-            if (!HEIGHT_DEGRADE_PRIORITY.contains(entry.type().wireName())) continue;
+            if (!HEIGHT_DEGRADE_PRIORITY.contains(entry.type())) continue;
             currentH -= compactSavings;
             degradeCount++;
         }

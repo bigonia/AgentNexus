@@ -1,4 +1,4 @@
-package com.zwbd.agentnexus.sdui.statemachine.model;
+package com.zwbd.agentnexus.common.web;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,7 +11,7 @@ import java.util.Map;
 
 @Slf4j
 @Converter
-public class StateMachineJsonConverter implements AttributeConverter<Map<String, Object>, String> {
+public class JsonMapConverter implements AttributeConverter<Map<String, Object>, String> {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
@@ -21,8 +21,8 @@ public class StateMachineJsonConverter implements AttributeConverter<Map<String,
         try {
             return OBJECT_MAPPER.writeValueAsString(attribute != null ? attribute : Map.of());
         } catch (Exception e) {
-            log.error("Failed to serialize state machine JSON", e);
-            throw new IllegalArgumentException("invalid state machine json", e);
+            log.error("Failed to serialize JSON map", e);
+            throw new IllegalArgumentException("invalid json map", e);
         }
     }
 
@@ -34,7 +34,7 @@ public class StateMachineJsonConverter implements AttributeConverter<Map<String,
         try {
             return OBJECT_MAPPER.readValue(dbData, MAP_TYPE);
         } catch (Exception e) {
-            log.error("Failed to deserialize state machine JSON", e);
+            log.error("Failed to deserialize JSON map", e);
             return new LinkedHashMap<>();
         }
     }

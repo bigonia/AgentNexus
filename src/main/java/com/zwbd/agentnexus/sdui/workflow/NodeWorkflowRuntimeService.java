@@ -87,7 +87,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
                 ? firstTriggerNode(workflow)
                 : NodeWorkflowSupport.nodeById(workflow, triggerNodeId);
         if (!NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(trigger.nodeType())) {
-            throw new IllegalArgumentException("test trigger node must be button.trigger: " + trigger.nodeId());
+            throw new IllegalArgumentException("test trigger node must be a trigger type: " + trigger.nodeId());
         }
         String deviceId = NodeWorkflowSupport.stringMap(deployment.getSlotBindings()).get(trigger.slotId());
         Map<String, Object> event = new LinkedHashMap<>();
@@ -195,10 +195,14 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
     private boolean triggerMatches(NodeWorkflowNode trigger, EventPayload payload) {
         String expectedEventId = NodeWorkflowSupport.string(trigger.params().get("eventId"));
         String expectedNodeId = NodeWorkflowSupport.string(trigger.params().get("nodeId"));
+        String expectedSectionId = NodeWorkflowSupport.string(trigger.params().get("sectionId"));
         if (!NodeWorkflowSupport.eventMatches(expectedEventId, payload.eventId())) {
             return false;
         }
-        return expectedNodeId.isBlank() || expectedNodeId.equals(payload.nodeId());
+        if (!expectedNodeId.isBlank() && !expectedNodeId.equals(payload.nodeId())) {
+            return false;
+        }
+        return expectedSectionId.isBlank() || expectedSectionId.equals(payload.sectionId());
     }
 
     private Optional<String> slotForDevice(NodeWorkflowDeploymentEntity deployment, String deviceId) {
@@ -221,6 +225,12 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         event.put("deviceId", payload.deviceId());
         event.put("nodeId", payload.nodeId());
         event.put("ts", payload.ts());
+        if (!payload.sectionId().isEmpty()) {
+            event.put("sectionId", payload.sectionId());
+        }
+        if (!payload.pageId().isEmpty()) {
+            event.put("pageId", payload.pageId());
+        }
         return event;
     }
 

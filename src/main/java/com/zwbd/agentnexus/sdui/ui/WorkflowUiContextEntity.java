@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.ui;
 
-import com.zwbd.agentnexus.sdui.statemachine.model.StateMachineJsonConverter;
+import com.zwbd.agentnexus.common.web.JsonMapConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -43,7 +43,7 @@ public class WorkflowUiContextEntity {
     @Column(nullable = false, length = 128)
     private String activePageId = "main";
 
-    @Convert(converter = StateMachineJsonConverter.class)
+    @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, Object> context = new LinkedHashMap<>();
 

@@ -2,7 +2,6 @@ package com.zwbd.agentnexus.sdui.event;
 
 import com.zwbd.agentnexus.sdui.protocol.BinaryProtocolCodec;
 import com.zwbd.agentnexus.sdui.protocol.TlvBuilder;
-import com.zwbd.agentnexus.sdui.section.SectionDataCodec;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -70,8 +69,10 @@ class EventPayloadTest {
     }
 
     private EventRegistry registry() {
-        EventCatalogLoader loader = new EventCatalogLoader(new SectionDataCodec());
+        EventCatalogLoader loader = new EventCatalogLoader();
         loader.load();
-        return new EventRegistry(loader);
+        EventRegistry registry = new EventRegistry(loader);
+        registry.init();
+        return registry;
     }
 }

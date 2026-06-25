@@ -6,47 +6,61 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Per-device single-page manager for debug.
+ *
+ * Each device has exactly one active page. Push replaces it; patch mutates
+ * its sections; clear removes it. There is no multi-page or workspace concept —
+ * the debug tool controls one page at a time on one device.
+ */
 @Service
 public class DebugSectionWorkspaceService {
 
     private static final String DEFAULT_LAYOUT = "vertical_scroll";
     private static final String PAGE_ID_PREFIX = "debug_page_";
     private static final String SECTION_ID_PREFIX = "section_";
-    private static final String DEBUG_NAMESPACE = "debug";
 
     private final DeviceCapabilityProjection capabilityProjection;
     private final SectionDataCodec sectionDataCodec;
     private final SectionOrchestrationService orchestrationService;
+    private final SectionTypeCatalog sectionTypeCatalog;
 
-    private final Map<String, DebugWorkspace> workspaces = new ConcurrentHashMap<>();
+    /** deviceId → current page */
+    private final Map<String, SectionPageDefinition> pagesByDevice = new ConcurrentHashMap<>();
 
     public DebugSectionWorkspaceService(DeviceCapabilityProjection capabilityProjection,
                                         SectionDataCodec sectionDataCodec,
-                                        SectionOrchestrationService orchestrationService) {
+                                        SectionOrchestrationService orchestrationService,
+                                        SectionTypeCatalog sectionTypeCatalog) {
         this.capabilityProjection = capabilityProjection;
         this.sectionDataCodec = sectionDataCodec;
         this.orchestrationService = orchestrationService;
+        this.sectionTypeCatalog = sectionTypeCatalog;
     }
 
+    // ── Push (replaces current page) ──
+
     public Map<String, Object> push(String deviceId, Map<String, Object> body) {
-        WorkspacePage page = workspacePageFromRequest(deviceId, body);
+        SectionPageDefinition page = pageDefinitionFromRequest(deviceId, body);
+        pagesByDevice.put(deviceId, page);
 
-        DebugWorkspace workspace = workspace(DEBUG_NAMESPACE, deviceId);
-        replacePage(workspace, page);
-
-        boolean sent = orchestrationService.sendScene(deviceId, toScene(page));
+        boolean sent = orchestrationService.sendScene(deviceId, page.toScene(sectionDataCodec));
         return Map.of(
                 "deviceId", deviceId,
                 "sent", sent,
-                "pageId", page.pageId,
-                "layout", page.layout,
-                "sectionsBuilt", page.sections.size(),
-                "sectionsRequested", page.sections.size(),
-                "sectionIds", new ArrayList<>(page.sections.keySet())
+                "pageId", page.pageId(),
+                "layout", page.layout().wireName(),
+                "sectionsBuilt", page.sections().size(),
+                "sectionsRequested", page.sections().size(),
+                "sectionIds", new ArrayList<>(page.sections().keySet())
         );
     }
 
+    // ── Patch (mutates current page) ──
+
     public Map<String, Object> patch(String deviceId, Map<String, Object> body) {
+        SectionPageDefinition page = requirePage(deviceId);
+
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawPatches = body.get("patches") instanceof List<?> list
                 ? (List<Map<String, Object>>) list : List.of();
@@ -54,102 +68,78 @@ public class DebugSectionWorkspaceService {
             throw new IllegalArgumentException("patches is required");
         }
 
-        DebugWorkspace workspace = workspace(DEBUG_NAMESPACE, deviceId);
-        String pageId = resolvePatchPageId(workspace, body);
-        WorkspacePage page = workspace.pages.get(pageId);
-        if (page == null) {
-            throw new IllegalArgumentException("page not found in debug workspace: " + pageId);
+        // Make patches mutable (callers may pass Map.of() which is immutable)
+        List<Map<String, Object>> mutablePatches = new ArrayList<>();
+        for (Map<String, Object> p : rawPatches) {
+            mutablePatches.add(new LinkedHashMap<>(p));
         }
 
-        List<SectionPatch.PatchEntry> patchEntries = applyPatchEntries(deviceId, page, rawPatches);
-        workspace.activePageId = pageId;
+        // Pre-generate sectionIds for "add" ops
+        Set<String> knownIds = new LinkedHashSet<>(page.sections().keySet());
+        for (Map<String, Object> rawPatch : mutablePatches) {
+            if ("add".equals(stringValue(rawPatch.getOrDefault("op", "update")))
+                    && stringValue(rawPatch.get("sectionId")).isBlank()) {
+                rawPatch.put("sectionId", nextSectionId(knownIds));
+            }
+            knownIds.add(stringValue(rawPatch.get("sectionId")));
+        }
 
-        boolean sent = orchestrationService.sendPatch(deviceId, new SectionPatch(pageId, patchEntries));
+        List<SectionPatch.PatchEntry> patchEntries = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (Map<String, Object> rawPatch : mutablePatches) {
+            patchEntries.add(applySinglePatch(deviceId, page, rawPatch, now));
+        }
+
+        // Build the mutated page
+        SectionPageDefinition mutated = applyPatchesToPage(page, mutablePatches, now);
+        pagesByDevice.put(deviceId, mutated);
+
+        boolean sent = orchestrationService.sendPatch(deviceId, new SectionPatch(mutated.pageId(), patchEntries));
         return Map.of(
                 "deviceId", deviceId,
                 "sent", sent,
-                "pageId", pageId,
+                "pageId", mutated.pageId(),
                 "patchesBuilt", patchEntries.size(),
                 "patchesRequested", rawPatches.size(),
-                "sectionIds", new ArrayList<>(page.sections.keySet())
+                "sectionIds", new ArrayList<>(mutated.sections().keySet())
         );
     }
 
+    // ── State / Clear ──
+
     public Map<String, Object> getState(String deviceId) {
-        return getState(DEBUG_NAMESPACE, deviceId);
-    }
-
-    /**
-     * Export the current debug workspace as a state-machine-compatible page state.
-     * This bridges the debug section editor to the state machine: users build a
-     * page in the debug UI, then export it as a state definition that can be
-     * copied into a state machine definition's "states" array.
-     *
-     * Returns the active page in state machine page format:
-     * {@code { pageId, layout, autoScroll, autoScrollMs, sections: [...] }}.
-     */
-    public Map<String, Object> getStateAsStateMachinePage(String deviceId) {
-        DebugWorkspace workspace = workspaces.get(workspaceKey(DEBUG_NAMESPACE, deviceId));
-        if (workspace == null) {
-            return emptyStateMachinePage(deviceId);
-        }
-
-        WorkspacePage activePage = workspace.pages.get(workspace.activePageId);
-        if (activePage == null && !workspace.pages.isEmpty()) {
-            activePage = workspace.pages.values().iterator().next();
-        }
-        if (activePage == null) {
-            return emptyStateMachinePage(deviceId);
-        }
-
-        List<Map<String, Object>> sections = new ArrayList<>();
-        for (WorkspaceSection section : activePage.sections.values()) {
-            Map<String, Object> sectionMap = new LinkedHashMap<>();
-            sectionMap.put("sectionId", section.sectionId);
-            sectionMap.put("sectionType", section.sectionType);
-            sectionMap.put("fields", new LinkedHashMap<>(section.fields));
-            sections.add(sectionMap);
-        }
-
-        Map<String, Object> pageState = new LinkedHashMap<>();
-        pageState.put("pageId", activePage.pageId);
-        pageState.put("layout", activePage.layout);
-        pageState.put("autoScroll", activePage.autoScroll);
-        pageState.put("autoScrollMs", activePage.autoScrollMs);
-        pageState.put("sections", sections);
-
+        SectionPageDefinition page = pagesByDevice.get(deviceId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", deviceId);
-        result.put("state", pageState);
-        result.put("usage", "Copy the 'state' object into a state machine definition's 'states' array, or use it as the basis for a page node.");
-        return result;
-    }
-
-    private Map<String, Object> emptyStateMachinePage(String deviceId) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("deviceId", deviceId);
-        result.put("state", Map.of(
-                "pageId", "state_machine_page",
-                "layout", "vertical_scroll",
-                "autoScroll", false,
-                "autoScrollMs", 0,
-                "sections", List.of()
-        ));
-        result.put("usage", "No debug workspace exists. Build a page in the section debug editor first.");
+        result.put("page", page != null ? page.toMap() : null);
         return result;
     }
 
     public Map<String, Object> clear(String deviceId) {
-        workspaces.remove(workspaceKey(DEBUG_NAMESPACE, deviceId));
+        pagesByDevice.remove(deviceId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", deviceId);
         result.put("cleared", true);
-        result.put("activePageId", null);
-        result.put("pages", List.of());
         return result;
     }
 
-    private WorkspacePage workspacePageFromRequest(String deviceId, Map<String, Object> body) {
+    // ── Section type lookup (used by EventStreamService) ──
+
+    public String findSectionType(String deviceId, String sectionId) {
+        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        if (page == null) return null;
+        SectionPageDefinition.SectionDef section = page.sections().get(sectionId);
+        return section != null ? section.sectionType() : null;
+    }
+
+    public String currentPageId(String deviceId) {
+        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        return page != null ? page.pageId() : null;
+    }
+
+    // ── Internal: page construction ──
+
+    private SectionPageDefinition pageDefinitionFromRequest(String deviceId, Map<String, Object> body) {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawSections = body.get("sections") instanceof List<?> list
                 ? (List<Map<String, Object>>) list : List.of();
@@ -165,52 +155,59 @@ public class DebugSectionWorkspaceService {
         boolean autoScroll = Boolean.TRUE.equals(body.get("autoScroll"));
         int autoScrollMs = body.get("autoScrollMs") instanceof Number n ? n.intValue() : 0;
 
-        WorkspacePage page = new WorkspacePage(pageId, SectionLayout.fromWireName(layoutName).wireName(), autoScroll, autoScrollMs);
-        long now = System.currentTimeMillis();
+        LinkedHashMap<String, SectionPageDefinition.SectionDef> sectionDefs = new LinkedHashMap<>();
+        Set<String> seenIds = new LinkedHashSet<>();
         for (Map<String, Object> rawSection : rawSections) {
-            WorkspaceSection section = buildSection(deviceId, rawSection, false, now, null);
-            if (page.sections.putIfAbsent(section.sectionId, section) != null) {
-                throw new IllegalArgumentException("duplicate sectionId in page: " + section.sectionId);
-            }
+            SectionPageDefinition.SectionDef section = buildSectionDef(deviceId, rawSection, seenIds);
+            sectionDefs.put(section.sectionId(), section);
+            seenIds.add(section.sectionId());
         }
-        page.updatedAt = now;
+
+        SectionPageDefinition page = new SectionPageDefinition(
+                pageId, SectionLayout.fromWireName(layoutName), autoScroll, autoScrollMs, sectionDefs);
+        page.validate(sectionTypeCatalog, sectionDataCodec);
         return page;
     }
 
-    private WorkspaceSection buildSection(String deviceId, Map<String, Object> rawSection,
-                                          boolean requireType, long now, Set<String> existingIds) {
+    private SectionPageDefinition.SectionDef buildSectionDef(String deviceId, Map<String, Object> rawSection,
+                                                              Set<String> existingIds) {
         String sectionId = stringValue(rawSection.get("sectionId"));
         if (sectionId.isBlank()) {
             sectionId = nextSectionId(existingIds);
         }
         String sectionType = stringValue(rawSection.getOrDefault("sectionType", rawSection.get("type")));
-        if (requireType && sectionType.isBlank()) {
+        if (sectionType.isBlank()) {
             throw new IllegalArgumentException("sectionType is required");
         }
         validateSectionType(deviceId, sectionType);
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> fields = rawSection.get("fields") instanceof Map<?, ?> map
+        Map<String, Object> rawFields = rawSection.get("fields") instanceof Map<?, ?> map
                 ? (Map<String, Object>) map : null;
-        if (fields == null) {
+        if (rawFields == null) {
             throw new IllegalArgumentException("fields is required for section " + sectionId);
         }
 
-        SectionData data = sectionDataCodec.buildSectionData(sectionType, fields, sectionId);
-        if (data == null) {
+        Map<String, Object> normalizedFields = sectionDataCodec.normalizeFields(sectionType, new LinkedHashMap<>(rawFields));
+        if (sectionDataCodec.buildSectionData(sectionType, normalizedFields, sectionId) == null) {
             throw new IllegalArgumentException("invalid fields for sectionType: " + sectionType);
         }
 
-        return new WorkspaceSection(
-                sectionId,
-                sectionType,
-                new LinkedHashMap<>(sectionDataCodec.toFieldMap(data)),
-                now
-        );
+        return new SectionPageDefinition.SectionDef(sectionId, sectionType, normalizedFields);
     }
 
-    private SectionPatch.PatchEntry applySinglePatch(String deviceId, WorkspacePage page,
-                                                     Map<String, Object> rawPatch, long now) {
+    // ── Internal: patch application ──
+
+    private SectionPageDefinition requirePage(String deviceId) {
+        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        if (page == null) {
+            throw new IllegalArgumentException("no page found for device: " + deviceId + ". Push a page first.");
+        }
+        return page;
+    }
+
+    private SectionPatch.PatchEntry applySinglePatch(String deviceId, SectionPageDefinition page,
+                                                      Map<String, Object> rawPatch, long now) {
         String op = stringValue(rawPatch.getOrDefault("op", "update"));
         String sectionId = stringValue(rawPatch.get("sectionId"));
         if (!"add".equals(op) && sectionId.isBlank()) {
@@ -225,77 +222,57 @@ public class DebugSectionWorkspaceService {
         };
     }
 
-    private List<SectionPatch.PatchEntry> applyPatchEntries(String deviceId, WorkspacePage page,
-                                                            List<Map<String, Object>> rawPatches) {
-        List<SectionPatch.PatchEntry> patchEntries = new ArrayList<>();
-        long now = System.currentTimeMillis();
+    private SectionPageDefinition applyPatchesToPage(SectionPageDefinition page,
+                                                      List<Map<String, Object>> rawPatches, long now) {
+        LinkedHashMap<String, SectionPageDefinition.SectionDef> sections = new LinkedHashMap<>(page.sections());
         for (Map<String, Object> rawPatch : rawPatches) {
-            patchEntries.add(applySinglePatch(deviceId, page, rawPatch, now));
-        }
-        page.updatedAt = now;
-        return patchEntries;
-    }
-
-    private void applyPatchEntries(WorkspacePage page, List<SectionPatch.PatchEntry> patches) {
-        long now = System.currentTimeMillis();
-        for (SectionPatch.PatchEntry entry : patches) {
-            String op = entry.op() != null ? entry.op() : "update";
+            String op = stringValue(rawPatch.getOrDefault("op", "update"));
+            String sectionId = stringValue(rawPatch.get("sectionId"));
             switch (op) {
-                case "remove" -> {
-                    if (page.sections.remove(entry.sectionId()) == null) {
-                        throw new IllegalArgumentException("section not found: " + entry.sectionId());
-                    }
-                }
+                case "remove" -> sections.remove(sectionId);
                 case "add" -> {
-                    if (entry.data() == null || entry.type() == null) {
-                        throw new IllegalArgumentException("invalid add patch for section: " + entry.sectionId());
+                    String sectionType = stringValue(rawPatch.getOrDefault("sectionType", rawPatch.get("type")));
+                    if (sectionId.isBlank()) {
+                        sectionId = nextSectionId(sections.keySet());
                     }
-                    if (page.sections.containsKey(entry.sectionId())) {
-                        throw new IllegalArgumentException("section already exists: " + entry.sectionId());
-                    }
-                    page.sections.put(entry.sectionId(), new WorkspaceSection(
-                            entry.sectionId(),
-                            entry.type(),
-                            new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
-                            now
-                    ));
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> rawFields = rawPatch.get("fields") instanceof Map<?, ?> map
+                            ? (Map<String, Object>) map : Map.of();
+                    Map<String, Object> normalizedFields = sectionDataCodec.normalizeFields(sectionType, new LinkedHashMap<>(rawFields));
+                    sections.put(sectionId, new SectionPageDefinition.SectionDef(sectionId, sectionType, normalizedFields));
                 }
-                default -> {
-                    if (entry.data() == null) {
-                        throw new IllegalArgumentException("invalid update patch for section: " + entry.sectionId());
-                    }
-                    WorkspaceSection existing = page.sections.get(entry.sectionId());
-                    if (existing == null) {
-                        throw new IllegalArgumentException("section not found: " + entry.sectionId());
-                    }
-                    existing.fields.clear();
-                    existing.fields.putAll(sectionDataCodec.toFieldMap(entry.data()));
-                    existing.updatedAt = now;
+                default -> { // update
+                    SectionPageDefinition.SectionDef existing = sections.get(sectionId);
+                    if (existing == null) continue;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> patchFields = rawPatch.get("fields") instanceof Map<?, ?> map
+                            ? (Map<String, Object>) map : Map.of();
+                    Map<String, Object> merged = new LinkedHashMap<>(existing.fields());
+                    merged.putAll(patchFields);
+                    sections.put(sectionId, new SectionPageDefinition.SectionDef(sectionId, existing.sectionType(), merged));
                 }
             }
         }
-        page.updatedAt = now;
+        return new SectionPageDefinition(page.pageId(), page.layout(), page.autoScroll(), page.autoScrollMs(), sections);
     }
 
-    private SectionPatch.PatchEntry applyAddPatch(String deviceId, WorkspacePage page,
-                                                  Map<String, Object> rawPatch, String sectionId, long now) {
-        WorkspaceSection section = buildSection(deviceId, rawPatch, true, now, page.sections.keySet());
-        sectionId = section.sectionId;
-        if (page.sections.containsKey(sectionId)) {
+    private SectionPatch.PatchEntry applyAddPatch(String deviceId, SectionPageDefinition page,
+                                                   Map<String, Object> rawPatch, String sectionId, long now) {
+        Set<String> existingIds = page.sections().keySet();
+        SectionPageDefinition.SectionDef section = buildSectionDef(deviceId, rawPatch, existingIds);
+        sectionId = section.sectionId();
+        if (page.sections().containsKey(sectionId)) {
             throw new IllegalArgumentException("section already exists: " + sectionId);
         }
-        page.sections.put(sectionId, section);
         return new SectionPatch.PatchEntry(
-                sectionId,
-                "add",
-                section.sectionType,
-                sectionDataCodec.buildSectionData(section.sectionType, section.fields, section.sectionId)
+                sectionId, "add", section.sectionType(),
+                sectionDataCodec.buildSectionData(section.sectionType(), section.fields(), section.sectionId())
         );
     }
 
-    private SectionPatch.PatchEntry applyUpdatePatch(String deviceId, WorkspacePage page,
-                                                     Map<String, Object> rawPatch, String sectionId, long now) {
-        WorkspaceSection existing = page.sections.get(sectionId);
+    private SectionPatch.PatchEntry applyUpdatePatch(String deviceId, SectionPageDefinition page,
+                                                      Map<String, Object> rawPatch, String sectionId, long now) {
+        SectionPageDefinition.SectionDef existing = page.sections().get(sectionId);
         if (existing == null) {
             throw new IllegalArgumentException("section not found: " + sectionId);
         }
@@ -308,30 +285,29 @@ public class DebugSectionWorkspaceService {
         }
 
         String sectionType = stringValue(rawPatch.get("sectionType"));
-        if (!sectionType.isBlank() && !sectionType.equals(existing.sectionType)) {
+        if (!sectionType.isBlank() && !sectionType.equals(existing.sectionType())) {
             throw new IllegalArgumentException("sectionType cannot change for existing section " + sectionId);
         }
 
-        validateSectionType(deviceId, existing.sectionType);
-        Map<String, Object> merged = new LinkedHashMap<>(existing.fields);
+        validateSectionType(deviceId, existing.sectionType());
+        Map<String, Object> merged = new LinkedHashMap<>(existing.fields());
         merged.putAll(patchFields);
-        SectionData data = sectionDataCodec.buildSectionData(existing.sectionType, merged, sectionId);
+        SectionData data = sectionDataCodec.buildSectionData(existing.sectionType(), merged, sectionId);
         if (data == null) {
-            throw new IllegalArgumentException("invalid fields for sectionType: " + existing.sectionType);
+            throw new IllegalArgumentException("invalid fields for sectionType: " + existing.sectionType());
         }
 
-        existing.fields.clear();
-        existing.fields.putAll(sectionDataCodec.toFieldMap(data));
-        existing.updatedAt = now;
         return new SectionPatch.PatchEntry(sectionId, "update", null, data);
     }
 
-    private SectionPatch.PatchEntry applyRemovePatch(WorkspacePage page, String sectionId) {
-        if (page.sections.remove(sectionId) == null) {
+    private SectionPatch.PatchEntry applyRemovePatch(SectionPageDefinition page, String sectionId) {
+        if (!page.sections().containsKey(sectionId)) {
             throw new IllegalArgumentException("section not found: " + sectionId);
         }
         return new SectionPatch.PatchEntry(sectionId, "remove", null, null);
     }
+
+    // ── Internal: validation ──
 
     private void validateSectionType(String deviceId, String sectionType) {
         if (sectionType.isBlank()) {
@@ -342,48 +318,15 @@ public class DebugSectionWorkspaceService {
         if (!supported) {
             throw new IllegalArgumentException("unsupported sectionType: " + sectionType);
         }
-        if (SectionType.fromWireName(sectionType) == null) {
+        if (!sectionTypeCatalog.isValidType(sectionType)) {
             throw new IllegalArgumentException("unknown sectionType: " + sectionType);
         }
     }
 
-    private SectionScene toScene(WorkspacePage page) {
-        List<SectionEntry> entries = new ArrayList<>();
-        for (WorkspaceSection section : page.sections.values()) {
-            SectionType type = SectionType.fromWireName(section.sectionType);
-            SectionData data = sectionDataCodec.buildSectionData(section.sectionType, section.fields, section.sectionId);
-            entries.add(new SectionEntry(type, section.sectionId, data));
-        }
-        return new SectionScene(
-                page.pageId,
-                SectionLayout.fromWireName(page.layout),
-                page.autoScroll,
-                page.autoScrollMs,
-                entries
-        );
-    }
-
-    private Map<String, Object> emptyState(String deviceId) {
-        Map<String, Object> state = new LinkedHashMap<>();
-        state.put("deviceId", deviceId);
-        state.put("activePageId", null);
-        state.put("pages", List.of());
-        return state;
-    }
+    // ── Internal: helpers ──
 
     private String stringValue(Object value) {
         return value instanceof String s ? s : value != null ? String.valueOf(value) : "";
-    }
-
-    private String resolvePatchPageId(DebugWorkspace workspace, Map<String, Object> body) {
-        String pageId = stringValue(body.get("pageId"));
-        if (!pageId.isBlank()) {
-            return pageId;
-        }
-        if (workspace.activePageId != null && !workspace.activePageId.isBlank()) {
-            return workspace.activePageId;
-        }
-        throw new IllegalArgumentException("pageId is required when no active page exists");
     }
 
     private String nextPageId() {
@@ -396,106 +339,5 @@ public class DebugSectionWorkspaceService {
             sectionId = SECTION_ID_PREFIX + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         } while (existingIds != null && existingIds.contains(sectionId));
         return sectionId;
-    }
-
-    private DebugWorkspace workspace(String namespace, String deviceId) {
-        return workspaces.computeIfAbsent(workspaceKey(namespace, deviceId), ignored -> new DebugWorkspace(deviceId));
-    }
-
-    private String workspaceKey(String namespace, String deviceId) {
-        return namespace + ":" + deviceId;
-    }
-
-    private void replacePage(DebugWorkspace workspace, WorkspacePage page) {
-        workspace.activePageId = page.pageId;
-        workspace.pages.put(page.pageId, page);
-    }
-
-    private Map<String, Object> getState(String namespace, String deviceId) {
-        DebugWorkspace workspace = workspaces.get(workspaceKey(namespace, deviceId));
-        if (workspace == null) {
-            return emptyState(deviceId);
-        }
-
-        List<Map<String, Object>> pages = new ArrayList<>();
-        for (WorkspacePage page : workspace.pages.values()) {
-            List<Map<String, Object>> sections = new ArrayList<>();
-            for (WorkspaceSection section : page.sections.values()) {
-                Map<String, Object> sectionMap = new LinkedHashMap<>();
-                sectionMap.put("sectionId", section.sectionId);
-                sectionMap.put("sectionType", section.sectionType);
-                sectionMap.put("fields", new LinkedHashMap<>(section.fields));
-                sectionMap.put("updatedAt", section.updatedAt);
-                sections.add(sectionMap);
-            }
-
-            Map<String, Object> pageMap = new LinkedHashMap<>();
-            pageMap.put("pageId", page.pageId);
-            pageMap.put("layout", page.layout);
-            pageMap.put("autoScroll", page.autoScroll);
-            pageMap.put("autoScrollMs", page.autoScrollMs);
-            pageMap.put("sections", sections);
-            pageMap.put("updatedAt", page.updatedAt);
-            pages.add(pageMap);
-        }
-
-        return Map.of(
-                "deviceId", deviceId,
-                "activePageId", workspace.activePageId,
-                "pages", pages
-        );
-    }
-
-    private String findSectionType(String namespace, String deviceId, String pageId, String sectionId) {
-        DebugWorkspace workspace = workspaces.get(workspaceKey(namespace, deviceId));
-        if (workspace == null) {
-            return null;
-        }
-        WorkspacePage page = workspace.pages.get(pageId);
-        if (page == null) {
-            return null;
-        }
-        WorkspaceSection section = page.sections.get(sectionId);
-        return section != null ? section.sectionType : null;
-    }
-
-    private static final class DebugWorkspace {
-        private final String deviceId;
-        private String activePageId;
-        private final Map<String, WorkspacePage> pages = new LinkedHashMap<>();
-
-        private DebugWorkspace(String deviceId) {
-            this.deviceId = deviceId;
-        }
-    }
-
-    private static final class WorkspacePage {
-        private final String pageId;
-        private final String layout;
-        private final boolean autoScroll;
-        private final int autoScrollMs;
-        private long updatedAt;
-        private final Map<String, WorkspaceSection> sections = new LinkedHashMap<>();
-
-        private WorkspacePage(String pageId, String layout, boolean autoScroll, int autoScrollMs) {
-            this.pageId = pageId;
-            this.layout = layout;
-            this.autoScroll = autoScroll;
-            this.autoScrollMs = autoScrollMs;
-        }
-    }
-
-    private static final class WorkspaceSection {
-        private final String sectionId;
-        private final String sectionType;
-        private final Map<String, Object> fields;
-        private long updatedAt;
-
-        private WorkspaceSection(String sectionId, String sectionType, Map<String, Object> fields, long updatedAt) {
-            this.sectionId = sectionId;
-            this.sectionType = sectionType;
-            this.fields = fields;
-            this.updatedAt = updatedAt;
-        }
     }
 }

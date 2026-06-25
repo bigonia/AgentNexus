@@ -89,7 +89,6 @@ class NodeWorkflowManagementServiceTest {
         assertEquals("boom", deployments.get(0).get("lastError"));
         assertEquals(2, deployments.get(0).get("runCount"));
         assertEquals(1L, deployments.get(0).get("failedRunCount"));
-        assertEquals("error", deployments.get(0).get("health"));
     }
 
     private NodeWorkflowDeploymentEntity deployment(String id, String workflowId) {

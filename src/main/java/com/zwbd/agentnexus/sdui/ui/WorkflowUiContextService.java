@@ -247,7 +247,7 @@ public class WorkflowUiContextService {
         for (SectionEntry entry : scene.sections()) {
             Map<String, Object> section = new LinkedHashMap<>();
             section.put("sectionId", entry.sectionId());
-            section.put("sectionType", entry.type().wireName());
+            section.put("sectionType", entry.type());
             section.put("fields", sectionDataCodec.toFieldMap(entry.data()));
             sections.put(entry.sectionId(), section);
         }

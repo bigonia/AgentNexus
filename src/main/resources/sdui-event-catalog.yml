@@ -229,16 +229,19 @@ commands:
 
 sections:
   types:
+    # ── Display-only sections ──
+
     - type: hero_section
       displayName: Hero 数据
+      compactHiddenFields: [subtitle, iconSrc, iconSymbol, progress]
       fields:
-        - {name: value, type: string}
-        - {name: label, type: string}
-        - {name: subtitle, type: string}
-        - {name: tone, type: enum, values: [primary, success, warning, danger, secondary]}
-        - {name: iconSrc, type: string}
-        - {name: iconSymbol, type: string}
-        - {name: progress, type: int, min: 0, max: 100}
+        - {name: value, type: string, label: 数值, default: ""}
+        - {name: label, type: string, label: 标签, default: ""}
+        - {name: subtitle, type: string, label: 副标题, default: ""}
+        - {name: tone, type: enum, values: [primary, success, warning, danger, secondary], label: 色调, default: primary}
+        - {name: iconSrc, type: enum, values: [start, mail, chat, file, love, droplet, doubt, veins, dollar, doller], label: 图标, default: ""}
+        - {name: iconSymbol, type: enum, values: [start, mail, chat, file, love, droplet, doubt, veins, dollar, doller], label: 图标符号, default: ""}
+        - {name: progress, type: int, min: 0, max: 100, label: 进度, default: 0}
       events: []
 
     - type: metric_section
@@ -246,62 +249,70 @@ sections:
       fields:
         - name: metrics
           type: array
+          label: 指标列表
           children:
-            - {name: label, type: string}
-            - {name: value, type: string}
+            - {name: label, type: string, label: 标签, default: ""}
+            - {name: value, type: string, label: 数值, default: ""}
       events: []
 
     - type: chart_section
       displayName: 图表
+      compactHiddenFields: [progress]
       fields:
-        - {name: title, type: string}
-        - {name: points, type: array}
-        - {name: progress, type: int, min: 0, max: 100}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: points, type: array, label: 数据点 int数组}
+        - {name: progress, type: int, min: 0, max: 100, label: 进度, default: 0}
       events: []
 
     - type: progress_section
       displayName: 进度条
+      compactHiddenFields: [title]
       fields:
-        - {name: title, type: string}
-        - {name: progress, type: int, min: 0, max: 100}
-        - {name: progressText, type: string}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: progress, type: int, min: 0, max: 100, label: 进度, default: 0}
+        - {name: progressText, type: string, label: 进度文本, default: ""}
       events: []
 
     - type: text_section
       displayName: 文本
       fields:
-        - {name: title, type: string}
-        - {name: body, type: string}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: body, type: string, label: 正文, default: ""}
       events: []
 
     - type: timer_section
       displayName: 计时器
+      compactHiddenFields: [title, progress]
       fields:
-        - {name: title, type: string}
-        - {name: progress, type: int, min: 0, max: 100}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: progress, type: int, min: 0, max: 100, label: 进度, default: 0}
         - name: timer
           type: object
+          label: 计时器
           children:
-            - {name: elapsedMs, type: int, min: 0}
-            - {name: running, type: boolean}
+            - {name: elapsedMs, type: int, min: 0, label: 已过毫秒, default: 0}
+            - {name: running, type: boolean, label: 运行中, default: false}
       events: []
 
     - type: image_section
       displayName: 图片
+      compactHiddenFields: [subtitle]
       fields:
-        - {name: iconSrc, type: string}
-        - {name: title, type: string}
-        - {name: subtitle, type: string}
+        - {name: iconSrc, type: enum, values: [start, mail, chat, file, love, droplet, doubt, veins, dollar, doller], label: 图标, default: chat}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: subtitle, type: string, label: 副标题, default: ""}
       events: []
+
+    # ── Interactive sections ──
 
     - type: overlay_section
       displayName: 覆盖层
       fields:
-        - {name: title, type: string}
-        - {name: body, type: string}
-        - {name: tone, type: enum, values: [neutral, warning, success, danger, primary]}
-        - {name: unreadCount, type: int, min: 0, max: 999}
-        - {name: autoHideMs, type: int, min: 0, max: 30000}
+        - {name: title, type: string, label: 标题, default: ""}
+        - {name: body, type: string, label: 正文, default: ""}
+        - {name: tone, type: enum, values: [warning, success, danger, primary], label: 色调, default: warning}
+        - {name: unreadCount, type: int, min: 0, max: 999, label: 未读数, default: 0}
+        - {name: autoHideMs, type: int, min: 0, max: 30000, label: 自动隐藏(ms), default: 0}
       events:
         - id: ui:overlay.confirm
           subtype: interaction
@@ -321,11 +332,12 @@ sections:
       fields:
         - name: actions
           type: array
+          label: 按钮列表
           children:
-            - {name: id, type: string}
-            - {name: label, type: string}
-            - {name: tone, type: enum, values: [primary, secondary, success, warning, danger]}
-            - {name: enabled, type: boolean}
+            - {name: id, type: string, label: 按钮ID, default: ""}
+            - {name: label, type: string, label: 按钮文本, default: ""}
+            - {name: tone, type: enum, values: [primary, secondary, success, warning, danger], label: 样式, default: primary}
+            - {name: enabled, type: boolean, label: 启用, default: true}
       events:
         - id: ui:action.click
           subtype: interaction
@@ -343,15 +355,17 @@ sections:
     - type: list_section
       displayName: 列表
       constraints: {max_items: 8}
+      compactHiddenFields: ["items[].subtitle", "items[].iconSrc"]
       fields:
         - name: items
           type: array
+          label: 列表项
           children:
-            - {name: id, type: string}
-            - {name: title, type: string}
-            - {name: subtitle, type: string}
-            - {name: tone, type: enum, values: [neutral, primary, success, warning, danger]}
-            - {name: iconSrc, type: string}
+            - {name: id, type: string, label: 项ID, default: ""}
+            - {name: title, type: string, label: 标题, default: ""}
+            - {name: subtitle, type: string, label: 副标题, default: ""}
+            - {name: tone, type: enum, values: [neutral, primary, success, warning, danger], label: 色调, default: neutral}
+            - {name: iconSrc, type: enum, values: [start, mail, chat, file, love, droplet, doubt, veins, dollar, doller], label: 图标, default: ""}
       events:
         - id: ui:list.select
           subtype: interaction
@@ -373,10 +387,11 @@ sections:
       fields:
         - name: options
           type: array
+          label: 选项列表
           children:
-            - {name: id, type: string}
-            - {name: label, type: string}
-            - {name: active, type: boolean}
+            - {name: id, type: string, label: 选项ID, default: ""}
+            - {name: label, type: string, label: 选项文本, default: ""}
+            - {name: active, type: boolean, label: 激活状态, default: false}
       events:
         - id: ui:toggle.change
           subtype: interaction
@@ -398,10 +413,11 @@ sections:
       fields:
         - name: tabs
           type: array
+          label: 标签列表
           children:
-            - {name: id, type: string}
-            - {name: label, type: string}
-        - {name: activeTab, type: int, min: 0}
+            - {name: id, type: string, label: 标签ID, default: ""}
+            - {name: label, type: string, label: 标签文本, default: ""}
+        - {name: activeTab, type: int, min: 0, max: 10, label: 当前激活Tab索引, default: 0}
       events:
         - id: ui:nav.change
           subtype: interaction

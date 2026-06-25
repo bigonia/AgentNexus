@@ -18,15 +18,18 @@ public class SduiUiTemplateService {
     private final SectionDataCodec sectionDataCodec;
     private final SectionOrchestrationService sectionOrchestrationService;
     private final DeviceCapabilityProjection capabilityProjection;
+    private final SectionTypeCatalog sectionTypeCatalog;
 
     public SduiUiTemplateService(SduiUiTemplateRepository repository,
                                  SectionDataCodec sectionDataCodec,
                                  SectionOrchestrationService sectionOrchestrationService,
-                                 DeviceCapabilityProjection capabilityProjection) {
+                                 DeviceCapabilityProjection capabilityProjection,
+                                 SectionTypeCatalog sectionTypeCatalog) {
         this.repository = repository;
         this.sectionDataCodec = sectionDataCodec;
         this.sectionOrchestrationService = sectionOrchestrationService;
         this.capabilityProjection = capabilityProjection;
+        this.sectionTypeCatalog = sectionTypeCatalog;
     }
 
     @Transactional
@@ -113,10 +116,12 @@ public class SduiUiTemplateService {
     public Map<String, Object> normalizeDefinition(Map<String, Object> body) {
         Map<String, Object> source = map(body.getOrDefault("definition", body));
         String templateKey = string(source.getOrDefault("templateKey", body.get("templateKey")));
+        String name = string(source.getOrDefault("name", body.getOrDefault("name", "")));
+        // 未提供 templateKey 时自动生成：名称 slug + 短 UUID
         if (templateKey.isBlank()) {
-            throw new IllegalArgumentException("templateKey is required");
+            String base = name.isBlank() ? "template" : name.toLowerCase().replaceAll("[^a-z0-9]+", "_").replaceAll("^_|_$", "");
+            templateKey = base + "_" + java.util.UUID.randomUUID().toString().substring(0, 8);
         }
-        String name = string(source.getOrDefault("name", body.getOrDefault("name", templateKey)));
         String pageId = string(source.getOrDefault("pageId", DEFAULT_PAGE_ID));
         String layout = string(source.getOrDefault("layout", DEFAULT_LAYOUT));
         if (SectionLayout.fromWireName(layout) == null) {
@@ -135,7 +140,7 @@ public class SduiUiTemplateService {
             String sectionType = string(section.getOrDefault("sectionType", section.get("type")));
             if (sectionId.isBlank()) throw new IllegalArgumentException("sectionId is required");
             if (!sectionIds.add(sectionId)) throw new IllegalArgumentException("duplicate sectionId: " + sectionId);
-            if (SectionType.fromWireName(sectionType) == null) {
+            if (!sectionTypeCatalog.isValidType(sectionType)) {
                 throw new IllegalArgumentException("unsupported sectionType: " + sectionType);
             }
             Map<String, Object> fields = sectionDataCodec.normalizeFields(sectionType, map(section.get("fields")));
@@ -194,11 +199,15 @@ public class SduiUiTemplateService {
         }
     }
 
-    SectionScene toScene(Map<String, Object> definition, Map<String, Object> variables) {
-        String pageId = string(definition.getOrDefault("pageId", DEFAULT_PAGE_ID));
-        SectionLayout layout = SectionLayout.fromWireName(string(definition.getOrDefault("layout", DEFAULT_LAYOUT)));
+    /**
+     * Convert a stored template definition (with variables resolved) into a
+     * {@link SectionPageDefinition} for validation, scene construction, or
+     * event catalog queries.
+     */
+    public SectionPageDefinition toPageDefinition(Map<String, Object> definition, Map<String, Object> variables) {
         Map<String, Object> values = variableValues(definition, variables);
-        List<SectionEntry> entries = new ArrayList<>();
+        LinkedHashMap<String, SectionPageDefinition.SectionDef> sectionDefs = new LinkedHashMap<>();
+
         for (Map<String, Object> section : listOfMaps(definition.get("sections"))) {
             String sectionId = string(section.get("sectionId"));
             String sectionType = string(section.get("sectionType"));
@@ -212,10 +221,17 @@ public class SduiUiTemplateService {
                     }
                 }
             }
-            SectionData data = sectionDataCodec.buildSectionData(sectionType, fields, sectionId);
-            entries.add(new SectionEntry(SectionType.fromWireName(sectionType), sectionId, data));
+            sectionDefs.put(sectionId, new SectionPageDefinition.SectionDef(sectionId, sectionType, fields));
         }
-        return new SectionScene(pageId, layout != null ? layout : SectionLayout.VERTICAL_SCROLL, false, 0, entries);
+
+        String pageId = string(definition.getOrDefault("pageId", DEFAULT_PAGE_ID));
+        SectionLayout layout = SectionLayout.fromWireName(string(definition.getOrDefault("layout", DEFAULT_LAYOUT)));
+        return new SectionPageDefinition(pageId, layout != null ? layout : SectionLayout.VERTICAL_SCROLL, false, 0, sectionDefs);
+    }
+
+    SectionScene toScene(Map<String, Object> definition, Map<String, Object> variables) {
+        SectionPageDefinition page = toPageDefinition(definition, variables);
+        return page.toScene(sectionDataCodec);
     }
 
     Map<String, Object> variableValues(Map<String, Object> definition, Map<String, Object> overrides) {
@@ -246,7 +262,7 @@ public class SduiUiTemplateService {
         for (SectionEntry entry : scene.sections()) {
             sections.add(new LinkedHashMap<>(Map.of(
                     "sectionId", entry.sectionId(),
-                    "sectionType", entry.type().wireName(),
+                    "sectionType", entry.type(),
                     "fields", sectionDataCodec.toFieldMap(entry.data())
             )));
         }

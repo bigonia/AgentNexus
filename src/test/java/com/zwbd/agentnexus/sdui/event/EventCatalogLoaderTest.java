@@ -1,6 +1,5 @@
 package com.zwbd.agentnexus.sdui.event;
 
-import com.zwbd.agentnexus.sdui.section.SectionDataCodec;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,7 +9,7 @@ class EventCatalogLoaderTest {
 
     @Test
     void loadsCommandAndSectionEventsFromConfiguration() {
-        EventCatalogLoader loader = new EventCatalogLoader(new SectionDataCodec());
+        EventCatalogLoader loader = new EventCatalogLoader();
         loader.load();
 
         assertTrue(loader.validationErrors().isEmpty());

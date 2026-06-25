@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.artifact;
 
-import com.zwbd.agentnexus.sdui.statemachine.model.StateMachineJsonConverter;
+import com.zwbd.agentnexus.common.web.JsonMapConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -46,7 +46,7 @@ public class SduiArtifactEntity {
     @Column(nullable = false, length = 128)
     private String mimeType;
 
-    @Convert(converter = StateMachineJsonConverter.class)
+    @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, Object> metadata = new LinkedHashMap<>();
 

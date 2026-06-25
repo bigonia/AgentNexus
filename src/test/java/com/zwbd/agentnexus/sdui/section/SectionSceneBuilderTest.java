@@ -1,21 +1,63 @@
 package com.zwbd.agentnexus.sdui.section;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SectionSceneBuilderTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SectionSceneBuilder builder = new SectionSceneBuilder(mapper);
+    private SectionSceneBuilder builder;
+
+    @BeforeEach
+    void setUp() {
+        SectionTypeCatalog mockCatalog = mock(SectionTypeCatalog.class);
+        when(mockCatalog.get(anyString())).thenAnswer(invocation -> {
+            String type = invocation.getArgument(0);
+            return Optional.ofNullable(compactDef(type));
+        });
+        builder = new SectionSceneBuilder(mapper, mockCatalog);
+    }
+
+    private SectionTypeCatalog.SectionTypeDef compactDef(String type) {
+        // (type, displayName, interactive, displayFields, interactionEvents, defaultConstraints, compactHiddenFields)
+        return switch (type) {
+            case "hero_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "Hero", false, List.of(), List.of(),
+                    Map.of(), Set.of("subtitle", "iconSrc", "iconSymbol", "progress"));
+            case "chart_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "Chart", false, List.of(), List.of(),
+                    Map.of(), Set.of("progress"));
+            case "timer_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "Timer", false, List.of(), List.of(),
+                    Map.of(), Set.of("title", "progress"));
+            case "image_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "Image", false, List.of(), List.of(),
+                    Map.of(), Set.of("subtitle"));
+            case "progress_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "Progress", false, List.of(), List.of(),
+                    Map.of(), Set.of("title"));
+            case "list_section" -> new SectionTypeCatalog.SectionTypeDef(
+                    type, "List", false, List.of(), List.of(),
+                    Map.of(), Set.of("items[].subtitle", "items[].iconSrc"));
+            default -> null;
+        };
+    }
 
     @Test
     void buildHeroScene() {
         SectionScene scene = new SectionScene("test_page", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.HERO, "hero_1",
+                new SectionEntry("hero_section", "hero_1",
                         new SectionData.HeroData("85%", "CPU", "Running", "primary", "cpu", null, 85))
         ));
 
@@ -60,42 +102,42 @@ class SectionSceneBuilderTest {
     @Test
     void buildSceneWithAllSectionTypes() {
         SectionScene scene = new SectionScene("all_types", SectionLayout.HORIZONTAL_PAGES, true, 2500, List.of(
-                new SectionEntry(SectionType.HERO, "h1",
+                new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", null, 72)),
-                new SectionEntry(SectionType.METRIC, "m1",
+                new SectionEntry("metric_section", "m1",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("CPU", "45%"),
                                 new SectionData.MetricData.MetricEntry("RAM", "58%")
                         ))),
-                new SectionEntry(SectionType.CHART, "c1",
+                new SectionEntry("chart_section", "c1",
                         new SectionData.ChartData("Trend", List.of(30, 45, 38, 55), 68)),
-                new SectionEntry(SectionType.TIMER, "t1",
+                new SectionEntry("timer_section", "t1",
                         new SectionData.TimerData("Timer", 50,
                                 new SectionData.TimerData.Timer(120000, true))),
-                new SectionEntry(SectionType.IMAGE, "i1",
+                new SectionEntry("image_section", "i1",
                         new SectionData.ImageData("start", "Status", "Online")),
-                new SectionEntry(SectionType.ACTION, "a1",
+                new SectionEntry("action_section", "a1",
                         new SectionData.ActionData(List.of(
                                 new SectionData.ActionData.ActionButton("ok", "OK", "primary", true),
                                 new SectionData.ActionData.ActionButton("cancel", "Cancel", "danger", true)
                         ))),
-                new SectionEntry(SectionType.PROGRESS, "p1",
+                new SectionEntry("progress_section", "p1",
                         new SectionData.ProgressData("Sync", 67, "67%")),
-                new SectionEntry(SectionType.TEXT, "tx1",
+                new SectionEntry("text_section", "tx1",
                         new SectionData.TextData("Notice", "Maintenance at 02:00 UTC.")),
-                new SectionEntry(SectionType.OVERLAY, "o1",
+                new SectionEntry("overlay_section", "o1",
                         new SectionData.OverlayData("Alert", "Disk at 90%", "warning", 1, 5000)),
-                new SectionEntry(SectionType.LIST, "l1",
+                new SectionEntry("list_section", "l1",
                         new SectionData.ListData(List.of(
                                 new SectionData.ListData.ListItem("l1", "Server OK", "2m ago", "success", null),
                                 new SectionData.ListData.ListItem("l2", "CPU 92%", "5m ago", "danger", null)
                         ))),
-                new SectionEntry(SectionType.TOGGLE, "tg1",
+                new SectionEntry("toggle_section", "tg1",
                         new SectionData.ToggleData(List.of(
                                 new SectionData.ToggleData.ToggleOption("wifi", "Wi-Fi", true),
                                 new SectionData.ToggleData.ToggleOption("bt", "BT", false)
                         ))),
-                new SectionEntry(SectionType.NAV, "n1",
+                new SectionEntry("nav_section", "n1",
                         new SectionData.NavData(List.of(
                                 new SectionData.NavData.NavTab("home", "Home"),
                                 new SectionData.NavData.NavTab("stats", "Stats"),
@@ -125,7 +167,7 @@ class SectionSceneBuilderTest {
     @Test
     void heroCompactOmitsHiddenFields() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.HERO, "h1",
+                List.of(new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", "star", 72))),
                 SectionRenderMode.COMPACT);
 
@@ -146,7 +188,7 @@ class SectionSceneBuilderTest {
     @Test
     void heroRichIncludesAllFields() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.HERO, "h1",
+                List.of(new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", "star", 72))),
                 SectionRenderMode.RICH);
 
@@ -161,7 +203,7 @@ class SectionSceneBuilderTest {
     @Test
     void chartCompactOmitsProgress() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.CHART, "c1",
+                List.of(new SectionEntry("chart_section", "c1",
                         new SectionData.ChartData("Trend", List.of(30, 55), 68))),
                 SectionRenderMode.COMPACT);
 
@@ -174,7 +216,7 @@ class SectionSceneBuilderTest {
     @Test
     void timerCompactOmitsTitleAndProgress() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.TIMER, "t1",
+                List.of(new SectionEntry("timer_section", "t1",
                         new SectionData.TimerData("My Timer", 50,
                                 new SectionData.TimerData.Timer(60000, true)))),
                 SectionRenderMode.COMPACT);
@@ -190,7 +232,7 @@ class SectionSceneBuilderTest {
     @Test
     void imageCompactOmitsSubtitle() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.IMAGE, "i1",
+                List.of(new SectionEntry("image_section", "i1",
                         new SectionData.ImageData("chat", "Title", "Subtitle"))),
                 SectionRenderMode.COMPACT);
 
@@ -204,7 +246,7 @@ class SectionSceneBuilderTest {
     @Test
     void progressCompactOmitsTitle() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.PROGRESS, "p1",
+                List.of(new SectionEntry("progress_section", "p1",
                         new SectionData.ProgressData("Loading", 75, "75%"))),
                 SectionRenderMode.COMPACT);
 
@@ -217,7 +259,7 @@ class SectionSceneBuilderTest {
     @Test
     void listCompactOmitsSubtitleAndIconSrc() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.LIST, "l1",
+                List.of(new SectionEntry("list_section", "l1",
                         new SectionData.ListData(List.of(
                                 new SectionData.ListData.ListItem("1", "Item A", "sub A", "primary", "icon1"),
                                 new SectionData.ListData.ListItem("2", "Item B", "sub B", "warning", "icon2")
@@ -236,7 +278,7 @@ class SectionSceneBuilderTest {
     @Test
     void listRichIncludesAllItemFields() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.LIST, "l1",
+                List.of(new SectionEntry("list_section", "l1",
                         new SectionData.ListData(List.of(
                                 new SectionData.ListData.ListItem("1", "Item A", "sub A", "primary", "icon1")
                         )))),
@@ -250,7 +292,7 @@ class SectionSceneBuilderTest {
     @Test
     void overlayDoesNotEmitVisibleField() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.OVERLAY, "o1",
+                List.of(new SectionEntry("overlay_section", "o1",
                         new SectionData.OverlayData("Alert", "Disk full", "warning", 3, 5000))));
 
         String json = builder.buildSceneJson(scene);
@@ -264,7 +306,7 @@ class SectionSceneBuilderTest {
     @Test
     void renderModeDefaultsToRichWhenNotSet() {
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0,
-                List.of(new SectionEntry(SectionType.HERO, "h1",
+                List.of(new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", "star", 72))));
 
         // No explicit render mode → should behave as RICH (all fields present)

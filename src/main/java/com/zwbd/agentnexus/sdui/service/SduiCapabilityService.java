@@ -10,6 +10,7 @@ import com.zwbd.agentnexus.sdui.protocol.SduiProtocolConstants;
 import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +29,7 @@ public class SduiCapabilityService {
     private final CapabilityRegistry capabilityRegistry;
     private final CapabilityCatalog catalog;
     private final DeviceProtocolCatalog protocolCatalog;
+    private final SectionTypeCatalog sectionCatalog;
     private final Map<String, CapabilitySchema.CapabilitySnapshot> cache = new ConcurrentHashMap<>();
 
     public SduiCapabilityService(SduiDeviceRepository deviceRepository,
@@ -35,13 +37,15 @@ public class SduiCapabilityService {
                                   CommandSchemaRegistry schemaRegistry,
                                   CapabilityRegistry capabilityRegistry,
                                   CapabilityCatalog catalog,
-                                  DeviceProtocolCatalog protocolCatalog) {
+                                  DeviceProtocolCatalog protocolCatalog,
+                                  SectionTypeCatalog sectionCatalog) {
         this.deviceRepository = deviceRepository;
         this.objectMapper = objectMapper;
         this.schemaRegistry = schemaRegistry;
         this.capabilityRegistry = capabilityRegistry;
         this.catalog = catalog;
         this.protocolCatalog = protocolCatalog;
+        this.sectionCatalog = sectionCatalog;
     }
 
     @Transactional
@@ -232,7 +236,7 @@ public class SduiCapabilityService {
                 }
                 if (caps.display() != null) {
                     for (String sectionType : caps.display().sectionTypes()) {
-                        if (com.zwbd.agentnexus.sdui.section.SectionTypeCatalog.get(sectionType).isEmpty()) {
+                        if (sectionCatalog.get(sectionType).isEmpty()) {
                             unresolved.add(unresolvedEntry("display.section_types", sectionType,
                                     "section type not found in platform catalog"));
                         }
@@ -353,15 +357,15 @@ public class SduiCapabilityService {
         List<Map<String, Object>> sections = new ArrayList<>();
         if (caps.display() != null) {
             for (String sectionType : caps.display().sectionTypes()) {
-                com.zwbd.agentnexus.sdui.section.SectionTypeCatalog.SectionTypeDef def =
-                        com.zwbd.agentnexus.sdui.section.SectionTypeCatalog.get(sectionType).orElse(null);
+                SectionTypeCatalog.SectionTypeDef def =
+                        sectionCatalog.get(sectionType).orElse(null);
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("type", sectionType);
                 entry.put("displayName", def != null ? def.displayName() : sectionType);
                 entry.put("interactive", def != null && def.interactive());
                 entry.put("events", def != null
                         ? def.interactionEvents().stream()
-                                .map(com.zwbd.agentnexus.sdui.section.SectionTypeCatalog.InteractionEvent::eventId)
+                                .map(SectionTypeCatalog.InteractionEvent::eventId)
                                 .toList()
                         : List.of());
                 entry.put("constraints", def != null ? def.defaultConstraints() : Map.of());

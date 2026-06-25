@@ -4,7 +4,7 @@ import java.util.List;
 
 public record NodeWorkflowSlot(
         String slotId,
-        String typeKey,
+        String board,
         String displayName,
         List<String> requiredCapabilities
 ) {}

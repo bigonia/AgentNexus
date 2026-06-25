@@ -3,6 +3,7 @@ package com.zwbd.agentnexus.sdui.ui;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.section.SectionDataCodec;
 import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.ui.repo.SduiUiTemplateRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,21 +15,28 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class SduiUiTemplateServiceTest {
 
     private SduiUiTemplateRepository repository;
+    private SectionTypeCatalog mockCatalog;
     private SduiUiTemplateService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(SduiUiTemplateRepository.class);
+        mockCatalog = mock(SectionTypeCatalog.class);
+        when(mockCatalog.get(anyString())).thenReturn(Optional.empty());
+        when(mockCatalog.defaultFieldValues(anyString())).thenReturn(Map.of());
+        when(mockCatalog.isValidType(anyString())).thenReturn(true);
         service = new SduiUiTemplateService(
                 repository,
-                new SectionDataCodec(),
+                new SectionDataCodec(mockCatalog),
                 mock(SectionOrchestrationService.class),
-                mock(DeviceCapabilityProjection.class)
+                mock(DeviceCapabilityProjection.class),
+                mockCatalog
         );
     }
 

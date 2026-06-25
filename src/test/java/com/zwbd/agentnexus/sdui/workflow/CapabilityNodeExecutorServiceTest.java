@@ -6,6 +6,7 @@ import com.zwbd.agentnexus.sdui.artifact.SduiArtifactService;
 import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
 import com.zwbd.agentnexus.sdui.section.SectionDataCodec;
 import com.zwbd.agentnexus.sdui.section.SectionOrchestrationService;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.section.SectionPatch;
 import com.zwbd.agentnexus.sdui.section.SectionScene;
 import com.zwbd.agentnexus.sdui.service.AudioService;
@@ -32,6 +33,7 @@ class CapabilityNodeExecutorServiceTest {
     private SduiArtifactService artifactService;
     private CommandService commandService;
     private AudioRecordSessionManager audioRecordSessionManager;
+    private SectionTypeCatalog mockCatalog;
     private CapabilityNodeExecutorService executor;
 
     @BeforeEach
@@ -41,6 +43,9 @@ class CapabilityNodeExecutorServiceTest {
         artifactService = mock(SduiArtifactService.class);
         commandService = mock(CommandService.class);
         audioRecordSessionManager = mock(AudioRecordSessionManager.class);
+        mockCatalog = mock(SectionTypeCatalog.class);
+        when(mockCatalog.get(anyString())).thenReturn(Optional.empty());
+        when(mockCatalog.isValidType(anyString())).thenReturn(true);
         executor = new CapabilityNodeExecutorService(
                 sessionManager,
                 commandService,
@@ -48,8 +53,9 @@ class CapabilityNodeExecutorServiceTest {
                 audioRecordSessionManager,
                 artifactService,
                 sectionService,
-                new SectionDataCodec(),
-                mock(WorkflowUiContextService.class)
+                new SectionDataCodec(mockCatalog),
+                mock(WorkflowUiContextService.class),
+                mockCatalog
         );
         when(sessionManager.isDeviceOnline("dev-1")).thenReturn(true);
     }

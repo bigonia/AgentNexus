@@ -48,8 +48,8 @@ class SectionCapabilityAdapterTest {
         SectionScene adapted = adapter.adapt(scene, caps);
 
         assertEquals(2, adapted.sections().size());
-        assertEquals(SectionType.HERO, adapted.sections().get(0).type());
-        assertEquals(SectionType.METRIC, adapted.sections().get(1).type());
+        assertEquals("hero_section", adapted.sections().get(0).type());
+        assertEquals("metric_section", adapted.sections().get(1).type());
     }
 
     @Test
@@ -57,7 +57,7 @@ class SectionCapabilityAdapterTest {
         when(catalog.getDisplayLimits(anyString())).thenReturn(Map.of("max_metrics", 2));
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.METRIC, "m1",
+                new SectionEntry("metric_section", "m1",
                         new SectionData.MetricData(List.of(
                                 new SectionData.MetricData.MetricEntry("A", "1"),
                                 new SectionData.MetricData.MetricEntry("B", "2"),
@@ -79,7 +79,7 @@ class SectionCapabilityAdapterTest {
         when(catalog.getDisplayLimits(anyString())).thenReturn(Map.of("max_list_items", 2));
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.LIST, "l1",
+                new SectionEntry("list_section", "l1",
                         new SectionData.ListData(List.of(
                                 new SectionData.ListData.ListItem("1", "A", "subA", "primary", null),
                                 new SectionData.ListData.ListItem("2", "B", "subB", "warning", null),
@@ -104,7 +104,7 @@ class SectionCapabilityAdapterTest {
         );
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.HERO, "h1",
+                new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("85%", "CPU", "OK", "primary", "cpu", null, 85))
         ));
 
@@ -118,7 +118,7 @@ class SectionCapabilityAdapterTest {
 
         String longBody = "This is a very long text body that should be truncated to fit the limit";
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.TEXT, "tx1",
+                new SectionEntry("text_section", "tx1",
                         new SectionData.TextData("Title", longBody))
         ));
 
@@ -151,7 +151,7 @@ class SectionCapabilityAdapterTest {
                 "large", Map.of());
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.HERO, "h1",
+                new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", null, 72))
         ));
 
@@ -166,7 +166,7 @@ class SectionCapabilityAdapterTest {
                 "small", Map.of());
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.HERO, "h1",
+                new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", null, 72))
         ));
 
@@ -181,7 +181,7 @@ class SectionCapabilityAdapterTest {
                 null, Map.of());
 
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.HERO, "h1",
+                new SectionEntry("hero_section", "h1",
                         new SectionData.HeroData("72%", "Status", "OK", "primary", "cpu", null, 72))
         ));
 
@@ -216,7 +216,7 @@ class SectionCapabilityAdapterTest {
 
         String longBody = "This is a long overlay body that needs truncation for small screens";
         SectionScene scene = new SectionScene("test", SectionLayout.VERTICAL_SCROLL, false, 0, List.of(
-                new SectionEntry(SectionType.OVERLAY, "o1",
+                new SectionEntry("overlay_section", "o1",
                         new SectionData.OverlayData("Alert", longBody, "warning", 0, 5000))
         ));
 

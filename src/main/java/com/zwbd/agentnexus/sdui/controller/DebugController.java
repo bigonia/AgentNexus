@@ -50,7 +50,6 @@ public class DebugController {
     private final DeviceSessionManager sessionManager;
     private final SectionOrchestrationService sectionService;
     private final DebugSectionWorkspaceService debugSectionWorkspaceService;
-    private final SectionEditorService sectionEditorService;
     private final EventStreamService eventStreamService;
     private final CommandResultStreamService commandResultStreamService;
     private final SduiDeviceCommandRepository commandRepository;
@@ -198,13 +197,6 @@ public class DebugController {
         }
     }
 
-    @GetMapping("/{deviceId}/section-editor")
-    public ApiResponse<Map<String, Object>> sectionEditor(@PathVariable String deviceId) {
-        Map<String, Object> editor = new LinkedHashMap<>(sectionEditorService.buildSectionEditor(deviceId));
-        editor.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(editor);
-    }
-
     @PostMapping("/{deviceId}/section/patch")
     public ApiResponse<Map<String, Object>> patchSection(@PathVariable String deviceId,
                                                          @RequestBody Map<String, Object> body) {
@@ -232,18 +224,6 @@ public class DebugController {
         return ApiResponse.ok(state);
     }
 
-    /**
-     * Export the current debug workspace as a state-machine-compatible page state.
-     * Call this after building a page in the section debug editor to get JSON
-     * suitable for pasting into a state machine definition's {@code states} array.
-     */
-    @GetMapping("/{deviceId}/section/state/as-state")
-    public ApiResponse<Map<String, Object>> sectionStateAsStateMachinePage(@PathVariable String deviceId) {
-        Map<String, Object> result = new LinkedHashMap<>(
-                debugSectionWorkspaceService.getStateAsStateMachinePage(deviceId));
-        result.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(result);
-    }
 
     // ── SSE event stream ──
 
@@ -397,10 +377,7 @@ public class DebugController {
 
 
     private Map<String, Object> fieldToMap(FieldSpec field) {
-        return Map.of(
-                "name", field.name(),
-                "type", field.type()
-        );
+        return field.toMap();
     }
 
 }

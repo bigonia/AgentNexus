@@ -332,17 +332,6 @@ public class DeviceController {
         return ApiResponse.ok(result);
     }
 
-    // ── Device types ──
-
-    @GetMapping("/types")
-    public ApiResponse<Map<String, Object>> deviceTypes() {
-        List<Map<String, Object>> types = capabilityRegistry.getDeviceTypesAsList();
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("types", types);
-        result.put("totalCount", types.size());
-        return ApiResponse.ok(result);
-    }
-
     // ── Commands ──
 
     @GetMapping("/{deviceId}/commands")

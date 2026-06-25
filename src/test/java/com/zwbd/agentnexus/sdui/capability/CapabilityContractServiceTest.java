@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceProtocolCatalog;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
+import com.zwbd.agentnexus.sdui.section.SectionTypeCatalog;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.service.CommandSchemaRegistry;
 import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
@@ -11,9 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +34,21 @@ class CapabilityContractServiceTest {
         CapabilityCatalog capabilityCatalog = new CapabilityCatalog();
         ReflectionTestUtils.invokeMethod(capabilityCatalog, "load");
         CapabilityRegistry capabilityRegistry = new CapabilityRegistry(capabilityCatalog);
+        SectionTypeCatalog mockSectionCatalog = mock(SectionTypeCatalog.class);
+        // Only resolve the 12 known section types — unknown types stay unresolved.
+        java.util.Set<String> KNOWN_TYPES = java.util.Set.of(
+                "hero_section", "metric_section", "chart_section", "timer_section",
+                "image_section", "progress_section", "text_section", "overlay_section",
+                "action_section", "list_section", "toggle_section", "nav_section");
+        when(mockSectionCatalog.get(anyString())).thenAnswer(inv -> {
+            String type = inv.getArgument(0);
+            if (KNOWN_TYPES.contains(type)) {
+                return java.util.Optional.of(new SectionTypeCatalog.SectionTypeDef(
+                        type, type, false, List.of(), List.of(), Map.of()));
+            }
+            return java.util.Optional.empty();
+        });
+        when(mockSectionCatalog.fieldsToMaps(anyList())).thenReturn(List.of());
         DeviceProtocolCatalog protocolCatalog = new DeviceProtocolCatalog(capabilityCatalog);
         capabilityService = new SduiCapabilityService(
                 deviceRepository,
@@ -37,7 +56,8 @@ class CapabilityContractServiceTest {
                 schemaRegistry,
                 capabilityRegistry,
                 capabilityCatalog,
-                protocolCatalog
+                protocolCatalog,
+                mockSectionCatalog
         );
         AudioService audioService = mock(AudioService.class);
         PlatformCapabilityRegistry platformCapabilityRegistry = new PlatformCapabilityRegistry(audioService);
@@ -46,7 +66,8 @@ class CapabilityContractServiceTest {
                 capabilityService,
                 capabilityCatalog,
                 platformCapabilityRegistry,
-                capabilityProjection
+                capabilityProjection,
+                mockSectionCatalog
         );
     }
 

@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.workflow.entity;
 
-import com.zwbd.agentnexus.sdui.statemachine.model.StateMachineJsonConverter;
+import com.zwbd.agentnexus.common.web.JsonMapConverter;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -48,11 +48,11 @@ public class NodeWorkflowRunStepEntity {
     @Column(nullable = false, length = 24)
     private String status;
 
-    @Convert(converter = StateMachineJsonConverter.class)
+    @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, Object> inputParams = new LinkedHashMap<>();
 
-    @Convert(converter = StateMachineJsonConverter.class)
+    @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")
     private Map<String, Object> result = new LinkedHashMap<>();
 

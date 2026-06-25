@@ -10,6 +10,12 @@ import java.util.Map;
 @Component
 public class SectionDataCodec {
 
+    private final SectionTypeCatalog catalog;
+
+    public SectionDataCodec(SectionTypeCatalog catalog) {
+        this.catalog = catalog;
+    }
+
     @SuppressWarnings("unchecked")
     public SectionData buildSectionData(String type, Map<String, Object> fields, String sectionId) {
         Map<String, Object> safeFields = normalizeFields(type, fields);
@@ -138,7 +144,7 @@ public class SectionDataCodec {
         if (type == null || type.isBlank()) {
             return fields != null ? new LinkedHashMap<>(fields) : Map.of();
         }
-        SectionTypeCatalog.SectionTypeDef def = SectionTypeCatalog.get(type).orElse(null);
+        SectionTypeCatalog.SectionTypeDef def = catalog.get(type).orElse(null);
         if (def == null) {
             return fields != null ? new LinkedHashMap<>(fields) : Map.of();
         }
@@ -278,7 +284,7 @@ public class SectionDataCodec {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> mergeWithDefaults(List<SectionTypeCatalog.SectionFieldDef> defs, Map<String, Object> rawFields) {
-        Map<String, Object> normalized = new LinkedHashMap<>(SectionTypeCatalog.defaultFieldValues(defs));
+        Map<String, Object> normalized = new LinkedHashMap<>(catalog.defaultFieldValues(defs));
         for (SectionTypeCatalog.SectionFieldDef def : defs) {
             Object rawValue = rawFields.get(def.name());
             if (rawValue == null) {

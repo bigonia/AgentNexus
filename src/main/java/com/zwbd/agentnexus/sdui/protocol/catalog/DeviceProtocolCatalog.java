@@ -15,15 +15,18 @@ public class DeviceProtocolCatalog {
 
     private final CapabilityCatalog capabilityCatalog;
     private final EventRegistry eventRegistry;
+    private final SectionTypeCatalog sectionCatalog;
     private final Map<String, CommandSpec> commands;
     private final Map<String, SectionSpec> sections;
     private final Map<String, EventSpec> events;
 
     @Autowired
     public DeviceProtocolCatalog(CapabilityCatalog capabilityCatalog,
-                                 EventRegistry eventRegistry) {
+                                 EventRegistry eventRegistry,
+                                 SectionTypeCatalog sectionCatalog) {
         this.capabilityCatalog = capabilityCatalog;
         this.eventRegistry = eventRegistry;
+        this.sectionCatalog = sectionCatalog;
         this.commands = Collections.unmodifiableMap(buildCommands());
         this.sections = Collections.unmodifiableMap(buildSections());
         this.events = Collections.unmodifiableMap(buildEvents());
@@ -32,6 +35,7 @@ public class DeviceProtocolCatalog {
     public DeviceProtocolCatalog(CapabilityCatalog capabilityCatalog) {
         this.capabilityCatalog = capabilityCatalog;
         this.eventRegistry = null;
+        this.sectionCatalog = null;
         this.commands = Collections.unmodifiableMap(buildCommands());
         this.sections = Collections.unmodifiableMap(buildSections());
         this.events = Map.of();
@@ -85,7 +89,8 @@ public class DeviceProtocolCatalog {
 
     private Map<String, SectionSpec> buildSections() {
         Map<String, SectionSpec> result = new LinkedHashMap<>();
-        for (SectionTypeCatalog.SectionTypeDef def : SectionTypeCatalog.all().values()) {
+        if (sectionCatalog == null) return result;
+        for (SectionTypeCatalog.SectionTypeDef def : sectionCatalog.all().values()) {
             result.put(def.type(), new SectionSpec(
                     def.type(),
                     toFieldSpecs(def.displayFields()),
@@ -129,7 +134,18 @@ public class DeviceProtocolCatalog {
         List<FieldSpec> specs = new ArrayList<>();
         for (SectionTypeCatalog.SectionFieldDef def : defs) {
             List<FieldSpec> children = def.children() != null ? toFieldSpecs(def.children()) : List.of();
-            specs.add(new FieldSpec(def.name(), normalizeType(def.type()), children));
+            specs.add(new FieldSpec(
+                    def.name(),
+                    normalizeType(def.type()),
+                    def.label(),
+                    def.defaultValue(),
+                    def.min(),
+                    def.max(),
+                    def.options(),
+                    def.description(),
+                    def.required(),
+                    children
+            ));
         }
         return specs;
     }

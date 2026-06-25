@@ -23,13 +23,14 @@ public class SectionOrchestrationService {
     private final SectionDataCodec sectionDataCodec;
     private final List<SectionTriggerHook> hooks = new CopyOnWriteArrayList<>();
 
-    private final Map<String, DeviceSectionState> deviceStates = new ConcurrentHashMap<>();
+    /** deviceId → pageId → SectionPageDefinition */
+    private final Map<String, Map<String, SectionPageDefinition>> pageStatesByDevice = new ConcurrentHashMap<>();
 
     public Map<String, Object> getPageState(String deviceId) {
         return getSectionState(deviceId);
     }
 
-    // ── Scene/Patch sending (existing) ──
+    // ── Scene/Patch sending ──
 
     public void registerHook(SectionTriggerHook hook) {
         hooks.add(hook);
@@ -74,153 +75,87 @@ public class SectionOrchestrationService {
         return sent;
     }
 
+    // ── State query ──
+
     public Map<String, Object> getSectionState(String deviceId) {
-        DeviceSectionState state = deviceStates.get(deviceId);
-        if (state == null) {
-            return Map.of(
-                    "deviceId", deviceId,
-                    "activePageId", null,
-                    "pages", List.of()
-            );
+        Map<String, SectionPageDefinition> devicePages = pageStatesByDevice.get(deviceId);
+        if (devicePages == null || devicePages.isEmpty()) {
+            return emptyState(deviceId);
         }
 
         List<Map<String, Object>> pages = new ArrayList<>();
-        for (PageState page : state.pages.values()) {
-            List<Map<String, Object>> sections = new ArrayList<>();
-            for (SectionState section : page.sections.values()) {
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("sectionId", section.sectionId);
-                entry.put("sectionType", section.sectionType);
-                entry.put("fields", section.fields);
-                entry.put("updatedAt", section.updatedAt);
-                sections.add(entry);
-            }
-
-            Map<String, Object> pageEntry = new LinkedHashMap<>();
-            pageEntry.put("pageId", page.pageId);
-            pageEntry.put("layout", page.layout);
-            pageEntry.put("autoScroll", page.autoScroll);
-            pageEntry.put("autoScrollMs", page.autoScrollMs);
-            pageEntry.put("sections", sections);
-            pageEntry.put("updatedAt", page.updatedAt);
-            pages.add(pageEntry);
+        for (SectionPageDefinition page : devicePages.values()) {
+            pages.add(page.toMap());
         }
 
-        return Map.of(
-                "deviceId", deviceId,
-                "activePageId", state.activePageId,
-                "pages", pages
-        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("activePageId", null);
+        result.put("pages", pages);
+        return result;
     }
 
     public String findSectionType(String deviceId, String pageId, String sectionId) {
-        DeviceSectionState deviceState = deviceStates.get(deviceId);
-        if (deviceState == null) {
-            return null;
-        }
-        PageState pageState = deviceState.pages.get(pageId);
-        if (pageState == null) {
-            return null;
-        }
-        SectionState sectionState = pageState.sections.get(sectionId);
-        return sectionState != null ? sectionState.sectionType : null;
+        Map<String, SectionPageDefinition> devicePages = pageStatesByDevice.get(deviceId);
+        if (devicePages == null) return null;
+        SectionPageDefinition page = devicePages.get(pageId);
+        if (page == null) return null;
+        SectionPageDefinition.SectionDef section = page.sections().get(sectionId);
+        return section != null ? section.sectionType() : null;
     }
 
+    // ── Internal: state remembering ──
+
     private void rememberScene(String deviceId, SectionScene scene) {
-        DeviceSectionState deviceState = deviceStates.computeIfAbsent(deviceId, ignored -> new DeviceSectionState());
-        PageState pageState = new PageState(scene.pageId());
-        pageState.layout = scene.layout().wireName();
-        pageState.autoScroll = scene.autoScroll();
-        pageState.autoScrollMs = scene.autoScrollMs();
-        pageState.updatedAt = System.currentTimeMillis();
-
-        for (SectionEntry entry : scene.sections()) {
-            SectionState sectionState = new SectionState(
-                    entry.sectionId(),
-                    entry.type().wireName(),
-                    new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
-                    System.currentTimeMillis()
-            );
-            pageState.sections.put(sectionState.sectionId, sectionState);
-        }
-
-        deviceState.activePageId = scene.pageId();
-        deviceState.pages.put(scene.pageId(), pageState);
+        SectionPageDefinition page = SectionPageDefinition.fromScene(scene, sectionDataCodec);
+        Map<String, SectionPageDefinition> devicePages = pageStatesByDevice.computeIfAbsent(deviceId, k -> new LinkedHashMap<>());
+        devicePages.put(scene.pageId(), page);
     }
 
     private void rememberPatch(String deviceId, SectionPatch patch) {
-        DeviceSectionState deviceState = deviceStates.computeIfAbsent(deviceId, ignored -> new DeviceSectionState());
-        PageState pageState = deviceState.pages.computeIfAbsent(patch.pageId(), PageState::new);
-        if (deviceState.activePageId == null || deviceState.activePageId.isBlank()) {
-            deviceState.activePageId = patch.pageId();
+        Map<String, SectionPageDefinition> devicePages = pageStatesByDevice.computeIfAbsent(deviceId, k -> new LinkedHashMap<>());
+        SectionPageDefinition page = devicePages.get(patch.pageId());
+        if (page == null) {
+            page = new SectionPageDefinition(patch.pageId());
         }
 
-        long now = System.currentTimeMillis();
+        LinkedHashMap<String, SectionPageDefinition.SectionDef> sections = new LinkedHashMap<>(page.sections());
         for (SectionPatch.PatchEntry entry : patch.patches()) {
             String op = entry.op() != null ? entry.op() : "update";
             switch (op) {
-                case "remove" -> pageState.sections.remove(entry.sectionId());
+                case "remove" -> sections.remove(entry.sectionId());
                 case "add" -> {
-                    if (entry.data() == null || entry.type() == null) {
-                        continue;
-                    }
-                    pageState.sections.put(entry.sectionId(), new SectionState(
-                            entry.sectionId(),
-                            entry.type(),
-                            new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data())),
-                            now
-                    ));
-                }
-                default -> {
-                    if (entry.data() == null) {
-                        continue;
-                    }
+                    if (entry.data() == null || entry.type() == null) continue;
                     Map<String, Object> fields = new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data()));
-                    SectionState existing = pageState.sections.get(entry.sectionId());
+                    sections.put(entry.sectionId(), new SectionPageDefinition.SectionDef(entry.sectionId(), entry.type(), fields));
+                }
+                default -> { // update
+                    if (entry.data() == null) continue;
+                    Map<String, Object> fields = new LinkedHashMap<>(sectionDataCodec.toFieldMap(entry.data()));
+                    SectionPageDefinition.SectionDef existing = sections.get(entry.sectionId());
                     if (existing == null) {
                         String type = entry.type() != null ? entry.type() : "unknown";
-                        pageState.sections.put(entry.sectionId(), new SectionState(entry.sectionId(), type, fields, now));
+                        sections.put(entry.sectionId(), new SectionPageDefinition.SectionDef(entry.sectionId(), type, fields));
                     } else {
-                        existing.fields.putAll(fields);
-                        existing.updatedAt = now;
+                        Map<String, Object> merged = new LinkedHashMap<>(existing.fields());
+                        merged.putAll(fields);
+                        sections.put(entry.sectionId(), new SectionPageDefinition.SectionDef(entry.sectionId(), existing.sectionType(), merged));
                     }
                 }
             }
         }
-        pageState.updatedAt = now;
+        devicePages.put(patch.pageId(), new SectionPageDefinition(page.pageId(), page.layout(), page.autoScroll(), page.autoScrollMs(), sections));
     }
 
-    private static final class DeviceSectionState {
-        private String activePageId;
-        private final Map<String, PageState> pages = new LinkedHashMap<>();
+    private Map<String, Object> emptyState(String deviceId) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("deviceId", deviceId);
+        state.put("activePageId", null);
+        state.put("pages", List.of());
+        return state;
     }
 
-    private static final class PageState {
-        private final String pageId;
-        private String layout = "vertical_scroll";
-        private boolean autoScroll;
-        private int autoScrollMs;
-        private long updatedAt;
-        private final Map<String, SectionState> sections = new LinkedHashMap<>();
-
-        private PageState(String pageId) {
-            this.pageId = pageId;
-        }
-    }
-
-    private static final class SectionState {
-        private final String sectionId;
-        private final String sectionType;
-        private final Map<String, Object> fields;
-        private long updatedAt;
-
-        private SectionState(String sectionId, String sectionType, Map<String, Object> fields, long updatedAt) {
-            this.sectionId = sectionId;
-            this.sectionType = sectionType;
-            this.fields = fields;
-            this.updatedAt = updatedAt;
-        }
-    }
+    // ── Hooks ──
 
     private void notifyHooks(String deviceId, String pageId, SectionTriggerHook.TriggerType type, String json) {
         for (SectionTriggerHook hook : hooks) {
