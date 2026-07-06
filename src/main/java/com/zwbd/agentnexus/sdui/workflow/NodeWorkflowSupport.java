@@ -6,14 +6,14 @@ import com.zwbd.agentnexus.sdui.workflow.model.*;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 final class NodeWorkflowSupport {
 
-    static final Set<String> TRIGGER_NODE_TYPES = Set.of("button.trigger", "section.trigger");
+    /** All node types ending with {@code .trigger} are trigger nodes (button, motion, section, etc.). */
+    static boolean isTriggerNode(String nodeType) {
+        return nodeType != null && nodeType.endsWith(".trigger");
+    }
     static final Set<String> OUTPUT_NODE_TYPES = Set.of("rgb.effect", "audio.play", "audio.record", "ui.update", "display.section");
-    private static final Pattern ANY_REF = Pattern.compile("\\$[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_\\-]+)*");
     static final TypeReference<List<NodeWorkflowSlot>> SLOT_LIST = new TypeReference<>() {};
     static final TypeReference<List<NodeWorkflowNode>> NODE_LIST = new TypeReference<>() {};
     static final TypeReference<List<NodeWorkflowEdge>> EDGE_LIST = new TypeReference<>() {};
@@ -74,11 +74,10 @@ final class NodeWorkflowSupport {
             if (node.nodeId().isBlank()) errors.add("nodeId is required");
             if (!node.nodeId().isBlank() && !nodeIds.add(node.nodeId())) errors.add("duplicate nodeId: " + node.nodeId());
             if (!slotIds.contains(node.slotId())) errors.add("node references unknown slot: " + node.nodeId());
-            if (!TRIGGER_NODE_TYPES.contains(node.nodeType()) && !OUTPUT_NODE_TYPES.contains(node.nodeType())) {
+            if (!isTriggerNode(node.nodeType()) && !OUTPUT_NODE_TYPES.contains(node.nodeType())) {
                 errors.add("unsupported nodeType: " + node.nodeType());
             }
-            errors.addAll(validateReferenceSyntax(node.nodeId(), node.params()));
-            hasTrigger = hasTrigger || TRIGGER_NODE_TYPES.contains(node.nodeType());
+            hasTrigger = hasTrigger || isTriggerNode(node.nodeType());
         }
         if (!hasTrigger) errors.add("at least one trigger node is required");
 
@@ -93,7 +92,7 @@ final class NodeWorkflowSupport {
             }
             NodeWorkflowNode from = nodeById(workflow, edge.from());
             NodeWorkflowNode to = nodeById(workflow, edge.to());
-            if (!TRIGGER_NODE_TYPES.contains(from.nodeType()) && !OUTPUT_NODE_TYPES.contains(from.nodeType())) {
+            if (!isTriggerNode(from.nodeType()) && !OUTPUT_NODE_TYPES.contains(from.nodeType())) {
                 errors.add("edge from node must be trigger or output: " + edge.from());
             }
             if (!OUTPUT_NODE_TYPES.contains(to.nodeType())) errors.add("edge to node must be output: " + edge.to());
@@ -209,6 +208,21 @@ final class NodeWorkflowSupport {
         return expected.endsWith("." + actual) || actual.endsWith("." + expected);
     }
 
+    /**
+     * Match a trigger node's expected nodeId against an event's actual nodeId.
+     * <p>
+     * The {@code :digit} state suffix is already stripped during event normalization
+     * ({@link com.zwbd.agentnexus.sdui.event.EventRegistry#normalizePayload}), so
+     * this method performs a direct comparison.</p>
+     *
+     * @return true if expected is blank (no filter), or expected matches actual nodeId.
+     */
+    static boolean nodeIdMatches(String expected, String actual) {
+        if (expected == null || expected.isBlank()) return true;
+        if (actual == null || actual.isBlank()) return false;
+        return expected.equals(actual);
+    }
+
     static <T> List<T> safeList(List<T> list) {
         return list == null ? List.of() : list;
     }
@@ -249,7 +263,7 @@ final class NodeWorkflowSupport {
     private static List<String> validateOutputReachability(NodeWorkflowDefinition workflow) {
         Set<String> reachable = new LinkedHashSet<>();
         for (NodeWorkflowNode node : workflow.nodes()) {
-            if (TRIGGER_NODE_TYPES.contains(node.nodeType())) {
+            if (isTriggerNode(node.nodeType())) {
                 reachable.addAll(reachableNodeIds(workflow, node.nodeId()));
             }
         }
@@ -279,6 +293,40 @@ final class NodeWorkflowSupport {
         return visited;
     }
 
+    /**
+     * Compute the set of upstream node IDs for every output node in the workflow.
+     * An upstream node is reachable by following edges in reverse from the target.
+     * Trigger nodes themselves are not included — only output nodes have upstreams.
+     */
+    static Map<String, Set<String>> upstreamNodeIds(NodeWorkflowDefinition workflow) {
+        Map<String, List<String>> reverseAdj = new LinkedHashMap<>();
+        for (var node : workflow.nodes()) {
+            reverseAdj.put(node.nodeId(), new ArrayList<>());
+        }
+        for (var edge : workflow.edges()) {
+            reverseAdj.computeIfAbsent(edge.to(), k -> new ArrayList<>()).add(edge.from());
+        }
+        Map<String, Set<String>> upstreamByNode = new LinkedHashMap<>();
+        for (var node : workflow.nodes()) {
+            if (OUTPUT_NODE_TYPES.contains(node.nodeType())) {
+                Set<String> upstream = new LinkedHashSet<>();
+                ArrayDeque<String> queue = new ArrayDeque<>();
+                queue.add(node.nodeId());
+                while (!queue.isEmpty()) {
+                    String current = queue.removeFirst();
+                    for (String prev : reverseAdj.getOrDefault(current, List.of())) {
+                        if (upstream.add(prev)) {
+                            queue.addLast(prev);
+                        }
+                    }
+                }
+                upstream.remove(node.nodeId());
+                upstreamByNode.put(node.nodeId(), upstream);
+            }
+        }
+        return upstreamByNode;
+    }
+
     private static Map<String, List<String>> adjacency(NodeWorkflowDefinition workflow) {
         Map<String, List<String>> adjacency = new LinkedHashMap<>();
         for (NodeWorkflowNode node : workflow.nodes()) {
@@ -299,38 +347,5 @@ final class NodeWorkflowSupport {
             order.put(workflow.nodes().get(i).nodeId(), i);
         }
         return order;
-    }
-
-    private static List<String> validateReferenceSyntax(String nodeId, Object value) {
-        List<String> errors = new ArrayList<>();
-        collectReferenceSyntaxErrors(nodeId, value, errors);
-        return errors;
-    }
-
-    private static void collectReferenceSyntaxErrors(String nodeId, Object value, List<String> errors) {
-        if (value instanceof Map<?, ?> map) {
-            for (Object child : map.values()) {
-                collectReferenceSyntaxErrors(nodeId, child, errors);
-            }
-            return;
-        }
-        if (value instanceof List<?> list) {
-            for (Object child : list) {
-                collectReferenceSyntaxErrors(nodeId, child, errors);
-            }
-            return;
-        }
-        if (!(value instanceof String text) || !text.contains("$")) {
-            return;
-        }
-        int index = text.indexOf('$');
-        while (index >= 0) {
-            Matcher matcher = ANY_REF.matcher(text.substring(index));
-            if (!matcher.lookingAt()) {
-                errors.add("node " + nodeId + " has invalid reference syntax near: " + text.substring(index));
-                return;
-            }
-            index = text.indexOf('$', index + Math.max(1, matcher.end()));
-        }
     }
 }

@@ -6,6 +6,7 @@ import com.zwbd.agentnexus.sdui.protocol.catalog.SectionSpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,7 +21,11 @@ class DebugSectionWorkspaceServiceTest {
     private DeviceCapabilityProjection capabilityProjection;
     private SectionOrchestrationService orchestrationService;
     private SectionTypeCatalog mockCatalog;
+    private PageService mockPageService;
     private DebugSectionWorkspaceService service;
+
+    /** In-memory page store to simulate PageService persistence. */
+    private final Map<String, SduiPageEntity> pageStore = new java.util.concurrent.ConcurrentHashMap<>();
 
     @BeforeEach
     void setUp() {
@@ -29,7 +34,69 @@ class DebugSectionWorkspaceServiceTest {
         mockCatalog = mock(SectionTypeCatalog.class);
         when(mockCatalog.get(anyString())).thenReturn(Optional.empty());
         when(mockCatalog.isValidType(anyString())).thenReturn(true);
-        service = new DebugSectionWorkspaceService(capabilityProjection, new SectionDataCodec(mockCatalog), orchestrationService, mockCatalog);
+        mockPageService = mock(PageService.class);
+
+        // Simulate PageService with an in-memory store (supports all create signatures)
+        when(mockPageService.create(anyString(), anyString(), anyBoolean(), anyInt(), any())).thenAnswer(inv -> {
+            String name = inv.getArgument(0);
+            String layout = inv.getArgument(1);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> sections = inv.getArgument(4);
+            return storePage(SduiPageEntity.generatePageId(), name, layout, sections);
+        });
+        when(mockPageService.create(anyString(), anyString(), anyString(), anyBoolean(), anyInt(), any())).thenAnswer(inv -> {
+            String pageId = inv.getArgument(0);
+            String name = inv.getArgument(1);
+            String layout = inv.getArgument(2);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> sections = inv.getArgument(5);
+            return storePage(pageId, name, layout, sections);
+        });
+        when(mockPageService.findByPageId(anyString())).thenAnswer(inv ->
+                Optional.ofNullable(pageStore.get(inv.getArgument(0))));
+        when(mockPageService.requireByPageId(anyString())).thenAnswer(inv -> {
+            SduiPageEntity page = pageStore.get(inv.getArgument(0));
+            if (page == null) throw new IllegalArgumentException("page not found: " + inv.getArgument(0));
+            return page;
+        });
+        when(mockPageService.toPageDefinition(any())).thenAnswer(inv -> {
+            SduiPageEntity entity = inv.getArgument(0);
+            try {
+                List<Map<String, Object>> sectionList = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(entity.getSectionsJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+                LinkedHashMap<String, SectionPageDefinition.SectionDef> defs = new LinkedHashMap<>();
+                for (Map<String, Object> sec : sectionList) {
+                    String sid = (String) sec.get("sectionId");
+                    String stype = (String) sec.get("sectionType");
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> fields = (Map<String, Object>) sec.getOrDefault("fields", Map.of());
+                    defs.put(sid, new SectionPageDefinition.SectionDef(sid, stype, fields));
+                }
+                return new SectionPageDefinition(entity.getPageId(),
+                        SectionLayout.fromWireName(entity.getLayout()), false, 0, defs);
+            } catch (Exception e) {
+                return new SectionPageDefinition(entity.getPageId(), SectionLayout.VERTICAL_SCROLL, false, 0,
+                        new LinkedHashMap<>());
+            }
+        });
+        doAnswer(inv -> {
+            String pageId = inv.getArgument(0);
+            String name = inv.getArgument(1);
+            String layout = inv.getArgument(2);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> sections = inv.getArgument(5);
+            SduiPageEntity page = pageStore.get(pageId);
+            if (page != null) {
+                page.setName(name);
+                page.setLayout(layout);
+                page.setSectionsJson(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(sections));
+            }
+            return page;
+        }).when(mockPageService).update(anyString(), anyString(), anyString(), anyBoolean(), anyInt(), any());
+        doAnswer(inv -> pageStore.remove(inv.getArgument(0)))
+                .when(mockPageService).delete(anyString());
+
+        service = new DebugSectionWorkspaceService(capabilityProjection, new SectionDataCodec(mockCatalog), orchestrationService, mockCatalog, mockPageService);
 
         when(capabilityProjection.sections("dev-1")).thenReturn(List.of(
                 new SectionSpec(
@@ -78,7 +145,7 @@ class DebugSectionWorkspaceServiceTest {
                 ))
         ));
 
-        assertTrue(String.valueOf(result.get("pageId")).startsWith("debug_page_"));
+        assertEquals("ws_dev-1", result.get("pageId"));
         assertEquals(1, result.get("sectionsBuilt"));
         @SuppressWarnings("unchecked")
         List<String> createdSectionIds = (List<String>) result.get("sectionIds");
@@ -234,5 +301,16 @@ class DebugSectionWorkspaceServiceTest {
 
         assertEquals(true, cleared.get("cleared"));
         assertNull(service.getState("dev-1").get("page"));
+    }
+
+    private SduiPageEntity storePage(String pageId, String name, String layout, List<Map<String, Object>> sections) {
+        SduiPageEntity page = new SduiPageEntity();
+        page.setPageId(pageId);
+        page.setName(name);
+        page.setLayout(layout);
+        try { page.setSectionsJson(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(sections)); }
+        catch (Exception ignored) { page.setSectionsJson("[]"); }
+        pageStore.put(pageId, page);
+        return page;
     }
 }

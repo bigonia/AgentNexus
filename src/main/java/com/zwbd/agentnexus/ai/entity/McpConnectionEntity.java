@@ -23,8 +23,8 @@ public class McpConnectionEntity {
     private String id;
 
     @TenantId
-    @Column(name = "space_id", nullable = false, updatable = false)
-    private String spaceId;
+    @Column(name = "user_id", updatable = false)
+    private String userId;
 
     @Column(name = "name", nullable = false)
     private String name;

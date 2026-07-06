@@ -102,31 +102,32 @@ public class SectionTypeCatalog {
             List<String> options,       // for enum type
             String description,         // tooltip / help text
             boolean required,           // whether the field is mandatory in the editor
+            boolean parameterizable,    // whether this field can be bound as a template variable
             List<SectionFieldDef> children  // for array/object types
     ) {
         // Simple field (string, boolean) with default value
         public SectionFieldDef(String name, String type, String label, Object defaultValue) {
-            this(name, type, label, defaultValue, null, null, null, null, false, null);
+            this(name, type, label, defaultValue, null, null, null, null, false, false, null);
         }
         // Int field with min/max
         public SectionFieldDef(String name, String type, String label, Object defaultValue,
                                Integer min, Integer max) {
-            this(name, type, label, defaultValue, min, max, null, null, false, null);
+            this(name, type, label, defaultValue, min, max, null, null, false, false, null);
         }
         // Enum field
         public static SectionFieldDef enumField(String name, String label, String defaultValue,
                                                  List<String> options) {
-            return new SectionFieldDef(name, "enum", label, defaultValue, null, null, options, null, false, null);
+            return new SectionFieldDef(name, "enum", label, defaultValue, null, null, options, null, false, false, null);
         }
         // Array field
         public static SectionFieldDef arrayField(String name, String label,
                                                   List<SectionFieldDef> children) {
-            return new SectionFieldDef(name, "array", label, null, null, null, null, null, false, children);
+            return new SectionFieldDef(name, "array", label, null, null, null, null, null, false, false, children);
         }
         // Object field
         public static SectionFieldDef objectField(String name, String label,
                                                    List<SectionFieldDef> children) {
-            return new SectionFieldDef(name, "object", label, null, null, null, null, null, false, children);
+            return new SectionFieldDef(name, "object", label, null, null, null, null, null, false, false, children);
         }
     }
 
@@ -276,8 +277,9 @@ public class SectionTypeCatalog {
         List<String> options = "enum".equals(type) ? e.getValues() : null;
         String description = e.getDescription();
         boolean required = e.isRequired();
+        boolean parameterizable = e.isParameterizable();
         List<SectionFieldDef> children = convertFields(e.getChildren());
-        return new SectionFieldDef(e.getName(), type, label, defaultValue, min, max, options, description, required, children);
+        return new SectionFieldDef(e.getName(), type, label, defaultValue, min, max, options, description, required, parameterizable, children);
     }
 
     private List<InteractionEvent> convertInteractionEvents(List<EventCatalogProperties.EventEntry> entries) {
@@ -405,6 +407,7 @@ public class SectionTypeCatalog {
             m.put("type", f.type());
             m.put("label", f.label());
             m.put("required", f.required());
+            m.put("parameterizable", f.parameterizable());
             if (f.defaultValue() != null) m.put("default", f.defaultValue());
             if (f.min() != null) m.put("min", f.min());
             if (f.max() != null) m.put("max", f.max());
@@ -433,6 +436,7 @@ public class SectionTypeCatalog {
             m.put("type", f.type());
             m.put("label", f.label());
             m.put("required", f.required());
+            m.put("parameterizable", f.parameterizable());
             if (f.defaultValue() != null) m.put("default", f.defaultValue());
             if (f.min() != null) m.put("min", f.min());
             if (f.max() != null) m.put("max", f.max());

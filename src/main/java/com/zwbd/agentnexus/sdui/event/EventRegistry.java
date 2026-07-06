@@ -120,15 +120,64 @@ public class EventRegistry {
         return rawEventAliases.getOrDefault(rawEventId, rawEventId);
     }
 
+    /**
+     * Normalize a raw {@link EventPayload} into platform-internal canonical form.
+     *
+     * <p>Three-step normalization:
+     * <ol>
+     *   <li>Resolve {@code eventId} from raw eventName / transport metadata</li>
+     *   <li>Strip {@code :digit} state suffix from {@code nodeId} (firmware convention)</li>
+     *   <li>Extract the suffix value into {@code value} if not already set</li>
+     * </ol>
+     *
+     * After normalization, all downstream code sees clean identifiers and no terminal
+     * protocol artifacts.</p>
+     */
     public EventPayload normalizePayload(EventPayload payload) {
         if (payload == null) {
             return null;
         }
+        // Step 1: resolve eventId
         String resolved = resolvePayloadEventId(payload);
-        if (resolved == null || resolved.equals(payload.eventId())) {
+        if (resolved != null && !resolved.equals(payload.eventId())) {
+            payload = payload.withEventId(resolved);
+        }
+        // Step 2: strip ":digit" suffix from nodeId and extract value
+        payload = normalizeNodeId(payload);
+        return payload;
+    }
+
+    /**
+     * Strip firmware {@code :digit} state suffix from nodeId and promote to value.
+     * <p>
+     * Example: {@code "option_b:1"} → nodeId={@code "option_b"}, value={@code 1}.
+     * If {@code value} is already set (via TLV_VALUE), the suffix is still stripped
+     * from nodeId but the existing value is preserved.</p>
+     */
+    private EventPayload normalizeNodeId(EventPayload payload) {
+        String nodeId = payload.nodeId();
+        if (nodeId == null || nodeId.isBlank()) {
             return payload;
         }
-        return payload.withEventId(resolved);
+        int colon = nodeId.lastIndexOf(':');
+        if (colon < 0 || colon >= nodeId.length() - 1) {
+            return payload;
+        }
+        String suffix = nodeId.substring(colon + 1);
+        if (!suffix.matches("\\d+")) {
+            return payload; // not a digit suffix, e.g. "input:buttons.pwr" — leave as-is
+        }
+        // Strip suffix from nodeId
+        payload = payload.withNodeId(nodeId.substring(0, colon));
+        // Extract value from suffix if not already present
+        if (payload.value() == null) {
+            try {
+                payload = payload.withValue(Integer.parseInt(suffix));
+            } catch (NumberFormatException ignored) {
+                // should not happen (already checked \d+), but be safe
+            }
+        }
+        return payload;
     }
 
     public ValidationResult validatePayload(String eventId, Map<String, Object> payload) {

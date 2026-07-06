@@ -78,14 +78,29 @@ public class CapabilityNodeExecutorService {
         if (hasText(params, "artifact_id")) {
             return playArtifact(deviceId, string(params.get("artifact_id")));
         }
+        if (params.containsKey("artifact_id")) {
+            return skipped(deviceId, "audio.play", "artifact not yet available");
+        }
         if (hasText(params, "audio_file")) {
             return playArtifact(deviceId, string(params.get("audio_file")));
+        }
+        if (params.containsKey("audio_file")) {
+            return skipped(deviceId, "audio.play", "audio file not available");
         }
         if (hasText(params, "text")) {
             return dispatchCommand(deviceId, "audio.tts.speak", Map.of("text", string(params.get("text"))), "audio.play");
         }
         String preset = hasText(params, "preset") ? string(params.get("preset")) : "notification";
         return dispatchCommand(deviceId, "audio.prompt.play", Map.of("preset", preset), "audio.play");
+    }
+
+    private Map<String, Object> skipped(String deviceId, String nodeType, String reason) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("nodeType", nodeType);
+        result.put("status", "skipped");
+        result.put("reason", reason);
+        return result;
     }
 
     private Map<String, Object> executeRgbEffect(String deviceId, Map<String, Object> params) {

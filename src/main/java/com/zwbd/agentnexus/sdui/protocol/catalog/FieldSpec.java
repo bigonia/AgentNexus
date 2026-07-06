@@ -14,21 +14,22 @@ public record FieldSpec(
         List<String> options,
         String description,
         boolean required,
+        boolean parameterizable,
         List<FieldSpec> children
 ) {
     /** Minimal constructor for command params / event payload (name + type only). */
     public FieldSpec(String name, String type) {
-        this(name, type, null, null, null, null, null, null, false, List.of());
+        this(name, type, null, null, null, null, null, null, false, false, List.of());
     }
 
     /** Convenience constructor for simple fields without constraints. */
     public FieldSpec(String name, String type, String label, Object defaultValue) {
-        this(name, type, label, defaultValue, null, null, null, null, false, List.of());
+        this(name, type, label, defaultValue, null, null, null, null, false, false, List.of());
     }
 
     /** Legacy constructor — name + type + children only. */
     public FieldSpec(String name, String type, List<FieldSpec> children) {
-        this(name, type, null, null, null, null, null, null, false, children);
+        this(name, type, null, null, null, null, null, null, false, false, children);
     }
 
     public Map<String, Object> toMap() {
@@ -38,6 +39,7 @@ public record FieldSpec(
         if (label != null) m.put("label", label);
         if (defaultValue != null) m.put("default", defaultValue);
         m.put("required", required);
+        m.put("parameterizable", parameterizable);
         if (min != null) m.put("min", min);
         if (max != null) m.put("max", max);
         if (options != null && !options.isEmpty()) m.put("options", options);

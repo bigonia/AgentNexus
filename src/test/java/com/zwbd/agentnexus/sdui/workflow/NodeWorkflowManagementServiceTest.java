@@ -12,6 +12,8 @@ import com.zwbd.agentnexus.sdui.workflow.model.NodeWorkflowSlot;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDefinitionRepository;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDeploymentRepository;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowRunRepository;
+import com.zwbd.agentnexus.sdui.ui.DevicePrimaryUiEntity;
+import com.zwbd.agentnexus.sdui.ui.repo.DevicePrimaryUiRepository;
 import com.zwbd.agentnexus.sdui.ui.WorkflowUiContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ class NodeWorkflowManagementServiceTest {
     private NodeWorkflowService workflowService;
     private NodeWorkflowDeploymentRepository deploymentRepository;
     private NodeWorkflowRunRepository runRepository;
+    private DevicePrimaryUiRepository primaryUiRepository;
     private DeviceSessionManager sessionManager;
     private NodeWorkflowManagementService service;
 
@@ -36,6 +39,7 @@ class NodeWorkflowManagementServiceTest {
         workflowService = mock(NodeWorkflowService.class);
         deploymentRepository = mock(NodeWorkflowDeploymentRepository.class);
         runRepository = mock(NodeWorkflowRunRepository.class);
+        primaryUiRepository = mock(DevicePrimaryUiRepository.class);
         sessionManager = mock(DeviceSessionManager.class);
         NodeWorkflowDefinitionRepository workflowRepository = mock(NodeWorkflowDefinitionRepository.class);
         NodeWorkflowDeploymentService deploymentService = new NodeWorkflowDeploymentService(
@@ -51,7 +55,8 @@ class NodeWorkflowManagementServiceTest {
                 workflowRepository,
                 deploymentRepository,
                 runRepository,
-                sessionManager
+                sessionManager,
+                primaryUiRepository
         );
     }
 
@@ -79,6 +84,7 @@ class NodeWorkflowManagementServiceTest {
         when(deploymentRepository.findByStatusOrderByDeployedAtDesc("active")).thenReturn(List.of(deployment));
         when(workflowService.requireEntity("wf-1")).thenReturn(workflowEntity("wf-1", "button workflow"));
         when(runRepository.findByDeploymentIdOrderByStartedAtDesc("dep-1")).thenReturn(List.of(failed, passed));
+        when(primaryUiRepository.findByDeploymentId("dep-1")).thenReturn(List.of(primaryUi("dep-1", "dev-b", "target", "main_view")));
         when(sessionManager.isDeviceOnline("dev-a")).thenReturn(true);
         when(sessionManager.isDeviceOnline("dev-b")).thenReturn(true);
 
@@ -89,6 +95,28 @@ class NodeWorkflowManagementServiceTest {
         assertEquals("boom", deployments.get(0).get("lastError"));
         assertEquals(2, deployments.get(0).get("runCount"));
         assertEquals(1L, deployments.get(0).get("failedRunCount"));
+        assertEquals(true, deployments.get(0).get("primaryUi"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> primaryUiDevices = (List<Map<String, Object>>) deployments.get(0).get("primaryUiDevices");
+        assertEquals("dev-b", primaryUiDevices.get(0).get("deviceId"));
+    }
+
+    @Test
+    void deviceDeploymentsMarkPrimaryUiForThatDevice() {
+        NodeWorkflowDeploymentEntity deployment = deployment("dep-1", "wf-1");
+        when(deploymentRepository.findAllByOrderByDeployedAtDesc()).thenReturn(List.of(deployment));
+        when(runRepository.findByDeploymentIdOrderByStartedAtDesc("dep-1")).thenReturn(List.of());
+        when(workflowService.requireEntity("wf-1")).thenReturn(workflowEntity("wf-1", "button workflow"));
+        when(workflowService.workflow("wf-1")).thenReturn(workflow("wf-1"));
+        when(primaryUiRepository.findByDeploymentId("dep-1")).thenReturn(List.of(primaryUi("dep-1", "dev-b", "target", "main_view")));
+        when(primaryUiRepository.findByDeviceId("dev-b")).thenReturn(java.util.Optional.of(primaryUi("dep-1", "dev-b", "target", "main_view")));
+
+        List<Map<String, Object>> deployments = service.deviceDeployments("dev-b");
+
+        assertEquals(1, deployments.size());
+        assertEquals(true, deployments.get(0).get("primaryUi"));
+        assertEquals("target", deployments.get(0).get("primaryUiSlotId"));
+        assertEquals("main_view", deployments.get(0).get("primaryUiTemplateKey"));
     }
 
     private NodeWorkflowDeploymentEntity deployment(String id, String workflowId) {
@@ -112,6 +140,17 @@ class NodeWorkflowManagementServiceTest {
         run.setError(error);
         run.setStartedAt(LocalDateTime.now());
         return run;
+    }
+
+    private DevicePrimaryUiEntity primaryUi(String deploymentId, String deviceId, String slotId, String templateKey) {
+        DevicePrimaryUiEntity primary = new DevicePrimaryUiEntity();
+        primary.setId("primary-" + deviceId);
+        primary.setWorkflowId("wf-1");
+        primary.setDeploymentId(deploymentId);
+        primary.setDeviceId(deviceId);
+        primary.setSlotId(slotId);
+        primary.setTemplateKey(templateKey);
+        return primary;
     }
 
     private NodeWorkflowDefinition workflow(String id) {

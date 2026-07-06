@@ -285,6 +285,7 @@ public class EventCatalogProperties {
         private Object max;
         private List<String> values = List.of();
         private String description;
+        private boolean parameterizable;
         private List<FieldEntry> children = List.of();
 
         public String getName() {
@@ -359,6 +360,14 @@ public class EventCatalogProperties {
 
         public void setDescription(String description) {
             this.description = description;
+        }
+
+        public boolean isParameterizable() {
+            return parameterizable;
+        }
+
+        public void setParameterizable(boolean parameterizable) {
+            this.parameterizable = parameterizable;
         }
 
         public List<FieldEntry> getChildren() {

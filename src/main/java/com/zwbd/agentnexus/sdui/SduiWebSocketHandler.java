@@ -2,6 +2,7 @@ package com.zwbd.agentnexus.sdui;
 
 import com.zwbd.agentnexus.sdui.service.audio.AudioRecordSessionManager;
 import com.zwbd.agentnexus.sdui.service.CommandService;
+import com.zwbd.agentnexus.sdui.ui.DevicePrimaryUiService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -41,6 +42,9 @@ public class SduiWebSocketHandler extends TextWebSocketHandler {
     @Autowired
     private CommandService commandService;
 
+    @Autowired
+    private DevicePrimaryUiService primaryUiService;
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         DeviceIdQueryParam deviceIdParam = extractDeviceIdFromUri(session);
@@ -49,6 +53,7 @@ public class SduiWebSocketHandler extends TextWebSocketHandler {
             sessionManager.registerSession(deviceId, session);
             recordSessionManager.resumeSession(deviceId);
             dispatchDeferredAudioStop(deviceId);
+            restorePrimaryUi(deviceId);
             log.info("WebSocket 连接已建立并绑定设备: session={}, device={}, queryParam={}",
                     session.getId(), deviceId, deviceIdParam.name());
         } else {
@@ -124,6 +129,15 @@ public class SduiWebSocketHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             recordSessionManager.requestStopOnReconnect(deviceId, "deferred_stop_error");
             log.warn("Deferred audio record stop failed after reconnect: device={}, error={}",
+                    deviceId, e.getMessage());
+        }
+    }
+
+    private void restorePrimaryUi(String deviceId) {
+        try {
+            primaryUiService.restorePrimary(deviceId);
+        } catch (Exception e) {
+            log.warn("Failed to restore primary UI after device connect: device={}, error={}",
                     deviceId, e.getMessage());
         }
     }

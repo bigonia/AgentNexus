@@ -32,7 +32,7 @@ public class DeviceLifecycleService {
             SduiDevice d = new SduiDevice();
             d.setDeviceId(deviceId);
             d.setName("device-" + deviceId);
-            d.setOwnerSpaceId("");
+            d.setOwnerUserId("");
             d.setRegistrationStatus("UNCLAIMED");
             return d;
         });
@@ -107,7 +107,7 @@ public class DeviceLifecycleService {
             SduiDevice d = new SduiDevice();
             d.setDeviceId(deviceId);
             d.setName("device-" + deviceId);
-            d.setOwnerSpaceId("");
+            d.setOwnerUserId("");
             d.setRegistrationStatus("UNCLAIMED");
             return d;
         });
@@ -157,7 +157,7 @@ public class DeviceLifecycleService {
     }
 
     private boolean isClaimed(SduiDevice device) {
-        return device.getOwnerSpaceId() != null && !device.getOwnerSpaceId().isBlank();
+        return device.getOwnerUserId() != null && !device.getOwnerUserId().isBlank();
     }
 
     public record SduiHeartbeatData(

@@ -68,9 +68,11 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
                 continue;
             }
             for (NodeWorkflowNode trigger : workflow.nodes()) {
-                if (!NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(trigger.nodeType())) continue;
+                if (!NodeWorkflowSupport.isTriggerNode(trigger.nodeType())) continue;
                 if (!slotId.get().equals(trigger.slotId())) continue;
                 if (!triggerMatches(trigger, payload)) continue;
+                log.info("Node workflow triggered: workflow={}, deployment={}, trigger={}, device={}, eventId={}",
+                        workflow.id(), deployment.getId(), trigger.nodeId(), payload.deviceId(), payload.eventId());
                 execute(workflow, deployment, trigger, eventToMap(payload));
             }
         }
@@ -86,7 +88,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         NodeWorkflowNode trigger = triggerNodeId.isBlank()
                 ? firstTriggerNode(workflow)
                 : NodeWorkflowSupport.nodeById(workflow, triggerNodeId);
-        if (!NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(trigger.nodeType())) {
+        if (!NodeWorkflowSupport.isTriggerNode(trigger.nodeType())) {
             throw new IllegalArgumentException("test trigger node must be a trigger type: " + trigger.nodeId());
         }
         String deviceId = NodeWorkflowSupport.stringMap(deployment.getSlotBindings()).get(trigger.slotId());
@@ -123,7 +125,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         run.setTriggerNodeId(trigger.nodeId());
         run.setTriggerEvent(new LinkedHashMap<>(event));
         run = runRepository.save(run);
-        Map<String, Object> context = contextService.create(run, deployment, workflow, trigger, event);
+        Map<String, Object> context = contextService.create(run);
         run.setContext(context);
         run = runRepository.save(run);
 
@@ -165,7 +167,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         step.setDeviceId(deviceId);
         step.setNodeType(target.nodeType());
         try {
-            Map<String, Object> resolvedParams = parameterResolver.resolveParams(target.params(), context);
+            Map<String, Object> resolvedParams = resolveParams(target, context);
             step.setInputParams(resolvedParams);
             Map<String, Object> result = executorService.execute(deviceId, target.nodeType(), resolvedParams,
                     Map.of(
@@ -181,6 +183,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
             step.setResult(result);
             contextService.putNodeResult(context, run, target, deviceId, result);
             stepRepository.save(step);
+            if ("skipped".equals(stepStatus)) return new StepExecution(true, null);
             if (!"passed".equals(stepStatus)) return new StepExecution(false, "node " + target.nodeId() + " returned " + stepStatus);
             return new StepExecution(true, null);
         } catch (Exception e) {
@@ -192,6 +195,10 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         }
     }
 
+    private Map<String, Object> resolveParams(NodeWorkflowNode target, Map<String, Object> context) {
+        return parameterResolver.resolveParams(target.params(), target.nodeType(), context);
+    }
+
     private boolean triggerMatches(NodeWorkflowNode trigger, EventPayload payload) {
         String expectedEventId = NodeWorkflowSupport.string(trigger.params().get("eventId"));
         String expectedNodeId = NodeWorkflowSupport.string(trigger.params().get("nodeId"));
@@ -199,7 +206,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
         if (!NodeWorkflowSupport.eventMatches(expectedEventId, payload.eventId())) {
             return false;
         }
-        if (!expectedNodeId.isBlank() && !expectedNodeId.equals(payload.nodeId())) {
+        if (!NodeWorkflowSupport.nodeIdMatches(expectedNodeId, payload.nodeId())) {
             return false;
         }
         return expectedSectionId.isBlank() || expectedSectionId.equals(payload.sectionId());
@@ -214,7 +221,7 @@ public class NodeWorkflowRuntimeService implements EventInputHandler.PayloadEven
 
     private NodeWorkflowNode firstTriggerNode(NodeWorkflowDefinition workflow) {
         return workflow.nodes().stream()
-                .filter(node -> NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(node.nodeType()))
+                .filter(node -> NodeWorkflowSupport.isTriggerNode(node.nodeType()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("workflow has no trigger node"));
     }

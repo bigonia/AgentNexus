@@ -191,7 +191,9 @@ public class DebugController {
             return ApiResponse.error(40000, "device is offline");
         }
         try {
-            return ApiResponse.ok(debugSectionWorkspaceService.push(deviceId, body));
+            Map<String, Object> result = debugSectionWorkspaceService.push(deviceId, body);
+            eventStreamService.pushEventCatalog(deviceId);
+            return ApiResponse.ok(result);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(40000, e.getMessage());
         }
@@ -204,7 +206,9 @@ public class DebugController {
             return ApiResponse.error(40000, "device is offline");
         }
         try {
-            return ApiResponse.ok(debugSectionWorkspaceService.patch(deviceId, body));
+            Map<String, Object> result = debugSectionWorkspaceService.patch(deviceId, body);
+            eventStreamService.pushEventCatalog(deviceId);
+            return ApiResponse.ok(result);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(40000, e.getMessage());
         }
@@ -221,9 +225,9 @@ public class DebugController {
     public ApiResponse<Map<String, Object>> clearSectionState(@PathVariable String deviceId) {
         Map<String, Object> state = new LinkedHashMap<>(debugSectionWorkspaceService.clear(deviceId));
         state.put("online", sessionManager.isDeviceOnline(deviceId));
+        eventStreamService.pushEventCatalog(deviceId);
         return ApiResponse.ok(state);
     }
-
 
     // ── SSE event stream ──
 

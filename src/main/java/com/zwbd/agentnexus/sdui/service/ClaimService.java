@@ -15,7 +15,7 @@ public class ClaimService {
     private final SduiDeviceRepository deviceRepository;
 
     @Transactional
-    public SduiDevice claimDevice(String deviceId, String claimCode, String deviceName, String spaceId) {
+    public SduiDevice claimDevice(String deviceId, String claimCode, String deviceName, String userId) {
         SduiDevice device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new IllegalArgumentException("device not found"));
 
@@ -27,12 +27,12 @@ public class ClaimService {
                 && LocalDateTime.now().isAfter(device.getClaimCodeExpireAt())) {
             throw new IllegalArgumentException("claim code expired");
         }
-        if (device.getOwnerSpaceId() != null && !device.getOwnerSpaceId().isBlank()
-                && !spaceId.equals(device.getOwnerSpaceId())) {
-            throw new IllegalArgumentException("device already claimed by another space");
+        if (device.getOwnerUserId() != null && !device.getOwnerUserId().isBlank()
+                && !userId.equals(device.getOwnerUserId())) {
+            throw new IllegalArgumentException("device already claimed by another user");
         }
 
-        device.setOwnerSpaceId(spaceId);
+        device.setOwnerUserId(userId);
         device.setRegistrationStatus("CLAIMED");
         device.setClaimedAt(LocalDateTime.now());
         device.setClaimCode(null);

@@ -4,7 +4,6 @@ import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Per-device single-page manager for debug.
@@ -17,38 +16,49 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DebugSectionWorkspaceService {
 
     private static final String DEFAULT_LAYOUT = "vertical_scroll";
-    private static final String PAGE_ID_PREFIX = "debug_page_";
     private static final String SECTION_ID_PREFIX = "section_";
+    private static final String WORKSPACE_PAGE_PREFIX = "ws_";
 
     private final DeviceCapabilityProjection capabilityProjection;
     private final SectionDataCodec sectionDataCodec;
     private final SectionOrchestrationService orchestrationService;
     private final SectionTypeCatalog sectionTypeCatalog;
-
-    /** deviceId → current page */
-    private final Map<String, SectionPageDefinition> pagesByDevice = new ConcurrentHashMap<>();
+    private final PageService pageService;
 
     public DebugSectionWorkspaceService(DeviceCapabilityProjection capabilityProjection,
                                         SectionDataCodec sectionDataCodec,
                                         SectionOrchestrationService orchestrationService,
-                                        SectionTypeCatalog sectionTypeCatalog) {
+                                        SectionTypeCatalog sectionTypeCatalog,
+                                        PageService pageService) {
         this.capabilityProjection = capabilityProjection;
         this.sectionDataCodec = sectionDataCodec;
         this.orchestrationService = orchestrationService;
         this.sectionTypeCatalog = sectionTypeCatalog;
+        this.pageService = pageService;
+    }
+
+    /** Deterministic workspace pageId for a device. */
+    static String workspacePageId(String deviceId) {
+        return WORKSPACE_PAGE_PREFIX + deviceId;
     }
 
     // ── Push (replaces current page) ──
 
     public Map<String, Object> push(String deviceId, Map<String, Object> body) {
         SectionPageDefinition page = pageDefinitionFromRequest(deviceId, body);
-        pagesByDevice.put(deviceId, page);
-
+        String wsPageId = workspacePageId(deviceId);
+        List<Map<String, Object>> sectionMaps = pageToSectionMaps(page);
+        pageService.findByPageId(wsPageId).ifPresentOrElse(
+                existing -> pageService.update(wsPageId, page.pageId(), page.layout().wireName(),
+                        page.autoScroll(), page.autoScrollMs(), sectionMaps),
+                () -> pageService.create(wsPageId, page.pageId(), page.layout().wireName(),
+                        page.autoScroll(), page.autoScrollMs(), sectionMaps)
+        );
         boolean sent = orchestrationService.sendScene(deviceId, page.toScene(sectionDataCodec));
         return Map.of(
                 "deviceId", deviceId,
                 "sent", sent,
-                "pageId", page.pageId(),
+                "pageId", wsPageId,
                 "layout", page.layout().wireName(),
                 "sectionsBuilt", page.sections().size(),
                 "sectionsRequested", page.sections().size(),
@@ -92,7 +102,10 @@ public class DebugSectionWorkspaceService {
 
         // Build the mutated page
         SectionPageDefinition mutated = applyPatchesToPage(page, mutablePatches, now);
-        pagesByDevice.put(deviceId, mutated);
+        // Persist updated sections
+        String wsPageId = workspacePageId(deviceId);
+        pageService.update(wsPageId, mutated.pageId(), mutated.layout().wireName(),
+                mutated.autoScroll(), mutated.autoScrollMs(), pageToSectionMaps(mutated));
 
         boolean sent = orchestrationService.sendPatch(deviceId, new SectionPatch(mutated.pageId(), patchEntries));
         return Map.of(
@@ -108,15 +121,16 @@ public class DebugSectionWorkspaceService {
     // ── State / Clear ──
 
     public Map<String, Object> getState(String deviceId) {
-        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        SduiPageEntity entity = pageService.findByPageId(workspacePageId(deviceId)).orElse(null);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", deviceId);
-        result.put("page", page != null ? page.toMap() : null);
+        result.put("page", entity != null ? pageService.toPageDefinition(entity).toMap() : null);
         return result;
     }
 
     public Map<String, Object> clear(String deviceId) {
-        pagesByDevice.remove(deviceId);
+        String wsPageId = workspacePageId(deviceId);
+        pageService.findByPageId(wsPageId).ifPresent(p -> pageService.delete(wsPageId));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", deviceId);
         result.put("cleared", true);
@@ -126,15 +140,156 @@ public class DebugSectionWorkspaceService {
     // ── Section type lookup (used by EventStreamService) ──
 
     public String findSectionType(String deviceId, String sectionId) {
-        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        SectionPageDefinition page = loadPage(deviceId);
         if (page == null) return null;
         SectionPageDefinition.SectionDef section = page.sections().get(sectionId);
         return section != null ? section.sectionType() : null;
     }
 
     public String currentPageId(String deviceId) {
-        SectionPageDefinition page = pagesByDevice.get(deviceId);
-        return page != null ? page.pageId() : null;
+        return pageService.findByPageId(workspacePageId(deviceId))
+                .map(SduiPageEntity::getPageId).orElse(null);
+    }
+
+    /**
+     * Resolve a human-readable element label from a section's fields by nodeId.
+     * Used by the SSE event stream to provide user-facing element names.
+     */
+    @SuppressWarnings("unchecked")
+    public Optional<String> resolveElementLabel(String deviceId, String sectionId, String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) return Optional.empty();
+        SectionPageDefinition page = loadPage(deviceId);
+        if (page == null) return Optional.empty();
+        SectionPageDefinition.SectionDef section = page.sections().get(sectionId);
+        if (section == null) return Optional.empty();
+        ChildExtractor extractor = CHILD_EXTRACTORS.get(section.sectionType());
+        if (extractor == null) return Optional.empty();
+        Object arrayRaw = section.fields().get(extractor.arrayField());
+        if (!(arrayRaw instanceof List<?> list)) return Optional.empty();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> itemMap)) continue;
+            Map<String, Object> fields = (Map<String, Object>) itemMap;
+            String id = stringValue(fields.get(extractor.idField()));
+            if (nodeId.equals(id)) {
+                String label = stringValue(fields.get(extractor.labelField()));
+                return label.isBlank() ? Optional.of(id) : Optional.of(label);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Describes how to extract child interactive elements from a section's fields.
+     */
+    private record ChildExtractor(String arrayField, String idField, String labelField) {}
+
+    private static final Map<String, ChildExtractor> CHILD_EXTRACTORS = Map.of(
+            "action_section", new ChildExtractor("actions", "id", "label"),
+            "toggle_section", new ChildExtractor("options", "id", "label"),
+            "list_section",   new ChildExtractor("items",   "id", "title"),
+            "nav_section",    new ChildExtractor("tabs",    "id", "label")
+    );
+
+    /**
+     * Build a page event catalog for the current debug page of a device.
+     * <p>
+     * For sections that contain child interactive elements (buttons, toggles, list
+     * items, nav tabs), each child is expanded into its own event entry carrying
+     * {@code elementId} and {@code elementLabel} so the debug frontend can distinguish
+     * which specific element fired an event.
+     */
+    public List<Map<String, Object>> buildPageEventCatalog(String deviceId) {
+        SectionPageDefinition page = loadPage(deviceId);
+        if (page == null) return List.of();
+
+        String pageId = page.pageId();
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (var entry : page.sections().entrySet()) {
+            String sectionId = entry.getKey();
+            String sectionType = entry.getValue().sectionType();
+            SectionTypeCatalog.SectionTypeDef def = sectionTypeCatalog.get(sectionType).orElse(null);
+            if (def == null || !def.interactive()) continue;
+
+            ChildExtractor extractor = CHILD_EXTRACTORS.get(sectionType);
+            if (extractor != null) {
+                // Has child elements — expand each element with its own entry
+                events.addAll(expandChildEvents(
+                        sectionId, sectionType, def, extractor, entry.getValue().fields()));
+            } else {
+                // No child elements (e.g. overlay_section) — section-level entry
+                for (SectionTypeCatalog.InteractionEvent evt : def.interactionEvents()) {
+                    events.add(sectionEventEntry(sectionId, sectionType, def.displayName(), evt));
+                }
+            }
+        }
+
+        // Attach page context
+        Map<String, Object> wrapper = new LinkedHashMap<>();
+        wrapper.put("pageId", pageId);
+        wrapper.put("events", events);
+        return List.of(wrapper); // single page for debug (consistent with getState)
+    }
+
+    /** Build a section-level event entry (no child elements). */
+    private static Map<String, Object> sectionEventEntry(String sectionId, String sectionType,
+                                                          String sectionDisplayName,
+                                                          SectionTypeCatalog.InteractionEvent evt) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("sectionId", sectionId);
+        info.put("sectionType", sectionType);
+        info.put("sectionDisplayName", sectionDisplayName);
+        info.put("eventId", evt.eventId());
+        return info;
+    }
+
+    /** Expand child elements from section fields into individual event entries. */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> expandChildEvents(
+            String sectionId, String sectionType, SectionTypeCatalog.SectionTypeDef def,
+            ChildExtractor extractor, Map<String, Object> sectionFields) {
+
+        Object arrayRaw = sectionFields.get(extractor.arrayField());
+        if (!(arrayRaw instanceof List<?> list) || list.isEmpty()) {
+            // Fallback: no child data, emit section-level entry
+            List<Map<String, Object>> fallback = new ArrayList<>();
+            for (SectionTypeCatalog.InteractionEvent evt : def.interactionEvents()) {
+                fallback.add(sectionEventEntry(sectionId, sectionType, def.displayName(), evt));
+            }
+            return fallback;
+        }
+
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> itemMap)) continue;
+            Map<String, Object> fields = (Map<String, Object>) itemMap;
+
+            String elementId = string(fields.get(extractor.idField()));
+            if (elementId.isBlank()) continue;
+
+            String elementLabel = string(fields.get(extractor.labelField()));
+            if (elementLabel.isBlank()) elementLabel = elementId;
+
+            for (SectionTypeCatalog.InteractionEvent evt : def.interactionEvents()) {
+                Map<String, Object> info = new LinkedHashMap<>();
+                info.put("sectionId", sectionId);
+                info.put("sectionType", sectionType);
+                info.put("sectionDisplayName", def.displayName());
+                info.put("elementId", elementId);
+                info.put("elementLabel", elementLabel);
+                info.put("eventId", evt.eventId());
+                events.add(info);
+            }
+        }
+        return events;
+    }
+
+    /**
+     * Build a flat list of expected events with page context, suitable for SSE push.
+     */
+    public Map<String, Object> buildPageEventCatalogMap(String deviceId) {
+        List<Map<String, Object>> catalogs = buildPageEventCatalog(deviceId);
+        if (catalogs.isEmpty()) return Map.of("pageId", "", "events", List.of());
+        return catalogs.get(0);
     }
 
     // ── Internal: page construction ──
@@ -149,7 +304,7 @@ public class DebugSectionWorkspaceService {
 
         String pageId = stringValue(body.get("pageId"));
         if (pageId.isBlank()) {
-            pageId = nextPageId();
+            pageId = workspacePageId(deviceId);
         }
         String layoutName = stringValue(body.getOrDefault("layout", DEFAULT_LAYOUT));
         boolean autoScroll = Boolean.TRUE.equals(body.get("autoScroll"));
@@ -199,11 +354,29 @@ public class DebugSectionWorkspaceService {
     // ── Internal: patch application ──
 
     private SectionPageDefinition requirePage(String deviceId) {
-        SectionPageDefinition page = pagesByDevice.get(deviceId);
+        SectionPageDefinition page = loadPage(deviceId);
         if (page == null) {
             throw new IllegalArgumentException("no page found for device: " + deviceId + ". Push a page first.");
         }
         return page;
+    }
+
+    private SectionPageDefinition loadPage(String deviceId) {
+        return pageService.findByPageId(workspacePageId(deviceId))
+                .map(pageService::toPageDefinition)
+                .orElse(null);
+    }
+
+    private List<Map<String, Object>> pageToSectionMaps(SectionPageDefinition page) {
+        List<Map<String, Object>> sections = new ArrayList<>();
+        for (var entry : page.sections().entrySet()) {
+            sections.add(Map.of(
+                    "sectionId", entry.getValue().sectionId(),
+                    "sectionType", entry.getValue().sectionType(),
+                    "fields", entry.getValue().fields()
+            ));
+        }
+        return sections;
     }
 
     private SectionPatch.PatchEntry applySinglePatch(String deviceId, SectionPageDefinition page,
@@ -329,8 +502,8 @@ public class DebugSectionWorkspaceService {
         return value instanceof String s ? s : value != null ? String.valueOf(value) : "";
     }
 
-    private String nextPageId() {
-        return PAGE_ID_PREFIX + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    private static String string(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String nextSectionId(Set<String> existingIds) {

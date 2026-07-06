@@ -9,6 +9,8 @@ import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.section.SectionEditorService;
+import com.zwbd.agentnexus.sdui.section.SectionTriggerCatalog;
+import com.zwbd.agentnexus.sdui.section.SectionTriggerCatalogService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +42,7 @@ public class BoardTypeController {
     private final EventRegistry eventRegistry;
     private final DeviceSessionManager sessionManager;
     private final CapabilityNodeCatalogService nodeCatalogService;
+    private final SectionTriggerCatalogService sectionTriggerCatalogService;
 
     // ── List all boards ──
 
@@ -144,10 +147,13 @@ public class BoardTypeController {
     }
 
     @GetMapping("/{board}/capability-nodes")
-    public ApiResponse<Map<String, Object>> capabilityNodesByBoard(@PathVariable String board) {
+    public ApiResponse<Map<String, Object>> capabilityNodesByBoard(
+            @PathVariable String board,
+            @RequestParam(required = false) String pageId,
+            @RequestParam(required = false) String pageJson) {
         return resolveExampleDevice(board, (deviceId) -> {
             CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-            CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId);
+            CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId, pageId, pageJson);
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("board", board);
             data.put("label", boardInfo != null ? boardInfo.label() : null);
@@ -158,6 +164,52 @@ public class BoardTypeController {
             data.put("unresolvedNodes", catalog.unresolvedNodes());
             return ApiResponse.ok(data);
         });
+    }
+
+    /**
+     * Section Trigger Catalog — a three-level tree for configuring section.trigger
+     * workflow nodes.  Returns all interactive sections on a page with their
+     * child interactive elements (buttons, toggles, list items, nav tabs) and
+     * the events each element can fire.
+     *
+     * <p>Unlike {@code /capability-nodes} (which returns flat workflow-graph nodes),
+     * this endpoint provides the configuration-panel data: which Section → which
+     * element → which event the user wants to trigger on.
+     */
+    @GetMapping("/{board}/section-triggers")
+    public ApiResponse<SectionTriggerCatalog> sectionTriggersByBoard(
+            @PathVariable String board,
+            @RequestParam(required = false) String pageId,
+            @RequestParam(required = false) String pageJson) {
+
+        CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
+        if (boardInfo == null) {
+            return ApiResponse.error(40400, "board not found: " + board);
+        }
+
+        // Prefer an online device, fall back to any example device
+        String deviceId = boardInfo.exampleDeviceIds().stream()
+                .filter(sessionManager::isDeviceOnline)
+                .findFirst()
+                .orElseGet(() -> boardInfo.exampleDeviceIds().isEmpty()
+                        ? null : boardInfo.exampleDeviceIds().get(0));
+
+        if (deviceId == null) {
+            return ApiResponse.error(40400,
+                    "no example device available for board: " + board
+                    + ". Wait for a device of this board to connect.");
+        }
+
+        boolean online = sessionManager.isDeviceOnline(deviceId);
+        SectionTriggerCatalog catalog;
+        if (pageId != null && !pageId.isBlank()) {
+            catalog = sectionTriggerCatalogService.buildForPage(deviceId, board, online, pageId);
+        } else if (pageJson != null && !pageJson.isBlank()) {
+            catalog = sectionTriggerCatalogService.buildFromPageJson(deviceId, board, online, pageId, pageJson);
+        } else {
+            catalog = new SectionTriggerCatalog(null, deviceId, board, online, List.of());
+        }
+        return ApiResponse.ok(catalog);
     }
 
     // ── Internal ──

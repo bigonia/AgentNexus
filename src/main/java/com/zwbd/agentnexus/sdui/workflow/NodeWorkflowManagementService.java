@@ -9,6 +9,8 @@ import com.zwbd.agentnexus.sdui.workflow.model.NodeWorkflowNode;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDefinitionRepository;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDeploymentRepository;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowRunRepository;
+import com.zwbd.agentnexus.sdui.ui.DevicePrimaryUiEntity;
+import com.zwbd.agentnexus.sdui.ui.repo.DevicePrimaryUiRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -23,19 +25,22 @@ public class NodeWorkflowManagementService {
     private final NodeWorkflowDeploymentRepository deploymentRepository;
     private final NodeWorkflowRunRepository runRepository;
     private final DeviceSessionManager sessionManager;
+    private final DevicePrimaryUiRepository primaryUiRepository;
 
     public NodeWorkflowManagementService(NodeWorkflowService workflowService,
                                          NodeWorkflowDeploymentService deploymentService,
                                          NodeWorkflowDefinitionRepository workflowRepository,
                                          NodeWorkflowDeploymentRepository deploymentRepository,
                                          NodeWorkflowRunRepository runRepository,
-                                         DeviceSessionManager sessionManager) {
+                                         DeviceSessionManager sessionManager,
+                                         DevicePrimaryUiRepository primaryUiRepository) {
         this.workflowService = workflowService;
         this.deploymentService = deploymentService;
         this.workflowRepository = workflowRepository;
         this.deploymentRepository = deploymentRepository;
         this.runRepository = runRepository;
         this.sessionManager = sessionManager;
+        this.primaryUiRepository = primaryUiRepository;
     }
 
     public Map<String, Object> overview() {
@@ -82,6 +87,16 @@ public class NodeWorkflowManagementService {
             summary.put("deviceId", deviceId);
             summary.put("slotIds", slotIds);
             summary.put("nodes", nodesForSlots(deployment, slotIds));
+            primaryUiRepository.findByDeviceId(deviceId)
+                    .filter(primary -> deployment.getId().equals(primary.getDeploymentId()))
+                    .ifPresentOrElse(
+                            primary -> {
+                                summary.put("primaryUi", true);
+                                summary.put("primaryUiSlotId", primary.getSlotId());
+                                summary.put("primaryUiTemplateKey", primary.getTemplateKey());
+                            },
+                            () -> summary.put("primaryUi", false)
+                    );
             result.add(summary);
         }
         return result;
@@ -153,6 +168,65 @@ public class NodeWorkflowManagementService {
         data.put("lastError", lastRun != null ? lastRun.getError() : null);
         data.put("runCount", runs.size());
         data.put("failedRunCount", failedRunCount);
+        data.putAll(primaryUiSummary(deployment));
+        data.put("devices", deploymentDevices(deployment));
+        return data;
+    }
+
+    private List<Map<String, Object>> deploymentDevices(NodeWorkflowDeploymentEntity deployment) {
+        Map<String, List<String>> slotsByDevice = new LinkedHashMap<>();
+        NodeWorkflowSupport.stringMap(deployment.getSlotBindings()).forEach((slotId, deviceId) ->
+                slotsByDevice.computeIfAbsent(deviceId, ignored -> new ArrayList<>()).add(slotId));
+        Map<String, DevicePrimaryUiEntity> primaryByDevice = primaryUiRepository.findByDeploymentId(deployment.getId()).stream()
+                .collect(Collectors.toMap(DevicePrimaryUiEntity::getDeviceId, primary -> primary, (left, right) -> left, LinkedHashMap::new));
+        Set<String> devicesWithUi = devicesWithUi(deployment);
+
+        List<Map<String, Object>> devices = new ArrayList<>();
+        for (var entry : slotsByDevice.entrySet()) {
+            String deviceId = entry.getKey();
+            DevicePrimaryUiEntity primary = primaryByDevice.get(deviceId);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("deviceId", deviceId);
+            item.put("online", sessionManager.isDeviceOnline(deviceId));
+            item.put("hasUi", devicesWithUi.contains(deviceId) || primary != null);
+            item.put("primaryUi", primary != null);
+            if (primary != null) {
+                item.put("primaryUiTemplateKey", primary.getTemplateKey());
+            }
+            devices.add(item);
+        }
+        return devices;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> devicesWithUi(NodeWorkflowDeploymentEntity deployment) {
+        Set<String> result = new LinkedHashSet<>();
+        for (Map<String, Object> context : deploymentService.toMap(deployment).get("uiContexts") instanceof List<?> list
+                ? list.stream().filter(Map.class::isInstance).map(item -> (Map<String, Object>) item).toList()
+                : List.<Map<String, Object>>of()) {
+            String deviceId = String.valueOf(context.getOrDefault("deviceId", ""));
+            if (deviceId.isBlank()) continue;
+            result.add(deviceId);
+        }
+        return result;
+    }
+
+    private Map<String, Object> primaryUiSummary(NodeWorkflowDeploymentEntity deployment) {
+        List<DevicePrimaryUiEntity> primaryUis = primaryUiRepository.findByDeploymentId(deployment.getId());
+        List<Map<String, Object>> devices = primaryUis.stream()
+                .map(primary -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("deviceId", primary.getDeviceId());
+                    item.put("slotId", primary.getSlotId());
+                    item.put("templateKey", primary.getTemplateKey());
+                    item.put("configuredAt", primary.getCreatedAt() != null ? primary.getCreatedAt().toString() : null);
+                    item.put("updatedAt", primary.getUpdatedAt() != null ? primary.getUpdatedAt().toString() : null);
+                    return item;
+                })
+                .toList();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("primaryUi", !devices.isEmpty());
+        data.put("primaryUiDevices", devices);
         return data;
     }
 
@@ -166,7 +240,7 @@ public class NodeWorkflowManagementService {
                         item.put("nodeId", node.nodeId());
                         item.put("nodeType", node.nodeType());
                         item.put("slotId", node.slotId());
-                        item.put("role", NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(node.nodeType()) ? "trigger" : "action");
+                        item.put("role", NodeWorkflowSupport.isTriggerNode(node.nodeType()) ? "trigger" : "action");
                         item.put("params", node.params());
                         return item;
                     })

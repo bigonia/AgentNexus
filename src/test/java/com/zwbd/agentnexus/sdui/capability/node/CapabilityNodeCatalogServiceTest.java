@@ -75,8 +75,7 @@ class CapabilityNodeCatalogServiceTest {
                 capabilityService,
                 contractService,
                 capabilityCatalog,
-                sessionManager,
-                mockSectionCatalog
+                sessionManager
         );
     }
 
@@ -113,8 +112,8 @@ class CapabilityNodeCatalogServiceTest {
 
         CapabilityNodeDefinition audioRecord = node(catalog, "audio.record");
         assertEquals(CapabilityNodeRuntimeMode.SESSION, audioRecord.runtimeMode());
-        assertTrue(audioRecord.artifacts().stream().anyMatch(a -> "audio_file".equals(a.name())));
-        assertTrue(audioRecord.artifacts().stream().anyMatch(a -> "text".equals(a.name())));
+        assertTrue(audioRecord.artifacts().stream().anyMatch(a -> "audioResourceId".equals(a.name())));
+        assertTrue(audioRecord.artifacts().stream().anyMatch(a -> "sttText".equals(a.name())));
 
         CapabilityNodeDefinition rgb = node(catalog, "rgb.effect");
         assertTrue(rgb.parameters().stream().anyMatch(p -> "off".equals(p.get("name"))));

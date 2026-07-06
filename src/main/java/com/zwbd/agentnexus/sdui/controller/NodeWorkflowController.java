@@ -7,6 +7,7 @@ import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowManagementService;
 import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowRuntimeService;
 import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowService;
 import com.zwbd.agentnexus.sdui.workflow.model.NodeWorkflowDefinition;
+import com.zwbd.agentnexus.sdui.ui.DevicePrimaryUiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +24,7 @@ public class NodeWorkflowController {
     private final NodeWorkflowRuntimeService runtimeService;
     private final NodeWorkflowManagementService managementService;
     private final SduiArtifactService artifactService;
+    private final DevicePrimaryUiService primaryUiService;
 
     @PostMapping
     public ApiResponse<Map<String, Object>> create(@RequestBody NodeWorkflowDefinition definition) {
@@ -85,6 +87,37 @@ public class NodeWorkflowController {
     @GetMapping("/management/devices/{deviceId}/deployments")
     public ApiResponse<List<Map<String, Object>>> managementDeviceDeployments(@PathVariable String deviceId) {
         return ApiResponse.ok(managementService.deviceDeployments(deviceId));
+    }
+
+    @PostMapping("/management/devices/{deviceId}/primary-ui")
+    public ApiResponse<Map<String, Object>> setDevicePrimaryUi(@PathVariable String deviceId,
+                                                               @RequestBody Map<String, Object> body) {
+        try {
+            return ApiResponse.ok(primaryUiService.setPrimary(deviceId, body));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(40000, e.getMessage());
+        }
+    }
+
+    @GetMapping("/management/devices/{deviceId}/primary-ui")
+    public ApiResponse<Map<String, Object>> getDevicePrimaryUi(@PathVariable String deviceId) {
+        return ApiResponse.ok(primaryUiService.getPrimary(deviceId));
+    }
+
+    @DeleteMapping("/management/devices/{deviceId}/primary-ui")
+    public ApiResponse<Map<String, Object>> clearDevicePrimaryUi(@PathVariable String deviceId) {
+        return ApiResponse.ok(primaryUiService.clearPrimary(deviceId));
+    }
+
+    @PostMapping("/management/deployments/{deploymentId}/devices/{deviceId}/primary-ui")
+    public ApiResponse<Map<String, Object>> setDeploymentAsDevicePrimaryUi(@PathVariable String deploymentId,
+                                                                           @PathVariable String deviceId,
+                                                                           @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            return ApiResponse.ok(primaryUiService.setPrimaryForDeployment(deploymentId, deviceId, body != null ? body : Map.of()));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(40000, e.getMessage());
+        }
     }
 
     @GetMapping("/management/conflicts")

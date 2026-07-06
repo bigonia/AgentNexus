@@ -62,7 +62,7 @@ public class HeartbeatHandler implements TopicHandler {
         SduiDevice device = deviceService.onHeartbeat(deviceId, payload);
         if (justConnected) {
             log.info("Device connected. deviceId={}, registrationStatus={}, spaceId={}",
-                    deviceId, device.getRegistrationStatus(), device.getOwnerSpaceId());
+                    deviceId, device.getRegistrationStatus(), device.getOwnerUserId());
         }
         if (!justConnected) {
             return;

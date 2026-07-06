@@ -259,7 +259,7 @@ public class NodeWorkflowDeploymentService {
         Map<String, String> bindings = NodeWorkflowSupport.stringMap(deployment.getSlotBindings());
         List<TriggerBinding> result = new ArrayList<>();
         for (NodeWorkflowNode node : workflow.nodes()) {
-            if (!NodeWorkflowSupport.TRIGGER_NODE_TYPES.contains(node.nodeType())) continue;
+            if (!NodeWorkflowSupport.isTriggerNode(node.nodeType())) continue;
             String deviceId = bindings.get(node.slotId());
             if (deviceId == null || deviceId.isBlank()) continue;
             result.add(new TriggerBinding(

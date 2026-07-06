@@ -19,6 +19,9 @@ inputs:
       - {name: event, type: string, required: true, description: "事件类型 (short_press / long_press)"}
       - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
       - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+    artifacts:
+      - {name: event, type: string, displayName: "触发事件"}
+      - {name: toggleState, type: boolean, displayName: "开关状态"}
 
   buttons.plus:
     protocol: ui3_binary
@@ -35,6 +38,9 @@ inputs:
       - {name: event, type: string, required: true, description: "事件类型 (short_press / long_press)"}
       - {name: kind, type: int, required: true, description: "事件类型编码 (4=BUTTON)"}
       - {name: ts, type: int, required: false, description: "事件时间戳(ms)"}
+    artifacts:
+      - {name: event, type: string, displayName: "触发事件"}
+      - {name: toggleState, type: boolean, displayName: "开关状态"}
 
   audio.record:
     protocol: json_topic
@@ -68,6 +74,10 @@ inputs:
       - {name: bitsPerSample, type: int, required: false, description: "位深，默认 16"}
       - {name: format, type: string, required: false, description: "PCM 格式 (pcm_s16le)"}
       - {name: text, type: string, required: false, description: "语音识别转录文本"}
+    artifacts:
+      - {name: audioResourceId, type: string, displayName: "音频资源ID"}
+      - {name: sttText, type: string, displayName: "转写文本"}
+      - {name: durationMs, type: int, displayName: "音频时长"}
 
   motion:
     protocol: ui3_binary
@@ -185,6 +195,10 @@ outputs:
   rgb.effect:
     displayName: "RGB 灯光"
     description: "设备 RGB LED 灯光效果控制"
+    artifacts:
+      - {name: enabled, type: boolean, displayName: "灯光状态"}
+      - {name: color, type: string, displayName: "颜色"}
+      - {name: mode, type: string, displayName: "效果模式"}
     commands:
       rgb.effect.set:
         topic: cmd/control

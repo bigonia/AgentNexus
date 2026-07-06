@@ -455,7 +455,7 @@ function renderParamPanel(node, index) {
             <div class="param-row single">
                 <label>事件</label>
                 <select data-button-node="${index}" data-button-part="event">
-                    ${buttonEventOptions(node, selection.buttonId, selection.eventName)}
+                    ${buttonEventOptions(node, selection.buttonId, selection.eventId)}
                 </select>
             </div>
             <div class="param-row single">
@@ -627,6 +627,7 @@ function buttonSelection(node) {
     const fromEvent = parseButtonEventId(params.eventId || '');
     return {
         buttonId: params.nodeId || fromEvent.buttonId || 'pwr',
+        eventId: params.eventId || '',
         eventName: fromEvent.eventName || 'short_press'
     };
 }
@@ -643,8 +644,11 @@ function buttonEventOptions(node, buttonId, selected = '') {
     const buttons = buttonCapabilities(node);
     const button = buttons.find(item => item.buttonId === buttonId) || buttons[0];
     if (!button) return '<option value="">当前按钮无事件</option>';
-    return (button.events || fallbackButtonEvents(button.buttonId)).map(event =>
-            `<option value="${esc(event.eventName)}" ${event.eventName === selected ? 'selected' : ''}>${esc(event.displayName || event.eventName)}</option>`
+    return (button.events || fallbackButtonEvents(button.buttonId)).map(event => {
+        const eventId = buttonEventId(button.buttonId, event);
+        const isSelected = eventId === selected || event.eventName === selected;
+        return `<option value="${esc(eventId)}" ${isSelected ? 'selected' : ''}>${esc(event.displayName || event.eventName || eventId)}</option>`;
+    }
     ).join('');
 }
 
@@ -696,6 +700,10 @@ function fallbackButtonEvents(buttonId) {
         { eventId: `input:buttons.${buttonId}.short_press`, eventName: 'short_press', displayName: '短按' },
         { eventId: `input:buttons.${buttonId}.long_press`, eventName: 'long_press', displayName: '长按' }
     ];
+}
+
+function buttonEventId(buttonId, event) {
+    return event.eventId || `input:buttons.${buttonId}.${event.eventName}`;
 }
 
 function renderCapabilityWarning(node) {
@@ -787,14 +795,17 @@ function updateButtonParam(target) {
     const node = state.nodes[index];
     const selection = buttonSelection(node);
     if (target.dataset.buttonPart === 'button') selection.buttonId = target.value;
-    if (target.dataset.buttonPart === 'event') selection.eventName = target.value;
+    if (target.dataset.buttonPart === 'event') selection.eventId = target.value;
     const capabilities = buttonCapabilities(node);
     const button = capabilities.find(item => item.buttonId === selection.buttonId) || capabilities[0] || fallbackButtons()[0];
-    const event = (button.events || []).find(item => item.eventName === selection.eventName) || button.events?.[0] || fallbackButtonEvents(button.buttonId)[0];
+    const events = button.events?.length ? button.events : fallbackButtonEvents(button.buttonId);
+    const event = events.find(item => buttonEventId(button.buttonId, item) === selection.eventId)
+            || events.find(item => item.eventName === selection.eventName)
+            || events[0];
     node.params = {
         ...(node.params || {}),
         nodeId: button.buttonId,
-        eventId: event.eventId || `input:buttons.${button.buttonId}.${event.eventName}`
+        eventId: buttonEventId(button.buttonId, event)
     };
     render();
 }
@@ -802,33 +813,33 @@ function updateButtonParam(target) {
 function bindDynamicEdits() {
     document.addEventListener('input', (e) => {
         const target = e.target;
-        if (target.dataset.slot) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
-        if (target.dataset.node) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
-        if (target.dataset.edge) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
-        if (target.dataset.paramNode) updateParam(target);
+        if ('slot' in target.dataset) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
+        if ('node' in target.dataset) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
+        if ('edge' in target.dataset) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
+        if ('paramNode' in target.dataset) updateParam(target);
         syncJson();
     });
     document.addEventListener('change', (e) => {
         const target = e.target;
-        if (target.dataset.slot) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
-        if (target.dataset.node) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
-        if (target.dataset.edge) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
-        if (target.dataset.paramNode) updateParam(target);
-        if (target.dataset.paramModeNode) updateParamMode(target);
-        if (target.dataset.audioSourceNode) updateAudioSource(target);
-        if (target.dataset.uiOperationNode) updateUiOperation(target);
-        if (target.dataset.uiVarNode) updateUiVariableParam(target);
-        if (target.dataset.buttonNode) updateButtonParam(target);
-        if (target.dataset.slot && target.dataset.key === 'deviceId') {
+        if ('slot' in target.dataset) state.slots[Number(target.dataset.slot)][target.dataset.key] = target.value;
+        if ('node' in target.dataset) updateNode(Number(target.dataset.node), target.dataset.key, target.value);
+        if ('edge' in target.dataset) state.edges[Number(target.dataset.edge)][target.dataset.key] = target.value;
+        if ('paramNode' in target.dataset) updateParam(target);
+        if ('paramModeNode' in target.dataset) updateParamMode(target);
+        if ('audioSourceNode' in target.dataset) updateAudioSource(target);
+        if ('uiOperationNode' in target.dataset) updateUiOperation(target);
+        if ('uiVarNode' in target.dataset) updateUiVariableParam(target);
+        if ('buttonNode' in target.dataset) updateButtonParam(target);
+        if ('slot' in target.dataset && target.dataset.key === 'deviceId') {
             ensureCatalog(target.value).then(render).catch(err => setStatus(err.message, 'bad'));
         }
         syncJson();
     });
     document.addEventListener('click', (e) => {
         const target = e.target;
-        if (target.dataset.removeSlot) { state.slots.splice(Number(target.dataset.removeSlot), 1); render(); }
-        if (target.dataset.removeNode) { state.nodes.splice(Number(target.dataset.removeNode), 1); render(); }
-        if (target.dataset.removeEdge) { state.edges.splice(Number(target.dataset.removeEdge), 1); render(); }
+        if ('removeSlot' in target.dataset) { state.slots.splice(Number(target.dataset.removeSlot), 1); render(); }
+        if ('removeNode' in target.dataset) { state.nodes.splice(Number(target.dataset.removeNode), 1); render(); }
+        if ('removeEdge' in target.dataset) { state.edges.splice(Number(target.dataset.removeEdge), 1); render(); }
     });
 }
 

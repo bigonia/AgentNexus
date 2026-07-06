@@ -21,18 +21,22 @@ import java.util.Map;
 public class MessageRouter {
 
     private static final String SPACE_ID_QUERY_PARAM = "spaceId";
+    private static final String[] DEVICE_ID_QUERY_PARAMS = {"deviceId", "deviceid", "device_id"};
 
     private final ObjectMapper objectMapper;
     private final SduiDeviceRepository deviceRepository;
+    private final DeviceSessionManager sessionManager;
     private final List<TopicHandler> handlers;
     private final List<BinaryFrameHandler> binaryHandlers;
     private final Map<String, TopicHandler> handlerMap = new HashMap<>();
     private final Map<Integer, BinaryFrameHandler> binaryHandlerMap = new HashMap<>();
 
     public MessageRouter(ObjectMapper objectMapper, SduiDeviceRepository deviceRepository,
+                         DeviceSessionManager sessionManager,
                          List<TopicHandler> handlers, List<BinaryFrameHandler> binaryHandlers) {
         this.objectMapper = objectMapper;
         this.deviceRepository = deviceRepository;
+        this.sessionManager = sessionManager;
         this.handlers = handlers;
         this.binaryHandlers = binaryHandlers;
     }
@@ -64,12 +68,12 @@ public class MessageRouter {
                 return;
             }
 
-            String spaceId = resolveSpaceId(session, message);
-            if (!StringUtils.hasText(spaceId)) {
-                spaceId = GlobalContext.DEFAULT_SPACE_ID;
+            String userId = resolveUserId(session, message);
+            if (!StringUtils.hasText(userId)) {
+                userId = GlobalContext.DEFAULT_USER_ID;
             }
 
-            GlobalContext.set(GlobalContext.KEY_SPACE_ID, spaceId);
+            GlobalContext.set(GlobalContext.KEY_USER_ID, userId);
             try {
                 handler.handle(session, message);
             } finally {
@@ -85,7 +89,17 @@ public class MessageRouter {
             BinaryProtocolCodec.DecodedFrame frame = BinaryProtocolCodec.decode(rawFrame);
             BinaryFrameHandler handler = binaryHandlerMap.get(frame.msgType());
             if (handler != null) {
-                handler.handle(session, frame);
+                String userId = resolveUserId(session, resolveDeviceId(session));
+                if (!StringUtils.hasText(userId)) {
+                    userId = GlobalContext.DEFAULT_USER_ID;
+                }
+
+                GlobalContext.set(GlobalContext.KEY_USER_ID, userId);
+                try {
+                    handler.handle(session, frame);
+                } finally {
+                    GlobalContext.clear();
+                }
             } else {
                 log.debug("No handler for binary msgType={}", frame.msgType());
             }
@@ -94,17 +108,17 @@ public class MessageRouter {
         }
     }
 
-    private String resolveSpaceId(WebSocketSession session, SduiMessage message) {
+    private String resolveUserId(WebSocketSession session, SduiMessage message) {
         String fromBinding = deviceRepository.findById(message.getDeviceId())
-                .map(d -> d.getOwnerSpaceId())
+                .map(d -> d.getOwnerUserId())
                 .filter(StringUtils::hasText)
                 .orElse(null);
         if (StringUtils.hasText(fromBinding)) {
             return fromBinding.trim();
         }
 
-        if (StringUtils.hasText(message.getSpaceId())) {
-            return message.getSpaceId().trim();
+        if (StringUtils.hasText(message.getUserId())) {
+            return message.getUserId().trim();
         }
 
         if (session.getUri() != null) {
@@ -114,7 +128,7 @@ public class MessageRouter {
                 return fromQuery.trim();
             }
 
-            String fromLegacyQuery = queryParams.getFirst(GlobalContext.KEY_SPACE_ID);
+            String fromLegacyQuery = queryParams.getFirst("space_id");
             if (StringUtils.hasText(fromLegacyQuery)) {
                 return fromLegacyQuery.trim();
             }
@@ -125,6 +139,57 @@ public class MessageRouter {
             return fromHeader.trim();
         }
 
+        return null;
+    }
+
+    private String resolveUserId(WebSocketSession session, String deviceId) {
+        if (StringUtils.hasText(deviceId)) {
+            String fromBinding = deviceRepository.findById(deviceId)
+                    .map(d -> d.getOwnerUserId())
+                    .filter(StringUtils::hasText)
+                    .orElse(null);
+            if (StringUtils.hasText(fromBinding)) {
+                return fromBinding.trim();
+            }
+        }
+
+        if (session.getUri() != null) {
+            var queryParams = UriComponentsBuilder.fromUri(session.getUri()).build().getQueryParams();
+            String fromQuery = queryParams.getFirst(SPACE_ID_QUERY_PARAM);
+            if (StringUtils.hasText(fromQuery)) {
+                return fromQuery.trim();
+            }
+
+            String fromLegacyQuery = queryParams.getFirst("space_id");
+            if (StringUtils.hasText(fromLegacyQuery)) {
+                return fromLegacyQuery.trim();
+            }
+        }
+
+        String fromHeader = session.getHandshakeHeaders().getFirst("X-Space-Id");
+        if (StringUtils.hasText(fromHeader)) {
+            return fromHeader.trim();
+        }
+
+        return null;
+    }
+
+    private String resolveDeviceId(WebSocketSession session) {
+        String fromSessionMap = sessionManager.getDeviceIdBySessionId(session.getId());
+        if (StringUtils.hasText(fromSessionMap)) {
+            return fromSessionMap.trim();
+        }
+
+        if (session.getUri() == null) {
+            return null;
+        }
+        var queryParams = UriComponentsBuilder.fromUri(session.getUri()).build().getQueryParams();
+        for (String param : DEVICE_ID_QUERY_PARAMS) {
+            String fromQuery = queryParams.getFirst(param);
+            if (StringUtils.hasText(fromQuery)) {
+                return fromQuery.trim();
+            }
+        }
         return null;
     }
 }

@@ -66,13 +66,7 @@ public class SwaggerConfig {
     @Bean
     public OperationCustomizer globalHeaderCustomizer() {
         return (operation, handlerMethod) -> {
-            // 添加 X-Space-Id 输入框
-            operation.addParametersItem(new Parameter()
-                    .in("header") // 指定参数位置为 HTTP Header
-                    .name("X-Space-Id")
-                    .description("【隔离参数】业务空间 ID (不填默认为 'default')")
-                    .required(false) // 设置为 false，因为拦截器有兜底逻辑
-                    .schema(new io.swagger.v3.oas.models.media.StringSchema()._default("default")));
+            // 添加 X-Space-Id 输入框（向后兼容：从 JWT 自动提取用户身份，无需手动传入）
 
             // 添加 X-User-Id 输入框
 //            operation.addParametersItem(new Parameter()

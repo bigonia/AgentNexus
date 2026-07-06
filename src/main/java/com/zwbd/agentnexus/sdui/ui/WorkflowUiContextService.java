@@ -16,15 +16,18 @@ public class WorkflowUiContextService {
     private final SduiUiTemplateService templateService;
     private final SectionDataCodec sectionDataCodec;
     private final SectionOrchestrationService sectionOrchestrationService;
+    private final DevicePrimaryUiService primaryUiService;
 
     public WorkflowUiContextService(WorkflowUiContextRepository repository,
                                     SduiUiTemplateService templateService,
                                     SectionDataCodec sectionDataCodec,
-                                    SectionOrchestrationService sectionOrchestrationService) {
+                                    SectionOrchestrationService sectionOrchestrationService,
+                                    DevicePrimaryUiService primaryUiService) {
         this.repository = repository;
         this.templateService = templateService;
         this.sectionDataCodec = sectionDataCodec;
         this.sectionOrchestrationService = sectionOrchestrationService;
+        this.primaryUiService = primaryUiService;
     }
 
     @Transactional
@@ -46,7 +49,7 @@ public class WorkflowUiContextService {
             templateService.validateDeviceSupportsTemplate(deviceId, template.getDefinition());
 
             Map<String, Object> variables = templateService.variableValues(template.getDefinition(), SduiUiTemplateService.map(config.get("variables")));
-            SectionScene scene = templateService.toScene(template.getDefinition(), variables);
+            SectionScene scene = templateService.toScene(template, variables);
             boolean sent = sectionOrchestrationService.sendScene(deviceId, scene);
 
             WorkflowUiContextEntity context = repository
@@ -173,7 +176,7 @@ public class WorkflowUiContextService {
         Map<String, Object> section = new LinkedHashMap<>(SduiUiTemplateService.map(sections.get(sectionId)));
         String sectionType = string(section.get("sectionType"));
         Map<String, Object> fields = new LinkedHashMap<>(SduiUiTemplateService.map(section.get("fields")));
-        fields.put(field, value);
+        SduiUiTemplateService.deepSet(fields, field, value);
         section.put("fields", fields);
         sections.put(sectionId, section);
         page.put("sections", sections);
@@ -184,9 +187,9 @@ public class WorkflowUiContextService {
         SectionPatch patch = new SectionPatch(pageId, List.of(
                 new SectionPatch.PatchEntry(sectionId, "update", sectionType, data)
         ));
-        boolean sent = sectionOrchestrationService.sendPatch(context.getDeviceId(), patch);
         context.setContext(ctx);
-        repository.save(context);
+        context = repository.save(context);
+        Map<String, Object> presentation = primaryUiService.presentUpdatedContext(context, patch);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", context.getDeviceId());
@@ -201,8 +204,9 @@ public class WorkflowUiContextService {
         result.put("field", field);
         result.put("patch", patchToMap(patch));
         result.put("contextId", context.getId());
-        result.put("sent", sent);
-        result.put("status", sent ? "sent" : "send_failed");
+        result.put("presentation", presentation);
+        result.put("sent", Boolean.TRUE.equals(presentation.get("sent")));
+        result.put("status", presentation.getOrDefault("status", "send_failed"));
         return result;
     }
 

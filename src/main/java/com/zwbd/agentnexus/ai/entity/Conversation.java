@@ -31,8 +31,8 @@ public class Conversation {
     private String id; // 对应 ChatMemory 中的 conversationId
 
     @TenantId
-    @Column(name = "space_id", nullable = false, updatable = false)
-    private String spaceId;
+    @Column(name = "user_id", updatable = false)
+    private String userId;
 
     @Column(length = 255)
     private String title;

@@ -51,7 +51,7 @@ public record ChatRequest(
 //                .map(ChatRequest::toSingleExpr)
 //                .collect(Collectors.joining(" and "));
         List<RAGFilter> ragFilters = Optional.ofNullable(RAGFilters).orElse(new ArrayList<>());
-        ragFilters.add(new RAGFilter(GlobalContext.KEY_SPACE_ID, Operator.EQUALS, GlobalContext.getSpaceId()));
+        ragFilters.add(new RAGFilter(GlobalContext.KEY_USER_ID, Operator.EQUALS, GlobalContext.getUserId()));
         return ragFilters.stream()
                 .map(ChatRequest::toSingleExpr)
                 .collect(Collectors.joining(" and "));

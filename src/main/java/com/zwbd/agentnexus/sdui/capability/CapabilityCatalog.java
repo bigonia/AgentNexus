@@ -32,10 +32,11 @@ public class CapabilityCatalog {
                            List<PayloadField> payloadSchema,
                            boolean platform,
                            Map<String, String> eventDisplayNames,
-                           Set<String> internalEvents) {
+                           Set<String> internalEvents,
+                           List<Map<String, Object>> artifacts) {
         /** Backward-compat constructor for code that only provides events list. */
         public InputDef(String name, String protocol, Integer eventKind, String topic, List<String> events) {
-            this(name, protocol, eventKind, topic, events, null, null, List.of(), false, Map.of(), Set.of());
+            this(name, protocol, eventKind, topic, events, null, null, List.of(), false, Map.of(), Set.of(), List.of());
         }
 
         /** Whether this is a platform-mediated capability (not a simple physical input). */
@@ -61,10 +62,11 @@ public class CapabilityCatalog {
     }
 
     public record OutputDef(String name, Map<String, CommandDef> commands,
-                            String displayName, String description) {
+                            String displayName, String description,
+                            List<Map<String, Object>> artifacts) {
         /** Backward-compat constructor. */
         public OutputDef(String name, Map<String, CommandDef> commands) {
-            this(name, commands, null, null);
+            this(name, commands, null, null, List.of());
         }
     }
 
@@ -211,8 +213,13 @@ public class CapabilityCatalog {
             List<PayloadField> payloadSchema = parsePayloadSchema(
                     (List<Map<String, Object>>) def.get("payloadSchema"));
 
+            // Parse artifacts if present (business-facing node outputs)
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> artifacts = def.get("artifacts") instanceof List<?> list
+                    ? (List<Map<String, Object>>) list : List.of();
+
             inputsByName.put(name, new InputDef(name, protocol, eventKind, topic, events,
-                    displayName, description, payloadSchema, platform, eventDisplayNames, internalEvents));
+                    displayName, description, payloadSchema, platform, eventDisplayNames, internalEvents, artifacts));
         }
     }
 
@@ -326,7 +333,12 @@ public class CapabilityCatalog {
                 commands.put(cmdName, commandDef);
                 commandsByName.put(cmdName, commandDef);
             }
-            outputsByName.put(name, new OutputDef(name, commands, outputDisplayName, outputDescription));
+            // Parse artifacts if present (business-facing node outputs)
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> artifacts = def.get("artifacts") instanceof List<?> list
+                    ? (List<Map<String, Object>>) list : List.of();
+
+            outputsByName.put(name, new OutputDef(name, commands, outputDisplayName, outputDescription, artifacts));
         }
     }
 

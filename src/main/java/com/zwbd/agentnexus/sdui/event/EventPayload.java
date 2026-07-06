@@ -193,6 +193,34 @@ public record EventPayload(
         );
     }
 
+    public EventPayload withNodeId(String newNodeId) {
+        return new EventPayload(
+                eventId,
+                deviceId,
+                pageId,
+                sectionId,
+                newNodeId,
+                kind,
+                value,
+                ts,
+                rawFields
+        );
+    }
+
+    public EventPayload withValue(Object newValue) {
+        return new EventPayload(
+                eventId,
+                deviceId,
+                pageId,
+                sectionId,
+                nodeId,
+                kind,
+                newValue,
+                ts,
+                rawFields
+        );
+    }
+
     // ── Query helpers ──
 
     /** @return true if this event has section-level context. */

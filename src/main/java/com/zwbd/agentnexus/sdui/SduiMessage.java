@@ -14,7 +14,7 @@ public class SduiMessage {
     private String deviceId;
 
     @JsonProperty("space_id")
-    private String spaceId;
+    private String userId;
 
     @JsonProperty("payload")
     private JsonNode payload;

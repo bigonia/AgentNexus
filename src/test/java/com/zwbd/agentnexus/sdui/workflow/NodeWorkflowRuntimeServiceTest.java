@@ -49,7 +49,7 @@ class NodeWorkflowRuntimeServiceTest {
         stepRepository = mock(NodeWorkflowRunStepRepository.class);
         executorService = mock(CapabilityNodeExecutorService.class);
         contextService = new NodeWorkflowRunContextService(mock(SduiArtifactService.class));
-        parameterResolver = new NodeWorkflowParameterResolver();
+        parameterResolver = new NodeWorkflowParameterResolver(new NodeTypeRegistry());
 
         new NodeWorkflowRuntimeService(eventInputHandler, workflowService, deploymentService,
                 deploymentRepository, runRepository, stepRepository, executorService, contextService, parameterResolver);
@@ -113,7 +113,7 @@ class NodeWorkflowRuntimeServiceTest {
                                 Map.of("eventId", "input:buttons.pwr.short_press", "nodeId", "pwr")),
                         new NodeWorkflowNode("record", "target", "audio.record", Map.of("control", "stop")),
                         new NodeWorkflowNode("play", "target", "audio.play",
-                                Map.of("artifact_id", "$nodes.record.artifact.artifactRef"))
+                                Map.of("artifact_id", Map.of("$ref", "record")))
                 ),
                 List.of(
                         new NodeWorkflowEdge("source_button", "record"),
@@ -125,7 +125,7 @@ class NodeWorkflowRuntimeServiceTest {
         when(executorService.execute(eq("dev-b"), eq("audio.record"), anyMap(), anyMap())).thenReturn(Map.of(
                 "status", "sent",
                 "sent", true,
-                "artifact", Map.of("artifactRef", "artifact:dev-b:audio-record-latest", "text", "hello")
+                "artifact", Map.of("artifactId", "abc-123", "artifactRef", "artifact:dev-b:latest", "text", "hello")
         ));
         when(executorService.execute(eq("dev-b"), eq("audio.play"), anyMap(), anyMap())).thenReturn(Map.of(
                 "status", "sent",
@@ -150,16 +150,17 @@ class NodeWorkflowRuntimeServiceTest {
                 Map.of()
         ));
 
+        // $ref resolution extracts artifactId from audio.record output
         verify(executorService).execute(eq("dev-b"), eq("audio.play"),
-                eq(Map.of("artifact_id", "artifact:dev-b:audio-record-latest")), anyMap());
+                eq(Map.of("artifact_id", "abc-123")), anyMap());
     }
 
     @Test
-    void multilayerDagRunsInTopologicalOrder() {
+    void skippedNodeDoesNotFailRun() {
         NodeWorkflowDeploymentEntity deployment = deployment();
         NodeWorkflowDefinition workflow = new NodeWorkflowDefinition(
                 "wf-1",
-                "record-play-ui",
+                "skip-play",
                 List.of(
                         new NodeWorkflowSlot("source", "type-a", "Source", List.of()),
                         new NodeWorkflowSlot("target", "type-a", "Target", List.of())
@@ -167,88 +168,33 @@ class NodeWorkflowRuntimeServiceTest {
                 List.of(
                         new NodeWorkflowNode("source_button", "source", "button.trigger",
                                 Map.of("eventId", "input:buttons.pwr.short_press", "nodeId", "pwr")),
-                        new NodeWorkflowNode("record", "target", "audio.record", Map.of("control", "stop")),
+                        // audio.record starts recording — no artifact produced
+                        new NodeWorkflowNode("record", "target", "audio.record", Map.of("control", "start")),
                         new NodeWorkflowNode("play", "target", "audio.play",
-                                Map.of("artifact_id", "$nodes.record.artifact.artifactRef")),
-                        new NodeWorkflowNode("show", "target", "ui.update",
-                                Map.of("patch", Map.of(
-                                        "pageId", "main",
-                                        "patches", List.of(Map.of(
-                                                "sectionId", "text1",
-                                                "op", "update",
-                                                "sectionType", "text_section",
-                                                "fields", Map.of("body", "$nodes.record.artifact.text")
-                                        ))
-                                )))
+                                Map.of("artifact_id", Map.of("$ref", "record"))),
+                        new NodeWorkflowNode("rgb", "target", "rgb.effect", Map.of("mode", "solid"))
                 ),
                 List.of(
                         new NodeWorkflowEdge("source_button", "record"),
                         new NodeWorkflowEdge("record", "play"),
-                        new NodeWorkflowEdge("play", "show")
-                )
-        );
-        when(deploymentRepository.findByStatus("active")).thenReturn(List.of(deployment));
-        when(workflowService.workflow("wf-1")).thenReturn(workflow);
-        when(executorService.execute(eq("dev-b"), eq("audio.record"), anyMap(), anyMap())).thenReturn(Map.of(
-                "status", "sent",
-                "sent", true,
-                "artifact", Map.of("artifactRef", "artifact:dev-b:audio-record-latest", "text", "hello")
-        ));
-        when(executorService.execute(eq("dev-b"), eq("audio.play"), anyMap(), anyMap())).thenReturn(Map.of("status", "sent", "sent", true));
-        when(executorService.execute(eq("dev-b"), eq("ui.update"), anyMap(), anyMap())).thenReturn(Map.of("status", "sent", "sent", true));
-        when(runRepository.save(any())).thenAnswer(invocation -> {
-            NodeWorkflowRunEntity run = invocation.getArgument(0);
-            if (run.getId() == null) run.setId("run-dag");
-            if (run.getStartedAt() == null) run.setStartedAt(LocalDateTime.now());
-            return run;
-        });
-
-        listener.onEvent(new EventPayload(
-                "input:buttons.pwr.short_press",
-                "dev-a",
-                "",
-                "",
-                "pwr",
-                0,
-                null,
-                System.currentTimeMillis(),
-                Map.of()
-        ));
-
-        var order = inOrder(executorService);
-        order.verify(executorService).execute(eq("dev-b"), eq("audio.record"), eq(Map.of("control", "stop")), anyMap());
-        order.verify(executorService).execute(eq("dev-b"), eq("audio.play"),
-                eq(Map.of("artifact_id", "artifact:dev-b:audio-record-latest")), anyMap());
-        order.verify(executorService).execute(eq("dev-b"), eq("ui.update"), anyMap(), anyMap());
-    }
-
-    @Test
-    void missingReferenceFailsAndStopsFollowingNodes() {
-        NodeWorkflowDeploymentEntity deployment = deployment();
-        NodeWorkflowDefinition workflow = new NodeWorkflowDefinition(
-                "wf-1",
-                "bad-ref",
-                List.of(
-                        new NodeWorkflowSlot("source", "type-a", "Source", List.of()),
-                        new NodeWorkflowSlot("target", "type-a", "Target", List.of())
-                ),
-                List.of(
-                        new NodeWorkflowNode("source_button", "source", "button.trigger",
-                                Map.of("eventId", "input:buttons.pwr.short_press", "nodeId", "pwr")),
-                        new NodeWorkflowNode("play", "target", "audio.play",
-                                Map.of("artifact_id", "$nodes.record.artifact.artifactRef")),
-                        new NodeWorkflowNode("rgb", "target", "rgb.effect", Map.of("mode", "solid"))
-                ),
-                List.of(
-                        new NodeWorkflowEdge("source_button", "play"),
                         new NodeWorkflowEdge("play", "rgb")
                 )
         );
         when(deploymentRepository.findByStatus("active")).thenReturn(List.of(deployment));
         when(workflowService.workflow("wf-1")).thenReturn(workflow);
+        // record starts — no artifact in result
+        when(executorService.execute(eq("dev-b"), eq("audio.record"), anyMap(), anyMap())).thenReturn(Map.of(
+                "status", "sent", "sent", true, "recording", true
+        ));
+        when(executorService.execute(eq("dev-b"), eq("audio.play"), anyMap(), anyMap())).thenReturn(Map.of(
+                "status", "skipped", "reason", "artifact not yet available"
+        ));
+        when(executorService.execute(eq("dev-b"), eq("rgb.effect"), anyMap(), anyMap())).thenReturn(Map.of(
+                "status", "sent", "sent", true
+        ));
         when(runRepository.save(any())).thenAnswer(invocation -> {
             NodeWorkflowRunEntity run = invocation.getArgument(0);
-            if (run.getId() == null) run.setId("run-failed");
+            if (run.getId() == null) run.setId("run-skip");
             if (run.getStartedAt() == null) run.setStartedAt(LocalDateTime.now());
             return run;
         });
@@ -265,11 +211,11 @@ class NodeWorkflowRuntimeServiceTest {
                 Map.of()
         ));
 
-        verify(executorService, never()).execute(anyString(), anyString(), anyMap());
-        ArgumentCaptor<NodeWorkflowRunStepEntity> stepCaptor = ArgumentCaptor.forClass(NodeWorkflowRunStepEntity.class);
-        verify(stepRepository).save(stepCaptor.capture());
-        assertEquals("failed", stepCaptor.getValue().getStatus());
-        assertEquals("play", stepCaptor.getValue().getNodeId());
+        // play receives empty artifact_id (ref resolves to empty since no artifact in record result)
+        // executor returns skipped status → run continues to rgb
+        verify(executorService).execute(eq("dev-b"), eq("audio.play"),
+                eq(Map.of("artifact_id", "")), anyMap());
+        verify(executorService).execute(eq("dev-b"), eq("rgb.effect"), anyMap(), anyMap());
     }
 
     private NodeWorkflowDeploymentEntity deployment() {

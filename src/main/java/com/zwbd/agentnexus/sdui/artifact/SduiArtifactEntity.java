@@ -21,8 +21,8 @@ import java.util.Map;
 public class SduiArtifactEntity {
 
     @TenantId
-    @Column(name = "space_id", nullable = false, updatable = false)
-    private String spaceId;
+    @Column(name = "user_id", updatable = false)
+    private String userId;
 
     @Id
     @Column(name = "artifact_id", length = 64)

@@ -10,11 +10,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface SduiDeviceRepository extends JpaRepository<SduiDevice, String> {
-    List<SduiDevice> findByOwnerSpaceId(String ownerSpaceId);
+    List<SduiDevice> findByOwnerUserId(String ownerUserId);
 
-    long countByOwnerSpaceId(String ownerSpaceId);
+    long countByOwnerUserId(String ownerUserId);
 
-    long countByOwnerSpaceIdAndStatusIgnoreCase(String ownerSpaceId, String status);
+    long countByOwnerUserIdAndStatusIgnoreCase(String ownerUserId, String status);
 
     List<SduiDevice> findByRegistrationStatus(String registrationStatus);
 

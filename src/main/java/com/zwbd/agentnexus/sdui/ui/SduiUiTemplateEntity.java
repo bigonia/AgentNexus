@@ -17,8 +17,8 @@ import java.util.Map;
 public class SduiUiTemplateEntity {
 
     @TenantId
-    @Column(name = "space_id", nullable = false, updatable = false)
-    private String spaceId;
+    @Column(name = "user_id", updatable = false)
+    private String userId;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -33,6 +33,12 @@ public class SduiUiTemplateEntity {
 
     @Column(nullable = false, length = 24)
     private String status = "active";
+
+    @Column(length = 64)
+    private String board;
+
+    @Column(length = 128)
+    private String pageId;
 
     @Convert(converter = JsonMapConverter.class)
     @Column(nullable = false, columnDefinition = "text")

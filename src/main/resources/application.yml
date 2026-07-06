@@ -103,7 +103,7 @@ spring:
   jpa:
     properties:
       hibernate:
-        tenant_identifier_resolver: com.zwbd.agentnexus.common.SpaceIdResolver
+        tenant_identifier_resolver: com.zwbd.agentnexus.common.UserIdResolver
         jdbc:
           batch_size: 500
     hibernate:

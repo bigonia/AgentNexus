@@ -16,8 +16,8 @@ import java.util.Map;
 public class NodeWorkflowDeploymentEntity {
 
     @TenantId
-    @Column(name = "space_id", nullable = false, updatable = false)
-    private String spaceId;
+    @Column(name = "user_id", updatable = false)
+    private String userId;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

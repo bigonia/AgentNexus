@@ -19,8 +19,8 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventListener {
 
     private static final int MAX_RUNS_PER_DEPLOYMENT = 50;
-    private static final Set<String> TRIGGER_NODE_TYPES = Set.of("button.trigger");
-    private static final Set<String> OUTPUT_NODE_TYPES = Set.of("rgb.effect", "audio.play", "audio.record");
+    private static boolean isTriggerNode(String nodeType) { return nodeType != null && nodeType.endsWith(".trigger"); }
+    private static final Set<String> OUTPUT_NODE_TYPES = Set.of("rgb.effect", "audio.play", "audio.record", "ui.update", "display.section");
 
     private final DeviceSessionManager sessionManager;
     private final CapabilityNodeCatalogService nodeCatalogService;
@@ -107,8 +107,8 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
         NodeWorkflowNode trigger = triggerNodeId.isBlank()
                 ? firstTriggerNode(workflow)
                 : nodeById(workflow, triggerNodeId);
-        if (!TRIGGER_NODE_TYPES.contains(trigger.nodeType())) {
-            throw new IllegalArgumentException("test trigger node must be button.trigger: " + trigger.nodeId());
+        if (!isTriggerNode(trigger.nodeType())) {
+            throw new IllegalArgumentException("test trigger node must be a trigger type: " + trigger.nodeId());
         }
 
         String deviceId = deployment.slotBindings().get(trigger.slotId());
@@ -140,7 +140,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
                 continue;
             }
             for (NodeWorkflowNode trigger : workflow.nodes()) {
-                if (!TRIGGER_NODE_TYPES.contains(trigger.nodeType())) {
+                if (!isTriggerNode(trigger.nodeType())) {
                     continue;
                 }
                 if (!slotId.get().equals(trigger.slotId())) {
@@ -258,13 +258,13 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
             if (!slotIds.contains(node.slotId())) {
                 throw new IllegalArgumentException("node references unknown slot: " + node.nodeId());
             }
-            if (!TRIGGER_NODE_TYPES.contains(node.nodeType()) && !OUTPUT_NODE_TYPES.contains(node.nodeType())) {
+            if (!isTriggerNode(node.nodeType()) && !OUTPUT_NODE_TYPES.contains(node.nodeType())) {
                 throw new IllegalArgumentException("unsupported nodeType: " + node.nodeType());
             }
-            hasTrigger = hasTrigger || TRIGGER_NODE_TYPES.contains(node.nodeType());
+            hasTrigger = hasTrigger || isTriggerNode(node.nodeType());
         }
         if (!hasTrigger) {
-            throw new IllegalArgumentException("at least one button.trigger node is required");
+            throw new IllegalArgumentException("at least one trigger node is required");
         }
 
         for (NodeWorkflowEdge edge : workflow.edges()) {
@@ -276,7 +276,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
             }
             NodeWorkflowNode from = nodeById(workflow, edge.from());
             NodeWorkflowNode to = nodeById(workflow, edge.to());
-            if (!TRIGGER_NODE_TYPES.contains(from.nodeType())) {
+            if (!isTriggerNode(from.nodeType())) {
                 throw new IllegalArgumentException("edge from node must be trigger: " + edge.from());
             }
             if (!OUTPUT_NODE_TYPES.contains(to.nodeType())) {
@@ -357,7 +357,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
                                                  NodeWorkflowDeployment deployment) {
         List<TriggerBinding> bindings = new ArrayList<>();
         for (NodeWorkflowNode node : workflow.nodes()) {
-            if (!TRIGGER_NODE_TYPES.contains(node.nodeType())) {
+            if (!isTriggerNode(node.nodeType())) {
                 continue;
             }
             String deviceId = deployment.slotBindings().get(node.slotId());
@@ -367,7 +367,8 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
             bindings.add(new TriggerBinding(
                     deviceId,
                     string(node.params().get("eventId")),
-                    string(node.params().get("nodeId"))
+                    string(node.params().get("nodeId")),
+                    string(node.params().get("sectionId"))
             ));
         }
         return bindings;
@@ -376,10 +377,14 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
     private boolean triggerMatches(NodeWorkflowNode trigger, EventPayload payload) {
         String expectedEventId = string(trigger.params().get("eventId"));
         String expectedNodeId = string(trigger.params().get("nodeId"));
+        String expectedSectionId = string(trigger.params().get("sectionId"));
         if (!eventMatches(expectedEventId, payload.eventId())) {
             return false;
         }
-        return expectedNodeId.isBlank() || expectedNodeId.equals(payload.nodeId());
+        if (!nodeIdMatches(expectedNodeId, payload.nodeId())) {
+            return false;
+        }
+        return expectedSectionId.isBlank() || expectedSectionId.equals(payload.sectionId());
     }
 
     private boolean eventMatches(String expected, String actual) {
@@ -389,7 +394,19 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
         if (expected == null || actual == null || expected.isBlank() || actual.isBlank()) {
             return false;
         }
-        return expected.endsWith("." + actual);
+        return expected.endsWith("." + actual) || actual.endsWith("." + expected);
+    }
+
+    /**
+     * Match expected nodeId against actual nodeId, stripping any {@code :digit}
+     * state suffix that device firmware may append (e.g. "option_b:0" → "option_b").
+     */
+    private boolean nodeIdMatches(String expected, String actual) {
+        if (expected == null || expected.isBlank()) return true;
+        if (actual == null || actual.isBlank()) return false;
+        if (expected.equals(actual)) return true;
+        String stripped = actual.replaceFirst(":\\d+$", "");
+        return expected.equals(stripped);
     }
 
     private Optional<String> slotForDevice(NodeWorkflowDeployment deployment, String deviceId) {
@@ -464,7 +481,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
 
     private NodeWorkflowNode firstTriggerNode(NodeWorkflowDefinition workflow) {
         return workflow.nodes().stream()
-                .filter(node -> TRIGGER_NODE_TYPES.contains(node.nodeType()))
+                .filter(node -> isTriggerNode(node.nodeType()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("workflow has no trigger node"));
     }
@@ -538,6 +555,12 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
         event.put("deviceId", payload.deviceId());
         event.put("nodeId", payload.nodeId());
         event.put("ts", payload.ts());
+        if (!payload.sectionId().isEmpty()) {
+            event.put("sectionId", payload.sectionId());
+        }
+        if (!payload.pageId().isEmpty()) {
+            event.put("pageId", payload.pageId());
+        }
         return event;
     }
 
@@ -549,11 +572,12 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
         return value == null ? "" : String.valueOf(value);
     }
 
-    private record TriggerBinding(String deviceId, String eventId, String nodeId) {
+    private record TriggerBinding(String deviceId, String eventId, String nodeId, String sectionId) {
         boolean conflictsWith(TriggerBinding other) {
             return deviceId.equals(other.deviceId)
                     && eventMatches(eventId, other.eventId)
-                    && (nodeId.isBlank() || other.nodeId.isBlank() || nodeId.equals(other.nodeId));
+                    && (nodeId.isBlank() || other.nodeId.isBlank() || nodeIdMatches(nodeId, other.nodeId))
+                    && (sectionId.isBlank() || other.sectionId.isBlank() || sectionId.equals(other.sectionId));
         }
 
         private boolean eventMatches(String left, String right) {
@@ -564,6 +588,14 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
                 return false;
             }
             return left.endsWith("." + right) || right.endsWith("." + left);
+        }
+
+        private boolean nodeIdMatches(String left, String right) {
+            if (left == null || left.isBlank() || right == null || right.isBlank()) return true;
+            if (left.equals(right)) return true;
+            String strippedLeft = left.replaceFirst(":\\d+$", "");
+            String strippedRight = right.replaceFirst(":\\d+$", "");
+            return strippedLeft.equals(strippedRight);
         }
     }
 }

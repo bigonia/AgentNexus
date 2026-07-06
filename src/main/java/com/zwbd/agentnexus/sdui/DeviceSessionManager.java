@@ -112,7 +112,7 @@ public class DeviceSessionManager {
     private void logConnectionEvent(String deviceId, WebSocketSession session, String eventType, String reason) {
         try {
             DeviceConnectionLog logEntry = new DeviceConnectionLog();
-            logEntry.setSpaceId(getCurrentSpaceId());
+            logEntry.setUserId(getCurrentUserId());
             logEntry.setDeviceId(deviceId);
             logEntry.setEventType(eventType);
             logEntry.setSessionId(session.getId());
@@ -130,9 +130,9 @@ public class DeviceSessionManager {
         }
     }
 
-    private String getCurrentSpaceId() {
+    private String getCurrentUserId() {
         try {
-            return GlobalContext.getSpaceId();
+            return GlobalContext.getUserId();
         } catch (Exception e) {
             return "";
         }

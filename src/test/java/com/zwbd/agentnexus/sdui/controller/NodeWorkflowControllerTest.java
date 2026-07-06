@@ -6,6 +6,7 @@ import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowDeploymentService;
 import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowManagementService;
 import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowRuntimeService;
 import com.zwbd.agentnexus.sdui.workflow.NodeWorkflowService;
+import com.zwbd.agentnexus.sdui.ui.DevicePrimaryUiService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -30,6 +31,7 @@ class NodeWorkflowControllerTest {
     private NodeWorkflowRuntimeService runtimeService;
     private NodeWorkflowManagementService managementService;
     private SduiArtifactService artifactService;
+    private DevicePrimaryUiService primaryUiService;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -40,8 +42,9 @@ class NodeWorkflowControllerTest {
         runtimeService = mock(NodeWorkflowRuntimeService.class);
         managementService = mock(NodeWorkflowManagementService.class);
         artifactService = mock(SduiArtifactService.class);
+        primaryUiService = mock(DevicePrimaryUiService.class);
         mockMvc = MockMvcBuilders.standaloneSetup(
-                new NodeWorkflowController(workflowService, deploymentService, runtimeService, managementService, artifactService)).build();
+                new NodeWorkflowController(workflowService, deploymentService, runtimeService, managementService, artifactService, primaryUiService)).build();
     }
 
     @Test
@@ -109,6 +112,11 @@ class NodeWorkflowControllerTest {
         when(managementService.conflicts()).thenReturn(List.of(Map.of("type", "blocking_conflict")));
         when(managementService.recentRuns("failed", 10)).thenReturn(List.of(Map.of("runId", "run-1")));
         when(managementService.inspectDeployment(eq("wf-1"), anyMap())).thenReturn(Map.of("valid", true));
+        when(primaryUiService.setPrimary(eq("dev-a"), anyMap())).thenReturn(Map.of("deviceId", "dev-a", "deploymentId", "dep-1"));
+        when(primaryUiService.setPrimaryForDeployment(eq("dep-1"), eq("dev-a"), anyMap()))
+                .thenReturn(Map.of("deviceId", "dev-a", "deploymentId", "dep-1", "primaryUi", true));
+        when(primaryUiService.getPrimary("dev-a")).thenReturn(Map.of("deviceId", "dev-a", "deploymentId", "dep-1"));
+        when(primaryUiService.clearPrimary("dev-a")).thenReturn(Map.of("deviceId", "dev-a", "cleared", true));
 
         mockMvc.perform(get("/api/v1/sdui/node-workflows/management/overview"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.workflowCount").value(1));
@@ -120,6 +128,18 @@ class NodeWorkflowControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].type").value("blocking_conflict"));
         mockMvc.perform(get("/api/v1/sdui/node-workflows/management/runs/recent?status=failed&limit=10"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].runId").value("run-1"));
+        mockMvc.perform(post("/api/v1/sdui/node-workflows/management/devices/dev-a/primary-ui")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("deploymentId", "dep-1", "slotId", "source", "templateKey", "main"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.deploymentId").value("dep-1"));
+        mockMvc.perform(get("/api/v1/sdui/node-workflows/management/devices/dev-a/primary-ui"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.deploymentId").value("dep-1"));
+        mockMvc.perform(delete("/api/v1/sdui/node-workflows/management/devices/dev-a/primary-ui"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.cleared").value(true));
+        mockMvc.perform(post("/api/v1/sdui/node-workflows/management/deployments/dep-1/devices/dev-a/primary-ui")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.primaryUi").value(true));
         mockMvc.perform(post("/api/v1/sdui/node-workflows/wf-1/deployments/inspect")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("slotBindings", Map.of("source", "dev-a")))))

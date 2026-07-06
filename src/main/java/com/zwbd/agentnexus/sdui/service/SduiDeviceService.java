@@ -75,13 +75,13 @@ public class SduiDeviceService {
 
     // ── Device queries ──
 
-    public long countDevices() { return deviceRepository.countByOwnerSpaceId(currentSpaceId()); }
-    public long countOnlineDevices() { return deviceRepository.countByOwnerSpaceIdAndStatusIgnoreCase(currentSpaceId(), "ONLINE"); }
-    public long countOfflineDevices() { return deviceRepository.countByOwnerSpaceIdAndStatusIgnoreCase(currentSpaceId(), "OFFLINE"); }
+    public long countDevices() { return deviceRepository.countByOwnerUserId(currentUserId()); }
+    public long countOnlineDevices() { return deviceRepository.countByOwnerUserIdAndStatusIgnoreCase(currentUserId(), "ONLINE"); }
+    public long countOfflineDevices() { return deviceRepository.countByOwnerUserIdAndStatusIgnoreCase(currentUserId(), "OFFLINE"); }
 
     public List<SduiDevice> listDevices() {
         lifecycleService.refreshOnlineStatus();
-        return deviceRepository.findByOwnerSpaceId(currentSpaceId());
+        return deviceRepository.findByOwnerUserId(currentUserId());
     }
 
     public List<SduiDevice> listUnclaimedDevices() {
@@ -91,7 +91,7 @@ public class SduiDeviceService {
     public Optional<SduiDevice> getDevice(String deviceId) {
         lifecycleService.refreshOnlineStatus();
         return deviceRepository.findById(deviceId)
-                .filter(d -> currentSpaceId().equals(d.getOwnerSpaceId()));
+                .filter(d -> currentUserId().equals(d.getOwnerUserId()));
     }
 
     public Page<SduiDeviceTelemetry> getTelemetry(String deviceId, int page, int size) {
@@ -126,7 +126,7 @@ public class SduiDeviceService {
     @Transactional
     public SduiDevice updateDevice(String deviceId, String name, String notes) {
         SduiDevice device = deviceRepository.findById(deviceId)
-                .filter(d -> currentSpaceId().equals(d.getOwnerSpaceId()))
+                .filter(d -> currentUserId().equals(d.getOwnerUserId()))
                 .orElseThrow(() -> new IllegalArgumentException("device not found or not owned"));
         if (name != null && !name.isBlank()) {
             device.setName(name.trim());
@@ -140,7 +140,7 @@ public class SduiDeviceService {
     // ── Claim / delete ──
 
     public SduiDevice claimDevice(String deviceId, String claimCode, String deviceName) {
-        SduiDevice device = claimService.claimDevice(deviceId, claimCode, deviceName, currentSpaceId());
+        SduiDevice device = claimService.claimDevice(deviceId, claimCode, deviceName, currentUserId());
         try {
             orchestrationService.sendScene(deviceId, SectionPresets.claimedSuccessScene());
         } catch (Exception e) {
@@ -152,13 +152,13 @@ public class SduiDeviceService {
     @Transactional
     public void deleteDevice(String deviceId) {
         SduiDevice device = deviceRepository.findById(deviceId)
-                .filter(d -> currentSpaceId().equals(d.getOwnerSpaceId()))
+                .filter(d -> currentUserId().equals(d.getOwnerUserId()))
                 .orElseThrow(() -> new IllegalArgumentException("device not found or not owned"));
 
         telemetryRepository.deleteByDeviceId(deviceId);
         commandRepository.deleteByDeviceId(deviceId);
         capabilityService.clearCapabilitiesCache(deviceId);
-        device.setOwnerSpaceId("");
+        device.setOwnerUserId("");
         device.setRegistrationStatus("UNCLAIMED");
         device.setClaimCode(null);
         device.setClaimCodeExpireAt(null);
@@ -169,7 +169,7 @@ public class SduiDeviceService {
 
         sessionManager.disconnectDevice(deviceId);
 
-        log.info("Device {} deleted from space {}, reset to unclaimed", deviceId, currentSpaceId());
+        log.info("Device {} deleted from user {}, reset to unclaimed", deviceId, currentUserId());
     }
 
     // ── Capabilities ──
@@ -198,16 +198,16 @@ public class SduiDeviceService {
 
     private void requireOwned(String deviceId) {
         deviceRepository.findById(deviceId)
-                .filter(d -> currentSpaceId().equals(d.getOwnerSpaceId()))
+                .filter(d -> currentUserId().equals(d.getOwnerUserId()))
                 .orElseThrow(() -> new IllegalArgumentException("device not found or not owned"));
     }
 
-    public String currentSpaceId() {
-        String spaceId = GlobalContext.getSpaceId();
-        if (spaceId == null || spaceId.isBlank()) {
-            throw new IllegalStateException("space_id is required");
+    public String currentUserId() {
+        String userId = GlobalContext.getUserId();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalStateException("user_id is required");
         }
-        return spaceId;
+        return userId;
     }
 
     // ── JSON helpers ──

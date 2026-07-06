@@ -15,8 +15,8 @@ import java.time.LocalDateTime;
 @Table(name = "sdui_device")
 public class SduiDevice {
 
-    @Column(name = "space_id", nullable = false)
-    private String ownerSpaceId = "";
+    @Column(name = "user_id")
+    private String ownerUserId = "";
 
     @Id
     @Column(name = "device_id", length = 64)

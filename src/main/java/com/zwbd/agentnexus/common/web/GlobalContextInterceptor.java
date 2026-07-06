@@ -2,44 +2,41 @@ package com.zwbd.agentnexus.common.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
-
-import java.util.Map;
 
 /**
  * @Author: wnli
  * @Date: 2025/11/24 10:08
  * @Desc:
- * 通用拦截器：自动提取 Header 并注入 GlobalContext
- * 支持配置 Header 到 Context Key 的映射，实现非侵入式参数传递
+ * 通用拦截器：自动从 SecurityContext 提取用户身份注入 GlobalContext，
+ * 同时兼容 X-Space-Id header（向后兼容旧前端）。
  */
 @Component
 public class GlobalContextInterceptor implements HandlerInterceptor {
 
-    // 定义 Header -> ContextKey 的映射关系
-    // 实际项目中可放入 application.yml 配置
-    private static final Map<String, String> HEADER_MAPPING = Map.of(
-            "X-Space-Id", GlobalContext.KEY_SPACE_ID
-//            "X-User-Id", GlobalContext.KEY_USER_ID,
-//            "X-Trace-Id", GlobalContext.KEY_TRACE_ID
-    );
-
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        // 1. 遍历映射，提取 HTTP Header 存入 Context
-        HEADER_MAPPING.forEach((header, key) -> {
-            String value = request.getHeader(header);
-            if (StringUtils.hasText(value)) {
-                GlobalContext.set(key, value);
-            }
-        });
+        // 1. 优先从 JWT SecurityContext 提取用户名作为隔离键
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && StringUtils.hasText(auth.getName())) {
+            GlobalContext.set(GlobalContext.KEY_USER_ID, auth.getName());
+        }
 
-        // 2. 核心参数兜底逻辑 (Space ID 特殊处理：如果没传，设为默认)
-        // 保证下游业务永远能拿到一个有效的 space_id
-        if (!StringUtils.hasText(GlobalContext.getString(GlobalContext.KEY_SPACE_ID))) {
-            GlobalContext.set(GlobalContext.KEY_SPACE_ID, GlobalContext.DEFAULT_SPACE_ID);
+        // 2. 兼容旧前端：X-Space-Id header 作为 fallback
+        if (!StringUtils.hasText(GlobalContext.getString(GlobalContext.KEY_USER_ID))) {
+            String spaceId = request.getHeader("X-Space-Id");
+            if (StringUtils.hasText(spaceId)) {
+                GlobalContext.set(GlobalContext.KEY_USER_ID, spaceId);
+            }
+        }
+
+        // 3. 核心参数兜底逻辑：如果仍然没有用户标识，设为默认
+        if (!StringUtils.hasText(GlobalContext.getString(GlobalContext.KEY_USER_ID))) {
+            GlobalContext.set(GlobalContext.KEY_USER_ID, GlobalContext.DEFAULT_USER_ID);
         }
 
         return true;

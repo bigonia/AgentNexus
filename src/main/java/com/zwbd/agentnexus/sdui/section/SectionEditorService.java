@@ -51,8 +51,31 @@ public class SectionEditorService {
 
     private List<Map<String, Object>> toDisplayFields(SectionSpec spec, SectionRenderMode renderMode) {
         return catalog.get(spec.type())
-                .map(def -> filterFields(spec.fields(), renderMode, def.compactHiddenFields(), ""))
+                .map(def -> {
+                    List<Map<String, Object>> fields = filterFields(spec.fields(), renderMode, def.compactHiddenFields(), "");
+                    mergeParameterizable(fields, def.displayFields());
+                    return fields;
+                })
                 .orElseGet(() -> spec.fields().stream().map(this::toFieldMap).toList());
+    }
+
+    /** Merge parameterizable flag from the catalog's SectionFieldDef into FieldSpec output maps. */
+    private void mergeParameterizable(List<Map<String, Object>> fieldMaps,
+                                       List<SectionTypeCatalog.SectionFieldDef> catalogFields) {
+        for (Map<String, Object> fm : fieldMaps) {
+            String name = (String) fm.get("name");
+            catalogFields.stream()
+                    .filter(cf -> cf.name().equals(name))
+                    .findFirst()
+                    .ifPresent(cf -> {
+                        fm.put("parameterizable", cf.parameterizable());
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> children = (List<Map<String, Object>>) fm.get("children");
+                        if (children != null && !children.isEmpty() && cf.children() != null && !cf.children().isEmpty()) {
+                            mergeParameterizable(children, cf.children());
+                        }
+                    });
+        }
     }
 
     private List<Map<String, Object>> filterFields(List<FieldSpec> fields,

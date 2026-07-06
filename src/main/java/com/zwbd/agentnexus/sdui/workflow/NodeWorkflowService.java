@@ -17,15 +17,18 @@ public class NodeWorkflowService {
     private final NodeWorkflowDefinitionRepository workflowRepository;
     private final NodeWorkflowDeploymentRepository deploymentRepository;
     private final WorkflowUiContextService uiContextService;
+    private final NodeWorkflowParameterResolver parameterResolver;
     private final ObjectMapper objectMapper;
 
     public NodeWorkflowService(NodeWorkflowDefinitionRepository workflowRepository,
                                NodeWorkflowDeploymentRepository deploymentRepository,
                                WorkflowUiContextService uiContextService,
+                               NodeWorkflowParameterResolver parameterResolver,
                                ObjectMapper objectMapper) {
         this.workflowRepository = workflowRepository;
         this.deploymentRepository = deploymentRepository;
         this.uiContextService = uiContextService;
+        this.parameterResolver = parameterResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -71,7 +74,9 @@ public class NodeWorkflowService {
     public Map<String, Object> validate(NodeWorkflowDefinition raw) {
         List<String> errors = new ArrayList<>(NodeWorkflowSupport.validateDefinition(raw));
         if (errors.isEmpty()) {
-            errors.addAll(uiContextService.validateUiNodes(NodeWorkflowSupport.normalize(raw)));
+            NodeWorkflowDefinition workflow = NodeWorkflowSupport.normalize(raw);
+            errors.addAll(uiContextService.validateUiNodes(workflow));
+            errors.addAll(validateRefs(workflow));
         }
         return Map.of("valid", errors.isEmpty(), "errors", errors);
     }
@@ -104,9 +109,22 @@ public class NodeWorkflowService {
         List<String> errors = new ArrayList<>(NodeWorkflowSupport.validateDefinition(workflow));
         if (errors.isEmpty()) {
             errors.addAll(uiContextService.validateUiNodes(workflow));
+            errors.addAll(validateRefs(workflow));
         }
         if (!errors.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", errors));
         }
+    }
+
+    private List<String> validateRefs(NodeWorkflowDefinition workflow) {
+        Set<String> allNodeIds = new LinkedHashSet<>();
+        workflow.nodes().forEach(n -> allNodeIds.add(n.nodeId()));
+        Map<String, Set<String>> upstreamByNode = NodeWorkflowSupport.upstreamNodeIds(workflow);
+        List<String> errors = new ArrayList<>();
+        for (var node : workflow.nodes()) {
+            errors.addAll(parameterResolver.validateReferences(
+                    node.params(), node.nodeType(), node.nodeId(), allNodeIds, upstreamByNode));
+        }
+        return errors;
     }
 }

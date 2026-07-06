@@ -144,6 +144,7 @@ public class DeviceProtocolCatalog {
                     def.options(),
                     def.description(),
                     def.required(),
+                    def.parameterizable(),
                     children
             ));
         }
