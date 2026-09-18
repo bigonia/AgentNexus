@@ -26,11 +26,10 @@ import java.util.*;
  */
 @Slf4j
 @Component
-// LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
-// Replaced by: 收敛为 03_UI_MODEL.md 2.1 的五类
-// Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
-// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
-@Deprecated(since = "0.10.0")
+// 保留（修正 2026-09-18）：本类不是旧协议路径。ui.SduiUiTemplateService 用它做 Section 类型与字段校验，
+// 数据由平台配置 sdui-event-catalog.yml 驱动，属于 UI 模板域的类型目录。
+// 待收敛（P5c，依赖 T6 定稿）：YAML 内的类型集合从 14 类收敛为 03_UI_MODEL.md §2.1 的五类；
+// 收敛的是内容，不是本类。见 12_DESIGN_NOTES.md §7 与 11_FEATURE_MATRIX.md 5.15。
 public class SectionTypeCatalog {
 
     private final EventRegistry eventRegistry;

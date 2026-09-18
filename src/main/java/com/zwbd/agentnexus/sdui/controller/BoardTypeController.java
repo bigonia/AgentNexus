@@ -93,12 +93,22 @@ public class BoardTypeController {
      * Section 触发树：Section → 可交互元素 → 该元素可触发的事件。
      *
      * <p>与 {@code /capability-nodes} 的分工：后者给出工作流图的可用节点，本接口给出
-     * {@code section.trigger} 节点的配置面板数据。</p>
+     * {@code section.trigger} 节点的配置面板数据——节点目录只能说明"有哪些触发源族"，
+     * 回答不了"当前页面里具体有哪些元素可绑"。</p>
      *
-     * <p>// TODO(lcd085-refactor): 这是接口集里最后一处仍读旧 Section 模型（{@link SectionTriggerCatalog}
-     * 及其 Service）的端点。触发树应从 v2 能力 Schema 的 {@code surface.ui} 派生。
-     * 登记于 12_DESIGN_NOTES.md §7.2，随 P5c 一并处理——终端固件未切换前，旧 Section 模型仍是活的，
-     * 现在改写会让触发面板没有数据源。</p>
+     * <p><b>数据源与设备协议无关</b>（2026-09-18 复核，原判断已修正）：三级树的输入是平台页面定义
+     * （{@code PageService} / {@code SectionPageDefinition}）与平台 Section 类型目录
+     * （{@code SectionTypeCatalog}，由 {@code sdui-event-catalog.yml} 驱动），都是平台侧产物，
+     * 与终端固件版本无关。它不可能"改从 v2 能力 Schema 的 {@code surface.ui} 派生"——
+     * {@code UiSpec} 只声明允许的 Section 类型名，不含元素与事件定义。且 v2 已有裁决：Section 类型的
+     * 能力门禁归 {@code CapabilitySchemaV2} 的校验职责，不在别处二次判断
+     * （见 {@code v2.display.SectionViewResolver} 类注释）。</p>
+     *
+     * <p>因此本端点<b>不阻塞 P5c</b>：它依赖的 {@code SectionTypeCatalog}、{@code PageService}、
+     * {@code EventRegistry} 均被保留包（{@code ui} / {@code workflow}）使用，属活代码；只有
+     * {@link SectionTriggerCatalog} 与 {@link SectionTriggerCatalogService} 两个薄封装随本端点的存废。
+     * 前端当前未调用本端点（{@code scripts/sdui-front-paths.py}），属编排面板尚未接线，
+     * 不是接口设计问题。</p>
      */
     @GetMapping("/{board}/section-triggers")
     public ApiResponse<SectionTriggerCatalog> sectionTriggers(

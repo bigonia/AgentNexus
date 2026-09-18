@@ -2,11 +2,11 @@ package com.zwbd.agentnexus.sdui.section;
 
 import java.util.List;
 
-// LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
-// Replaced by: display.section 全量替换
-// Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
-// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
-@Deprecated(since = "0.10.0")
+// 保留（修正 2026-09-18）：本类不是旧协议路径，是 v2 单 Section 收敛点的输入模型之一。
+// v2.display.PrimaryViewPublisher / SectionViewResolver 用它承载平台内部既有的类型化补丁，
+// 再由 SectionViewResolver 合成为完整 Section，以 display.section 下发。
+// v2 协议层面确实没有 Patch（§4.17），要移除的是"把 Patch 直接下发给设备"的旧路径，不是本类。
+// 详见 docs/sdui/lcd085-refactor/2026-09-18/12_DESIGN_NOTES.md §4.17 / §4.18 裁决二。
 public record SectionPatch(
         String pageId,
         List<PatchEntry> patches,

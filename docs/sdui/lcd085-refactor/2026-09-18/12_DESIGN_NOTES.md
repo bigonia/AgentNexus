@@ -291,7 +291,13 @@ P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一�
 
 **修正一处错误注释。** `CapabilityNodeController` 原标注"前端未使用，预期移除"，实际编辑器与两个测试页都在调用。教训：端点是否在用要靠扫描前端调用点（`scripts/sdui-front-paths.py`）判定，不能靠印象——这正是 Q9 之前一直无法关闭的原因。
 
-**遗留。** `/board-types/{board}/section-triggers` 仍读旧 Section 目录，应从 v2 Schema 的 `surface.ui` 派生；终端固件未切换前旧模型仍是活的，提前改写会让触发面板失去数据源。已标 `TODO(lcd085-refactor)` 并登记 §7.2。
+**复核并撤销一处定性（同日，0.14.1）。** `/board-types/{board}/section-triggers` 曾被记作"接口集里最后一处旧 Section 模型泄漏，应从 v2 Schema 的 `surface.ui` 派生"。复核后该定性不成立，理由三条：
+
+1. **数据源不是旧协议。** 三级树的输入是平台页面定义（`PageService` / `SectionPageDefinition`）与平台 Section 类型目录（`SectionTypeCatalog`，由 `sdui-event-catalog.yml` 驱动）。二者都是平台侧产物，与终端固件版本无关。
+2. **"从 `surface.ui` 派生"技术上不成立。** `CapabilitySchemaV2.UiSpec` 只有 `sectionTypes`（允许的类型名）与 `viewModes`，不含元素与事件定义；实例级三级树不可能由它生成。
+3. **v2 已有相反裁决。** `v2.display.SectionViewResolver` 类注释明确"不做 Section 类型的能力门禁——终端声明的 `ui.sectionTypes` 属于 `CapabilitySchemaV2` 的校验职责，在这里再判断一次会形成第二处真值"。因此本端点也不应叠加门禁。
+
+**结论**：本端点不阻塞 P5c。它依赖的 `SectionTypeCatalog`、`PageService`、`EventRegistry` 都被保留包（`ui` / `workflow`）使用着（`SduiUiTemplateService` 用 `SectionTypeCatalog` 做模板字段校验，`NodeWorkflowSupport` 用 `EventRegistry`），属活代码；随本端点存废的只有 `SectionTriggerCatalog` 与 `SectionTriggerCatalogService` 两个薄封装。前端当前未调用它（`scripts/sdui-front-paths.py`），属编排面板尚未接线。Q10 据此关闭。
 
 ### 4.20 引用图的第三类误判：接线根（2026-09-18，0.14.0 修正）
 
@@ -309,6 +315,22 @@ P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一�
 
 **实测影响**：A 类从 15 降到 **12**。移出的 3 个是 `WebSocketConfig`（转为接线根）与 `SduiWebSocketHandler`、`MessageRouter`（转为"先删注册行再删"，见 §7.1b）。数量变小了，但清单从"照删会出事故"变成了"照删是安全的"。
 
+## 4.21 引用图的两处口径修正：释放量与保留闭包（2026-09-18，0.14.1 复核）
+
+复核 Q10 时发现引用图的两处输出会误导 P5c 的执行顺序，一并修正。
+
+**一、"引用数"不等于"释放量"。** 原"释放容量"表统计的是"该控制层类引用了多少个滞留类"。但按判据 `f 可删 <=> 引用者全可删`，只有滞留类的引用者**全是候选方**时，裁掉它才能释放；若另有保留方引用，裁掉多少都不释放。于是 `CapabilityNodeTestService`（引用 5 个）被排在第一位，实际它**一个都释放不了**。
+
+改为**逐个推演**：把该类视为已删除后重跑收敛，看 A 类增量。为此给 `converge()` 加了 `removed` 参数——少了它，"引用者已删"的类仍会被判为受阻。修正后的排序：`BoardTypeController` 2、`WebSocketConfig` 2、`DeviceController` 1，其余控制层类均为 0。
+
+**二、"直接引用者是不是保留包"漏掉间接依赖。** 原判断只看被引用类的直接引用者。`event/EventRegistry` 的直接引用者全在候选池，看起来可删；实际上 `ui.SduiUiTemplateService → section.SectionTypeCatalog → event.EventRegistry` 是一条真实链（构造器注入，非 javadoc）。
+
+改为计算**保留闭包**：从保留包出发（种子排除接线根与 `controller` / `debug` 两个待裁层），沿类型引用与继承关系求可达集。实测 **39 个**，全部属于"保留方不改动就删不掉"。§7.3 据此重写——原表声称可删的旧能力 / 事件模型，实际上全在闭包内。
+
+**种子为什么必须排除接线根与待裁层**：`WebSocketConfig` 虽在保留集，但它要裁剪（只留 `/ws/sdui/v2` 注册）。把它当种子，会把 `SduiWebSocketHandler → MessageRouter → DeviceSessionManager` 整条旧链误判为保留。同理 `controller` / `debug` 层已在 §7.2 列为待裁，它们当前的引用是**改造点**，不是保护。
+
+**附带的两个修正**：`section/SectionPatch` 与 `section/SectionTypeCatalog` 原先都带 `@Deprecated(since="0.10.0")` + "legacy protocol path, scheduled for removal"。前者被 v2 主视图收敛依赖，后者被 UI 模板域依赖——照删都会**编译通过但功能悄悄消失**（前者让 v2 下发失败，后者让模板字段校验失效）。两处标注已改为说明其真实依赖，`@Deprecated` 已移除。
+
 ## 5. 未决问题
 
 | # | 问题 | 影响 | 状态 |
@@ -322,7 +344,7 @@ P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一�
 | Q7 | 平台能否为动态节点签发专用绑定 / 新 token | `rgb.effect` / `audio.record` 类平台步骤能否闭环 | 待终端确认（G25 / T15） |
 | Q8 | 平台步骤在连接线程上同步执行 | 一次含 TTS 与音频下行的工作流可能占用秒级消息线程时间 | 待定；移出线程需要一并传递租户上下文（`GlobalContext` 是 ThreadLocal），旧实现同样同步，无退化 |
 | Q9 | §7.2 的控制层端点哪些仍被前端使用 | P5c 能否删除对应的旧能力 / 事件模型 | **已关闭（0.14.0）**：扫描 `static/*.html` 得到前端实际调用面（§7.2）。调试域只有 `node-tests` 三个端点被调用；`static/*.html` 本身在 §7.3 待删清单里 |
-| Q10 | `/section-triggers` 的触发树数据源 | 接口集里最后一处旧模式泄漏，阻塞 3 个待删类 | 待 P5c：改从 v2 Schema 的 `surface.ui` 派生；终端固件切换后旧数据源才会失效（§4.19） |
+| Q10 | `/section-triggers` 的触发树数据源 | 原判"接口集里最后一处旧模式泄漏，阻塞 3 个待删类" | **已关闭（0.14.1）**：定性有误，已撤销。数据源是平台页面定义与类型目录（非旧协议），v2 Schema 的 `ui` 只有类型名名单、无法派生三级树，且 v2 已裁决门禁归 Schema 校验（§4.19）。不阻塞 P5c |
 
 ## 6. 开发过程记录
 
@@ -346,6 +368,7 @@ P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一�
 | 2026-09-18 | P5c 前置：引用图复核删除清单 | 新增 `scripts/sdui-refgraph/refgraph.py`；查明 v2 硬依赖只有 6 个类、`sdui` 对外封闭、删除难点在控制层；修正原清单两处错误（§4.18），§7 重写为三步可执行清单 |
 | 2026-09-18 | 交付 0.14.0 闭环接口集 | 新增契约 `docs/sdui/front/CLIENT_API.md`；按域改写全部 sdui 控制器（设备 / 能力 / 板型 / 事件 / 工作流 / 调试）；新建 `CapabilityQueryService`（能力唯一出口）、`PlatformRequestDispatcher`（调试下行唯一出口）、`DebugStreamHub`（调试流）；保留模块统一换用 `DeviceConnectionRegistry`（§4.19）；删除重复端点 `/debug/node-workflows/**`，补上缺失的 `/deployments/{deploymentId}/config` |
 | 2026-09-18 | 关闭 Q9、新增 Q10 | 扫描前端调用点（`scripts/sdui-front-paths.py`）确定实际使用面；修正 `CapabilityNodeController` 的错误弃用注释；§7.2 阻塞量 59 → 18（§4.19） |
+| 2026-09-18 | 撤销 Q10、修正引用图两处口径、纠正两处误标弃用 | 保留闭包 39 个，§7.3 重写为"控制层裁剪**不能**释放旧能力 / 事件模型，前提是先解耦 `ui` 包"；"引用数"口径改为"释放量"逐个推演（§7.2）；`SectionPatch` / `SectionTypeCatalog` 移除错误的 `@Deprecated`；新增 T16（§4.19 / §4.21） |
 | 2026-09-18 | 修正引用图第三类误判：接线根 | `WebSocketConfig`（`@Configuration`，注册 `/ws/sdui/v2`）原被列为 A 类可删，照删会让 v2 端点在编译与测试全绿的情况下消失。脚本新增接线根判据，A 类 15 → 12（§4.20） |
 | 2026-09-18 | 验证 | `mvn test` **350 项通过**（新增 `PlatformRequestDispatcher` / `DebugStreamHub` / `CapabilityQueryService` 等 29 项用例；删除重复控制器 `NodeWorkflowDebugController` 及其 2 项测试；无回归） |
 
@@ -369,7 +392,9 @@ python scripts/sdui-refgraph/refgraph.py
 python scripts/sdui-front-paths.py
 ```
 
-**规模（0.14.0 实测）**：`sdui` 主代码中 v2 54 个、非 v2 165 个，其中保留包（`ui` / `workflow` / `artifact` / `repo` / `model` / `dto` / `controller` / `debug` / `resources`）占 71 个，`sdui` 外 58 个。候选池 93 = **A 类 12（可整文件删）** + C 类 81（需先裁剪引用方）。
+**规模（0.14.1 实测）**：`sdui` 主代码中 v2 54 个、非 v2 165 个，其中保留包（`ui` / `workflow` / `artifact` / `repo` / `model` / `dto` / `controller` / `debug` / `resources`）占 71 个，`sdui` 外 58 个。候选池 93 = **A 类 12（可整文件删）** + C 类 81（需先裁剪引用方）。C 类里有 **39 个属保留闭包**（§7.3）——在保留方改动前删不掉，真正可争取的是其余 42 个。
+
+脚本输出另有两节供执行顺序使用（0.14.1 新增，见 §4.21）：**释放容量**（逐个推演"裁掉它能释放几个"，与"引用几个"不是一回事）与**保留闭包**（保留方直接或间接依赖的池内类，即不可删清单）。
 
 ### 7.1 第一步：无需改动任何保留方即可删（12）
 
@@ -398,20 +423,23 @@ python scripts/sdui-front-paths.py
 
 ### 7.2 第二步：先裁剪控制层
 
-下列控制层类仍按旧能力 / 事件模型暴露接口，各自的每个引用都在"保护"着若干待删类。**不先处理它们，旧模型一个都删不掉。**
+**执行顺序的依据是"释放量"，不是"引用数"（口径修正 2026-09-18，0.14.1）。** 原统计口径是"该控制层类引用了多少个滞留类"，把"碰到"当成了"阻塞"。按判据 `f 可删 <=> 引用者全可删`，只有当滞留类的引用者**全是候选方**时，裁掉它才能释放；若某类另有保留方（`ui` / `workflow`）引用，裁掉多少控制层都不释放。原引导句"不先处理它们，旧模型一个都删不掉"对 `CapabilityNodeTestService` 这类并不成立。
 
-**规模已随接口集落地（0.14.0）大幅收缩**：控制层的总阻塞量从 0.13.0 的约 59 降到 **18**。`DebugController` 与 `CapabilityController` 已完全脱离旧模型（阻塞 0），不再是这一步的对象。下表为 0.14.0 实测：
+下表因此改为**逐个推演**：把该类视为已删除后重跑收敛，看 A 类增量（`scripts/sdui-refgraph/refgraph.py`）。0.14.1 实测：
 
-| 控制层类 | 阻塞的待删类数 | 0.13.0 | 说明 |
+| 控制层类 | 真实释放量 | 引用滞留类 | 说明 |
 | --- | --- | --- | --- |
-| `debug/node/CapabilityNodeTestService` | 5 | 6 | P5b 已改为走 `WorkflowPlatformStepExecutor`，但仍持有 `AudioService` / `EventInputHandler` |
-| `debug/workflow/NodeWorkflowDebugService` | 4 | 5 | 旧调试链路 |
-| `controller/BoardTypeController` | 4 | 10 | **仅剩 `/section-triggers`**：读 `SectionTriggerCatalog` / `SectionTriggerCatalogService` / `SectionTypeCatalog` |
-| `controller/CapabilityNodeController` | 2 | 2 | 节点目录（`CapabilityNodeCatalog*`） |
-| `controller/DeviceController` | 2 | 12 | 遥测趋势（`TelemetryTrendService`）、`SduiDeviceService` |
-| `controller/EventCatalogController` | 1 | 1 | 事件目录（旧 14 类 Section 模型） |
-| `controller/DebugController` | 0 | 14 | **已脱离**：改走 v2 请求派发与调试流枢纽 |
-| `controller/CapabilityController` | 0 | 9 | **已脱离**：改走 `CapabilityQueryService`（全部读 v2 Schema） |
+| `controller/BoardTypeController` | **2** | 4 | `/section-triggers` 的存废决定 `SectionTriggerCatalog` / `SectionTriggerCatalogService`；另 2 个引用项（`CapabilityNodeCatalog*`）被部署域共用，不随它释放 |
+| `WebSocketConfig` | **2** | 1 | 删掉旧端点两行注册，连带释放 `SduiWebSocketHandler` → `MessageRouter` |
+| `controller/DeviceController` | **1** | 2 | 遥测趋势（`TelemetryTrendService`）；`SduiDeviceService` 被 v2 与调试域共用，不释放 |
+| `debug/node/CapabilityNodeTestService` | 0 | 5 | 引用最多但一个都不释放——它们都另有保留方引用 |
+| `debug/workflow/NodeWorkflowDebugService` | 0 | 4 | 同上 |
+| `controller/CapabilityNodeController` | 0 | 2 | 节点目录（`CapabilityNodeCatalog*`）被部署域共用 |
+| `controller/EventCatalogController` | 0 | 1 | 事件目录被 `workflow.NodeWorkflowSupport` 共用 |
+| `controller/DebugController` | 0 | 0 | **已脱离**：改走 v2 请求派发与调试流枢纽 |
+| `controller/CapabilityController` | 0 | 0 | **已脱离**：改走 `CapabilityQueryService`（全部读 v2 Schema） |
+
+**结论**：旧清单把 `CapabilityNodeTestService` 列为第一阻塞源（"阻塞 5 个"）是误导——它一个都释放不了。按真实释放量，P5c 的优先项是 `BoardTypeController`、`WebSocketConfig`（各 2）与 `DeviceController`（1），合计 5 个；其余控制层类处理与否不改变可删集。
 
 处理方式：删除端点，或改读 v2 的能力 Schema（`sdui.v2.capability.CapabilitySchemaV2`）。
 
@@ -428,30 +456,63 @@ python scripts/sdui-front-paths.py
 
 结论：调试域**只有 `node-tests` 三个端点**被前端调用；`/debug/{deviceId}/request`、`/view`、`/requests*`、`/events/stream` 目前无调用方。裁剪控制层时，前端会随之改版——`static/*.html` 本身也在 §7.3 的待删清单里。
 
-### 7.3 第三步：随控制层裁剪一并撤销保护的旧协议簇
+### 7.3 第三步：保留闭包——**不能**随控制层裁剪释放的旧协议簇
 
-裁剪 §7.2 后重跑脚本，可删集显著扩大（推演显示至少额外释放 18 个，该数字偏保守——链式保护会传导，届时以重跑结果为准）。预期纳入的核心簇：
+原 §7.3 假定"裁掉控制层后，旧能力 / 事件 / 下发模型会一并进入可删集"。0.14.1 用**保留闭包**复核，该假定**不成立**。
 
-| 簇 | 代表类 |
+保留闭包 = 从保留包出发（种子排除接线根与 `controller` / `debug` 两个待裁层），沿类型引用与继承关系可达的池内类。它们被保留方直接或间接依赖，**在保留方不改动的前提下删不掉**。实测 **39 个**，由三个来源引入：
+
+| 来源 | 引入链 | 被拖住的类 |
+| --- | --- | --- |
+| UI 模板域（真硬约束） | `ui.SduiUiTemplateService`、`ui.DevicePrimaryUiService`、`ui.WorkflowUiContextService` | `section/` 平台 UI 模型 11 类、`protocol/catalog/DeviceCapabilityProjection` |
+| 旧能力模型（经上一行引入） | `DeviceCapabilityProjection` → `service.SduiCapabilityService` → `capability.CapabilityRegistry` | `capability/CapabilityRegistry`、`CapabilityCatalog`、`protocol/CapabilitySchema`、`protocol/CapabilitySnapshotParser`、`service/CommandSchemaRegistry`、`protocol/catalog/*` 6 类 |
+| 旧事件模型（同上） | `DeviceCapabilityProjection` → `protocol/catalog/DeviceProtocolCatalog` → `event.EventRegistry` | `event/EventRegistry`、`EventDefinition`、`EventCatalogLoader`、`EventCatalogProperties`、`EventPayload`、`protocol/BinaryProtocolCodec` |
+
+**关键链**（它决定了 P5c 的实际工作量）：
+
+```
+ui.SduiUiTemplateService
+  └─ protocol.catalog.DeviceCapabilityProjection      （构造器注入，非 javadoc）
+       ├─ service.SduiCapabilityService               （@Lazy 注入）
+       │    ├─ capability.CapabilityRegistry
+       │    └─ service.CommandSchemaRegistry
+       └─ protocol.catalog.DeviceProtocolCatalog
+            └─ event.EventRegistry -> EventDefinition / EventCatalogLoader / EventCatalogProperties
+```
+
+**结论**：`capability/CapabilityRegistry`、`capability/node/*`、`protocol/catalog/*`、`event/EventRegistry` 及整条旧事件模型**都不能**在 P5c 直接删——它们被保留的 UI 模板域用着。释放它们的唯一路径是先让 `ui` 包从旧能力模型解耦，这是一块独立改造面，工作量大于裁控制层。
+
+控制层裁剪后**真正新增**的可删类只有 6 个：
+
+| 来源 | 类 |
 | --- | --- |
-| 旧消息入口 | `CapabilitiesReportHandler`、`HeartbeatHandler`、`MotionEventHandler`、`SduiControlAckHandler`、`SduiPageChangedHandler`、`handler/AckBinaryHandler`、`handler/ErrorBinaryHandler`、`handler/EventInputHandler` |
-| 旧协议编解码 | `protocol/BinaryProtocolCodec`、`protocol/ProtocolMapper`、`protocol/SduiProtocolConstants`、`protocol/CapabilitySnapshotParser` |
-| 旧能力模型 | `capability/CapabilityRegistry`、`capability/node/*`、`protocol/catalog/DeviceCapabilityProjection`（`PlatformCapabilityRegistry`、`CapabilityContractService`、`SduiRuntimeHandlers` 已提前到 §7.1，无需等这一步） |
-| 旧事件模型 | `event/EventRegistry`、`event/EventPayload`、`event/EventDefinition`、`event/EventCatalogLoader`、`event/EventCatalogProperties` |
-| 旧下发出口 | `section/SectionOrchestrationService`、`service/CommandService`、`service/CommandDispatcher`、`service/CommandSchemaRegistry`、`service/SduiDeviceService`、`service/DeviceLifecycleService`、`service/EventStreamService`、`service/SduiProtocolService` |
-| 旧 Section 编排 | `section/SectionSceneBuilder`、`section/SectionCapabilityAdapter`、`section/SectionPresets`、`section/SectionTriggerHook`、`section/PageRepository`、`section/SduiPageEntity` |
-| 旧调试页 | `static/sdui-node-test.html`、`sdui-workflow-editor.html`、`sdui-workflow-test.html` |
+| `BoardTypeController`（`/section-triggers` 存废决定） | `section/SectionTriggerCatalog`、`SectionTriggerCatalogService` |
+| `DeviceController` | `service/TelemetryTrendService` |
+| `WebSocketConfig`（删旧端点两行注册） | `SduiWebSocketHandler` → `MessageRouter` |
+| `debug` 层改写 | `debug/DebugSessionService` |
+
+其余旧协议类（`CapabilitiesReportHandler`、`HeartbeatHandler`、`MotionEventHandler`、`SduiControlAckHandler`、`SduiPageChangedHandler`、`handler/EventInputHandler`、`service/SduiProtocolService`、`DeviceSessionManager`、`section/SectionOrchestrationService` 等）串成一条链，而该链同时被 `debug` 层与 `ui` 层握着。**逐个推演显示裁掉整个 `debug` 层释放 0 个类**，正因为这条链在 `debug` 之外另有保留方。
+
+**执行顺序因此修正为**：
+
+1. 裁 §7.2 的三个控制层类 → 释放 3 个旧模型类，加接线根释放的 2 个；
+2. 让 `ui` 层与 `debug` 层从旧能力 / 事件模型解耦——闭包 39 个里的绝大多数要靠这一步；
+3. 步骤 2 完成后重跑脚本，旧协议簇才真正进入可删集。
+
+`static/*.html` 三个调试页仍在待删清单（前端实际调用面见 §7.2）。
 
 ### 7.4 必须保留（v2 硬依赖，P5c 不可动）
 
 | 类 | 引用方 | 原因 |
 | --- | --- | --- |
 | `model/SduiDevice` | `v2.capability.CapabilityQueryService` | 设备台账（板型聚合、租户过滤）。**0.14.0 新增的硬边界**：能力查询必须落到设备实体上，不能只读能力缓存 |
-| `section/SectionScene`、`SectionPatch`、`SectionData`、`SectionEntry`、`SectionDataCodec` | `v2.display.PrimaryViewPublisher`、`v2.display.SectionViewResolver` | 单 Section 收敛点的输入模型（§4.17 / §4.18 裁决二） |
+| `section/SectionScene`、`SectionPatch`、`SectionData`、`SectionEntry`、`SectionDataCodec` | `v2.display.PrimaryViewPublisher`、`v2.display.SectionViewResolver` | 单 Section 收敛点的输入模型（§4.17 / §4.18 裁决二）。**0.14.1 修正误标**：`SectionPatch` 原先带 `@Deprecated` + "legacy protocol path, scheduled for removal"，照删会让 v2 的主视图收敛编译不过 |
 | `repo/SduiDeviceRepository` | `v2.session.DeviceTenantContext` | 设备归属查询（§4.16） |
 | `service/audio/TtsProvider` 及实现 `FfmpegTtsProvider`、`MacOsTtsEngine`、`AudioConversionService` | `workflow.WorkflowPlatformStepExecutor` | `audio.play` 的 TTS 链路（§4.15）。它们零显式引用者，最容易被误删 |
-| `section/SectionTypeCatalog` | `ui.SduiUiTemplateService` | 模板类型校验；收敛类型集合而非删除 |
-| `section/SectionLayout`、`SectionRenderMode`、`PageService`、`PageDefinition` | `ui.DevicePrimaryUiService`、`ui.SduiUiTemplateService` | 平台侧 UI 模型 |
+| `section/SectionTypeCatalog` | `ui.SduiUiTemplateService` | 模板类型与字段校验用的类型目录；收敛 YAML 内的类型集合，而非删除本类。**0.14.1 修正误标**：原先带 `@Deprecated` + "legacy protocol path, scheduled for removal"，实际是活代码 |
+| `section/SectionLayout`、`SectionRenderMode`、`PageService`、`PageRepository`、`SduiPageEntity`、`SectionPageDefinition` | `ui.DevicePrimaryUiService`、`ui.SduiUiTemplateService` | 平台侧 UI 模型 |
+| `capability/node/CapabilityNodeCatalog`、`CapabilityNodeCatalogService` | `workflow.NodeWorkflowDeploymentService` | 部署组装读节点目录。**0.14.1 新增**：它们同时被 `BoardTypeController` / `CapabilityNodeController` 引用，容易被误当成"控制层专属而可删" |
+| `protocol/catalog/DeviceCapabilityProjection` 及其下游（`service/SduiCapabilityService`、`service/CommandSchemaRegistry`、`capability/CapabilityRegistry`、`event/EventRegistry` 等） | `ui.SduiUiTemplateService` | **不是可删项**。保留闭包 39 个中的大多数经此链被拖住；P5c 的前提是先解耦 `ui` 包（§7.3） |
 
 ### 7.5 删除前必须确认
 
@@ -460,7 +521,8 @@ python scripts/sdui-front-paths.py
 | T11 | 上行音频的 v2 承载方式 | 旧链路是平台唯一的录音通路，删了就没有替代 |
 | T13 | 本地响应动作的名称与参数集合 | `WorkflowActionMapper` 的映射表无法定稿，直接影响"哪些节点该下沉" |
 | ~~—~~ | ~~§7.2 控制层端点的实际使用情况~~ | **已关闭（0.14.0）**：`scripts/sdui-front-paths.py` 给出前端实际调用面，见 §7.2。调试域只有 `node-tests` 三个端点在用 |
-| Q10 | `/section-triggers` 改由 v2 Schema 派生 | 不改则接口集里始终留一处旧 Section 模型依赖，阻塞 3 个待删类 |
+| ~~Q10~~ | ~~`/section-triggers` 改由 v2 Schema 派生~~ | **已关闭（0.14.1）**：定性有误。数据源是平台页面定义与类型目录；v2 的 `UiSpec` 只有类型名名单，派生三级树不成立；v2 已裁决 Section 门禁归 Schema 校验。不阻塞 P5c（§4.19） |
+| **T16** | `ui` 包如何从旧能力 / 事件模型解耦（入口是 `SduiUiTemplateService` / `DevicePrimaryUiService` / `WorkflowUiContextService`） | 不解耦则保留闭包 39 个类一个都删不掉，P5c 无法收尾（§7.3 / §7.4）。**这是 P5c 真正的前置工作** |
 
 ### 7.6 测试与调试资产
 

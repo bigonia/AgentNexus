@@ -95,7 +95,7 @@
 
 `capability-nodes` 与 `section-triggers`（含设备级同构入口）服务于步骤 ③ 的可视化编排，不是设备协议的一部分。
 
-`/section-triggers` 是接口集里**唯一一处仍未完成数据源替换**的端点：它当前读的是旧 Section 目录，而语义上应从 v2 能力 Schema 的 `surface.ui` 派生。之所以现在不改写，是因为终端固件尚未全量切换，旧 Section 模型仍是活的，提前改写会让触发面板失去数据源。已在代码中标注 `TODO(lcd085-refactor)`，登记于 `12_DESIGN_NOTES.md` §7.2，随 P5c 一并处理。**响应形状不会变**，前端无需为此调整。
+`/section-triggers` 的数据源与设备协议版本**无关**（2026-09-18 复核，原判断已修正）：三级树的输入是平台页面定义（`PageService` / `SectionPageDefinition`）与平台 Section 类型目录（`SectionTypeCatalog`，由 `sdui-event-catalog.yml` 驱动），两者都是平台侧产物。它不可能"改从 v2 能力 Schema 的 `surface.ui` 派生"——`UiSpec` 只声明允许的 Section 类型名，不含元素与事件定义；同理，Section 类型的能力门禁归 `CapabilitySchemaV2` 的校验职责，本端点不再判断第二处（见 `v2.display.SectionViewResolver` 类注释）。因此它**不阻塞 P5c，也无需改写**。前端当前未调用它，属编排面板尚未接线。
 
 ### 2.4 事件目录与校验 `/api/v1/sdui/events`
 

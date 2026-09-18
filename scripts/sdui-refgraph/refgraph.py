@@ -17,7 +17,7 @@
 import os
 import re
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 
 MAIN = 'src/main/java'
 TEST = 'src/test/java'
@@ -178,18 +178,23 @@ POOL = {f for f in non_v2 if not in_keep(f) and f not in WIRING}
 sup_cache = {f: supertypes(f) for f in non_v2}
 
 
-def converge(pool, keep):
+def converge(pool, keep, removed=frozenset()):
     """从"假设全删"向下收敛到最大可删集。
 
     两条必备约束：
       1. 引用者必须也在删除集内（否则留下编译不过的调用方）；
       2. 不能实现删除集之外的工程内契约（否则契约失去实现）——
          Spring 按类型注入的实现类天然零显式引用者，只靠"零引用"会误杀。
+
+    ``removed`` 表达"这些类已经先被裁掉"，用于逐个推演：判断裁掉某个控制层类
+    究竟能释放多少个待删类。少了它会把"引用者已删"的类仍判为受阻，
+    并高估控制层的阻塞量。
     """
     del_set = set(pool)
     while True:
         drop = {f for f in del_set
-                if (rev[f] - del_set) or any(s not in del_set for s in sup_cache[f])}
+                if ({b for b in rev[f] if b not in removed} - del_set)
+                or any(s not in del_set and s not in removed for s in sup_cache[f])}
         if not drop:
             return del_set
         del_set -= drop
@@ -263,15 +268,23 @@ for t in test_path:
             if m in DEL}
     if hits:
         test_refs[t] = hits
-print(f'\n=== 释放容量：各保留方阻塞了多少待删类（P5c 执行顺序依据）===')
+print(f'\n=== 释放容量：裁掉某个控制层类能释放多少待删类（P5c 执行顺序依据）===')
+print('  口径：把该类视为已删除后重跑收敛，看 A 类增量。')
+print('  "引用 N 个"只是它碰到多少滞留类，不等于能释放——那些类可能另有保留方引用。')
 stuck = POOL - DEL
-releasers = defaultdict(set)
-for t in stuck:
-    for b in rev[t]:
-        if kind(b) in ('ctrl', 'dbg', 'wire'):
-            releasers[b].add(t)
-for b in sorted(releasers, key=lambda x: -len(releasers[x])):
-    print(f'  [{kind(b)}] {b.replace(SDUI + ".", ""):42s} 阻塞 {len(releasers[b]):2d} 个')
+rows = []
+# 候选是"引用了滞留类的控制层 / 调试层 / 接线类"。它们自身多在保留包内（不参与候选池），
+# 所以要从反向图收集，而不是从 POOL 取。
+candidates = {b for t in stuck for b in rev[t] if kind(b) in ('ctrl', 'dbg', 'wire')}
+for b in sorted(candidates):
+    after = converge(POOL, KEEP, removed={b})
+    gained = len(after) - len(DEL)
+    touched = len([t for t in refs[b] if t in stuck])
+    rows.append((gained, touched, b))
+rows.sort(key=lambda r: (-r[0], -r[1]))
+for gained, touched, b in rows:
+    note = f'释放 {gained:2d} 个' if gained else '释放  0 个（它引用的滞留类另有保留方引用）'
+    print(f'  [{kind(b)}] {b.replace(SDUI + ".", ""):42s} {note}   引用滞留类 {touched} 个')
 
 if WIRING:
     print(f'\n=== 接线 / 配置根（不可整文件删，只能裁剪其注册行）（{len(WIRING)}）===')
@@ -282,13 +295,39 @@ if WIRING:
         print(f'  {f.replace(SDUI + ".", ""):42s} 依据 {why:24s} '
               f'引用 {len(blocked)} 个池内类: {", ".join(blocked)[:44]}')
 
-print(f'\n=== 被 ui / workflow / v2 阻塞的类（这些是真依赖，不能删）===')
-for t in sorted(stuck):
-    ui_refs = [b for b in rev[t] if kind(b) == 'ui']
-    ctrl_refs = [b for b in rev[t] if kind(b) in ('ctrl', 'dbg')]
-    if ui_refs and not ctrl_refs:
-        print(f'  {t.replace(SDUI + ".", ""):48s} <- '
-              + ', '.join(b.replace(SDUI + '.', '') for b in sorted(ui_refs))[:60])
+print(f'\n=== 保留闭包：KEEP 沿类型引用可达的候选池类（P5c 的不可删清单）===')
+print('  为什么不用"直接引用者是不是 ui / workflow"来筛：那会漏掉被保留方**间接**依赖的类。')
+print('  例：ui.SduiUiTemplateService -> section.SectionTypeCatalog -> event.EventRegistry。')
+print('  EventRegistry 的直接引用者全在候选池，但它实际上删不掉。')
+print('  保留闭包 = 从 KEEP 出发沿 refs / supers 可达的池内类；它们出现在可删集里即为误判。')
+print('  种子要排除"已知待裁剪层"：① 接线根（WebSocketConfig 只留 v2 端点注册，把它当种子会')
+print('  将 SduiWebSocketHandler -> MessageRouter -> DeviceSessionManager 整条旧链误判为保留）；')
+print('  ② controller / debug 层（§7.2 已列为待裁，它们当前的引用是改造点而非保护）。')
+
+CUT_LAYERS = {f for f in KEEP
+              if f.startswith(SDUI + '.controller') or f.startswith(SDUI + '.debug')}
+
+
+def keep_closure(seeds):
+    seen, q = set(), deque(seeds)
+    while q:
+        f = q.popleft()
+        for t in set(refs.get(f, ())) | sup_cache.get(f, set()):
+            if t not in seen:
+                seen.add(t)
+                q.append(t)
+    return seen
+
+
+MUST_KEEP = keep_closure(KEEP - WIRING - CUT_LAYERS) & POOL
+misjudged = MUST_KEEP & DEL
+for t in sorted(MUST_KEEP):
+    via = sorted({b for b in rev[t] if b in KEEP or (b in MUST_KEEP and b != t)})
+    tag = '   ← 被判进可删集：误判' if t in DEL else ''
+    print(f'  {t.replace(SDUI + ".", ""):48s} <- '
+          + ', '.join(b.replace(SDUI + '.', '') for b in via)[:50] + tag)
+print(f'  共 {len(MUST_KEEP)} 个；落在可删集里的误判 {len(misjudged)}'
+      + (f' -> {", ".join(sorted(misjudged))}' if misjudged else ''))
 
 print(f'\n=== 受影响测试文件：{len(test_refs)} ===')
 for t in sorted(test_refs):
