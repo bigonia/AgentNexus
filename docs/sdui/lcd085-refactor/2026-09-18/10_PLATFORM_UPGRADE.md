@@ -255,6 +255,48 @@ BusinessConfig {
 
 未下沉的节点被登记为 `platformSteps`，交由 P5b 在收到交互上报后执行。
 
+### 8.2 交互回流与运行时接管（P5b 实现）
+
+P5b 把工作流运行时从"听终端输入事件（TLV）后逐条下发设备命令"改成"听业务交互上报后执行平台步骤"。
+
+**闭环落点。**
+
+```text
+终端本地执行静态响应序列
+  → platform.interaction 事件（device_id + token）
+  → BusinessConfigService 按 token 反查 contextRef，发出 BusinessInteraction 领域事件
+  → NodeWorkflowRuntimeService.onInteraction：解析 contextRef → 定位活动部署与触发节点
+  → 读出该设备、该触发节点下固化的 platformSteps，逐条执行
+  → 结果作为**新的独立请求**下发（display.section / audio.*）
+```
+
+01§4 明确"下发结果是新的独立命令，不是原响应序列的继续"，因此平台步骤不是把响应序列接下去，而是一次全新的下行。
+
+**上下文怎么恢复（`contextRef`）。** 终端只上报 `device_id + token`，平台必须自己找回"是哪一次部署的哪个触发节点"。做法是 token 在注册时携带 `contextRef`，形如 `wf:<workflowId>:<triggerNodeId>`：
+
+- 为什么不只记 `triggerId`——同一工作流的不同部署可以把同一个物理按钮绑到不同 slot，只凭 `triggerId` 无法区分是哪一次部署在等；
+- 为什么不用 `deviceId` 反查——同一设备可同时参与多个工作流的部署，反查结果不唯一；
+- 解析失败（例如非工作流场景写入的 `binding:<triggerId>`）一律返回空、安静跳过，不让整条上报链失败。
+
+`contextRef` 只存在于平台侧 token 注册表，不进 `BusinessConfig` 的下行报文——终端不感知也不需要理解它。
+
+**平台步骤从哪来。** 来自部署时固化到 `NodeWorkflowDeploymentEntity.businessConfigs` 的 `platformSteps`，运行时读取而非按当前能力 Schema 重新组装。理由：设备侧配置在部署那一刻已经生效，平台侧必须与那一份严格对应；按当前定义重新组装会在工作流被编辑后引入漂移。
+
+**平台步骤的两种出口。**
+
+| 类别 | 节点 | 出口 |
+| --- | --- | --- |
+| 平台可作为请求下发 | `display.section`、`ui.update`、`audio.play`（TTS / artifact） | 走 v2 下行：`display.section` 或 `audio.start → binary → audio.stop` |
+| 平台不可作为请求下发 | `rgb.effect`、`audio.record` | 能力 Schema 只声明 `usableIn=binding`，平台无请求可发；如实返回 `terminal_action_required`，**不**退化成旧协议遥控路径 |
+
+第二类不是实现缺陷，而是模型的结果：动作所有权交给了终端的本地响应序列。要覆盖它需要"平台为一个动态节点生成专用绑定并签发 token"的能力，而终端设计文档没有定义这种绑定的形态，登记为缺口 G25 并列入待确认项 T15。
+
+**单 Section 收敛点。** v2 没有 Section 级增量更新，而平台侧的业务写法里仍有 Section 场景与 Patch。收敛发生在唯一一处 `SectionViewResolver`：把"页面 → 多 Section"取首页单 Section 作为主视图；Patch 在平台侧合成完整 Section 后再下发，平台没有快照时回退为下发完整场景。业务侧统一经 `PrimaryViewPublisher` 出口，不再各自调用编排服务。
+
+**v2 接入层的设备租户上下文（P1–P4 遗漏的真实缺陷）。** 平台数据隔离靠 `@TenantId`，租户来自线程上的 `GlobalContext`；v2 WebSocket 线程没有 HTTP 上下文，租户退化成 `default`。而设备表 `sdui_device` 是**全局表**（用 `ownerUserId` 列记归属），部署 / 运行 / UI 上下文才是租户表——于是同一线程上"读设备成功、读部署查不到"。新增 `DeviceTenantContext` 在路由分发点按设备归属建立租户，作为 v2 侧唯一的租户建立入口。
+
+**旧执行器删除。** `CapabilityNodeExecutorService` 已删除，其职责由 `WorkflowPlatformStepExecutor` 承接。旧实现依赖的 `CommandService`（`cmd/control` + 等 ACK）、`AudioService`（Base64 内联音频）、`SectionOrchestrationService`（scene/patch）在 v2 中都没有对应概念；为等 ACK 而写的重试与状态轮询也不需要了——v2 的请求只接收一次最终结果。
+
 ## 9. 分阶段计划
 
 | 阶段 | 内容 | 交付物 | 前置 | 状态 |
@@ -265,14 +307,14 @@ BusinessConfig {
 | P3 | 业务配置域 | 绑定表模型、token 服务、reset/update/trigger | P2 | 完成 |
 | P4 | 业务面迁移 | display.*（Section/图片/Canvas）、audio.*、system.* | P3 | 完成 |
 | P5a | 工作流产出业务配置 | 节点→动作映射与下沉判定、按设备组装 `BusinessConfig`、部署下发 | P4 | 完成 |
-| P5b | 交互事件回流 | `platform.interaction` 驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端 | P5a | 未开始 |
+| P5b | 交互事件回流 | `platform.interaction` 驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端 | P5a | 完成 |
 | P5c | 旧协议路径剪除 | 删除 §10 清单，平台侧只剩一套协议 | P5b + 终端全量切换 | 未开始 |
 
 **P5 为何拆成三阶段**：原计划把"工作流对接"与"旧路径删除"放在同一步。但旧路径删除的准入条件不是代码就绪，而是**终端固件全量切到 v2**——在那之前删除会让在线设备立刻失联。同时工作流侧本身包含"产出配置"与"消费事件"两个方向，可独立验收。因此按"产出 → 回流 → 剪除"三道闸门拆分，详见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §4.8。
 
 **0.12.0：不做灰度，v2 是唯一协议。** 原 P5a 里的设备级分流开关（`DeviceProtocolRouter` + `sdui.routing`）已删除。本项目不做"新旧协议并存期按设备分流"的渐进切换，所有设备的业务配置一律按 v2 组装下发。代价是旧路径删除不再有"把某台设备按回旧协议"的回退手段，见 12_DESIGN_NOTES.md §4.12。
 
-阶段准入原则：每阶段必须可编译、有针对性测试、并且不破坏上一阶段已验收行为。终端未就绪期间，`sdui/v2` 通过内置的**模拟终端**（测试用 stub）验证，不依赖真实设备。当前验证基线：`mvn test` 289 项通过。
+阶段准入原则：每阶段必须可编译、有针对性测试、并且不破坏上一阶段已验收行为。终端未就绪期间，`sdui/v2` 通过内置的**模拟终端**（测试用 stub）验证，不依赖真实设备。当前验证基线：`mvn test` 323 项通过。
 
 各阶段的具体功能项与逐条状态见 [功能清单与实现台账](11_FEATURE_MATRIX.md)。
 
@@ -280,7 +322,7 @@ BusinessConfig {
 
 **准入条件**：终端固件全量切换到 v2。分流开关已在 0.12.0 删除，因此**没有按设备回退的手段**——旧路径删除只能一次性完成，且必须在终端切换之后。在那之前删除任何一项都会让在线设备失联。
 
-**当前状态**：清单内各类已统一加上 `@Deprecated(since = "0.10.0")` 与替代项说明，代码保持可用。逐文件清单与回滚方式见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7「待清除模块清单」。
+**当前状态**：清单内各类已统一加上 `@Deprecated(since = "0.10.0")` 与替代项说明，代码保持可用。P5b 完成后，平台侧运行时（工作流续接、主视图下发、音频下行）已全部走 v2，旧协议栈只剩"仍被同协议内部依赖"这一层，不再有业务侧调用者。逐文件清单与回滚方式见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7「待清除模块清单」。
 
 | 旧入口 | 位置 | 处置 |
 | --- | --- | --- |

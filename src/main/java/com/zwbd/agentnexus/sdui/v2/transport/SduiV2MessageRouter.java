@@ -6,6 +6,7 @@ import com.zwbd.agentnexus.sdui.v2.protocol.Envelope;
 import com.zwbd.agentnexus.sdui.v2.protocol.EnvelopeCodec;
 import com.zwbd.agentnexus.sdui.v2.protocol.ProtocolException;
 import com.zwbd.agentnexus.sdui.v2.protocol.ProtocolErrors;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceTenantContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +31,7 @@ public class SduiV2MessageRouter {
     private final EnvelopeCodec codec;
     private final DeviceSender sender;
     private final PlatformRequestService requestService;
+    private final DeviceTenantContext tenantContext;
     private final Map<String, V2Contexts.RequestHandler> requestHandlers = new HashMap<>();
     private final Map<String, V2Contexts.EventSink> eventSinks = new HashMap<>();
     private final Map<BinaryDataType, V2Contexts.BinarySink> binarySinks = new HashMap<>();
@@ -40,12 +42,14 @@ public class SduiV2MessageRouter {
     public SduiV2MessageRouter(EnvelopeCodec codec,
                                DeviceSender sender,
                                PlatformRequestService requestService,
+                               DeviceTenantContext tenantContext,
                                List<V2Contexts.RequestHandler> requestHandlerList,
                                List<V2Contexts.EventSink> eventSinkList,
                                List<V2Contexts.BinarySink> binarySinkList) {
         this.codec = codec;
         this.sender = sender;
         this.requestService = requestService;
+        this.tenantContext = tenantContext;
         for (V2Contexts.RequestHandler handler : requestHandlerList) {
             V2Contexts.RequestHandler previous = requestHandlers.put(handler.name(), handler);
             if (previous != null) {
@@ -104,7 +108,9 @@ public class SduiV2MessageRouter {
             return;
         }
         try {
-            var result = handler.handle(new V2Contexts.RequestContext(deviceId, generation, request.id(), request.body()));
+            // 处理器可能读写租户表（artifact、业务配置、能力缓存落库等），必须先按设备归属建立租户
+            var result = tenantContext.callWith(deviceId, () ->
+                    handler.handle(new V2Contexts.RequestContext(deviceId, generation, request.id(), request.body())));
             respond(deviceId, codec.encodeResult(request.id(), result.ok(), result.error()));
         } catch (ProtocolException e) {
             log.warn("请求处理失败: device={}, name={}, error={}", deviceId, request.name(), e.code());
@@ -122,7 +128,9 @@ public class SduiV2MessageRouter {
             return;
         }
         try {
-            sink.onEvent(new V2Contexts.EventContext(deviceId, generation, event.name(), event.body()));
+            // platform.interaction 会驱动工作流运行、读部署记录并写运行记录，全部是租户表
+            tenantContext.runWith(deviceId, () ->
+                    sink.onEvent(new V2Contexts.EventContext(deviceId, generation, event.name(), event.body())));
         } catch (ProtocolException e) {
             log.warn("事件处理失败: device={}, name={}, error={}", deviceId, event.name(), e.code());
         } catch (RuntimeException e) {
@@ -155,7 +163,9 @@ public class SduiV2MessageRouter {
             return;
         }
         try {
-            boolean consumed = sink.onData(new V2Contexts.BinaryContext(deviceId, generation, frame.payload()));
+            // 上行音频会落 artifact（租户表），同样需要设备归属租户
+            boolean consumed = tenantContext.callWith(deviceId, () ->
+                    sink.onData(new V2Contexts.BinaryContext(deviceId, generation, frame.payload())));
             if (!consumed) {
                 // 04§8.1：没有活动生命周期时收到对应 Binary 数据应拒绝或丢弃
                 droppedBinaryFrames.incrementAndGet();

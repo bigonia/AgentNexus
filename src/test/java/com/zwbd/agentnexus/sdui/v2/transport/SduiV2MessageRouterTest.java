@@ -8,6 +8,7 @@ import com.zwbd.agentnexus.sdui.v2.protocol.BinaryFrameCodecV2;
 import com.zwbd.agentnexus.sdui.v2.protocol.EnvelopeCodec;
 import com.zwbd.agentnexus.sdui.v2.protocol.ProtocolErrors;
 import com.zwbd.agentnexus.sdui.v2.protocol.V2Names;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceTenantContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,7 @@ class SduiV2MessageRouterTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final EnvelopeCodec codec = new EnvelopeCodec(objectMapper);
+    private final DeviceTenantContext tenantContext = new PassthroughTenantContext();
 
     private DeviceSender sender;
     private PlatformRequestService requestService;
@@ -41,6 +43,21 @@ class SduiV2MessageRouterTest {
     private CapturingEventSink eventSink;
     private CapturingBinarySink binarySink;
     private SduiV2MessageRouter router;
+
+    /**
+     * 透传租户上下文：本测试验证的是分发与回写，租户建立本身由 {@link DeviceTenantContext} 自己覆盖。
+     * 基底类需要设备仓储才能解析归属，这里只把动作原样执行，不触碰租户切换。
+     */
+    private static final class PassthroughTenantContext extends DeviceTenantContext {
+        private PassthroughTenantContext() {
+            super(null);
+        }
+
+        @Override
+        public <T> T callWith(String deviceId, java.util.function.Supplier<T> action) {
+            return action.get();
+        }
+    }
 
     /** 一个最小请求处理器，便于验证结果回写。 */
     private static final class CapturingRequestHandler implements V2Contexts.RequestHandler {
@@ -97,7 +114,7 @@ class SduiV2MessageRouterTest {
         requestHandler = new CapturingRequestHandler();
         eventSink = new CapturingEventSink();
         binarySink = new CapturingBinarySink();
-        router = new SduiV2MessageRouter(codec, sender, requestService,
+        router = new SduiV2MessageRouter(codec, sender, requestService, tenantContext,
                 List.of(requestHandler), List.of(eventSink), List.of(binarySink));
     }
 
@@ -214,14 +231,14 @@ class SduiV2MessageRouterTest {
     void rejectsDuplicateRegistration() {
         IllegalStateException handlerConflict = org.junit.jupiter.api.Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> new SduiV2MessageRouter(codec, sender, requestService,
+                () -> new SduiV2MessageRouter(codec, sender, requestService, tenantContext,
                         List.of(new CapturingRequestHandler(), new CapturingRequestHandler()),
                         List.of(), List.of()));
         assertTrue(handlerConflict.getMessage().contains("device.ping"));
 
         IllegalStateException sinkConflict = org.junit.jupiter.api.Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> new SduiV2MessageRouter(codec, sender, requestService,
+                () -> new SduiV2MessageRouter(codec, sender, requestService, tenantContext,
                         List.of(), List.of(new CapturingEventSink(), new CapturingEventSink()), List.of()));
         assertTrue(sinkConflict.getMessage().contains(V2Names.PLATFORM_INTERACTION));
     }
@@ -240,7 +257,7 @@ class SduiV2MessageRouterTest {
                 throw new IllegalStateException("sink failed");
             }
         };
-        SduiV2MessageRouter guarded = new SduiV2MessageRouter(codec, sender, requestService,
+        SduiV2MessageRouter guarded = new SduiV2MessageRouter(codec, sender, requestService, tenantContext,
                 List.of(requestHandler), List.of(faulty), List.of(binarySink));
 
         guarded.onText("dev-1", 1L, "{\"name\":\"boom\"}");

@@ -72,6 +72,7 @@ public class NodeWorkflowDeploymentService {
         deployment.setWorkflowId(workflowId);
         deployment.setWorkflowVersion(workflowEntity.getVersion());
         deployment.setSlotBindings(new LinkedHashMap<>(bindings));
+        deployment.setBusinessConfigs(assembleResult.toPersistedMap());
         List<String> replaced = stopConflictingDeployments(workflow, deployment);
         NodeWorkflowDeploymentEntity saved = deploymentRepository.save(deployment);
         Map<String, Object> data = toMap(saved);
@@ -218,6 +219,15 @@ public class NodeWorkflowDeploymentService {
                     .map(WorkflowBusinessConfigAssembler.Assembled::toMap)
                     .toList());
             return data;
+        }
+
+        /** 随部署记录持久化的形态：deviceId → {triggers, platformSteps}。 */
+        Map<String, Object> toPersistedMap() {
+            Map<String, Object> byDevice = new LinkedHashMap<>();
+            for (WorkflowBusinessConfigAssembler.Assembled assembled : configs) {
+                byDevice.put(assembled.deviceId(), assembled.toPersistedMap());
+            }
+            return byDevice;
         }
     }
 

@@ -3,6 +3,7 @@ package com.zwbd.agentnexus.sdui.ui;
 import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.ui.repo.SduiUiTemplateRepository;
+import com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -16,20 +17,20 @@ public class SduiUiTemplateService {
 
     private final SduiUiTemplateRepository repository;
     private final SectionDataCodec sectionDataCodec;
-    private final SectionOrchestrationService sectionOrchestrationService;
+    private final PrimaryViewPublisher primaryViewPublisher;
     private final DeviceCapabilityProjection capabilityProjection;
     private final SectionTypeCatalog sectionTypeCatalog;
     private final PageService pageService;
 
     public SduiUiTemplateService(SduiUiTemplateRepository repository,
                                  SectionDataCodec sectionDataCodec,
-                                 SectionOrchestrationService sectionOrchestrationService,
+                                 PrimaryViewPublisher primaryViewPublisher,
                                  DeviceCapabilityProjection capabilityProjection,
                                  SectionTypeCatalog sectionTypeCatalog,
                                  PageService pageService) {
         this.repository = repository;
         this.sectionDataCodec = sectionDataCodec;
-        this.sectionOrchestrationService = sectionOrchestrationService;
+        this.primaryViewPublisher = primaryViewPublisher;
         this.capabilityProjection = capabilityProjection;
         this.sectionTypeCatalog = sectionTypeCatalog;
         this.pageService = pageService;
@@ -117,7 +118,7 @@ public class SduiUiTemplateService {
                 throw new IllegalArgumentException("deviceId is required when push=true");
             }
             validateDeviceSupportsTemplate(deviceId, entity.getDefinition());
-            sent = sectionOrchestrationService.sendScene(deviceId, scene);
+            sent = primaryViewPublisher.publish(deviceId, scene);
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("templateId", entity.getId());

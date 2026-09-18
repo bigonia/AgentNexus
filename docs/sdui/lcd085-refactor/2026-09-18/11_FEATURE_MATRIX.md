@@ -94,15 +94,21 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 | 5.3 | ~~设备级新旧协议分流开关~~ | - | 是 | P5a | **已移除** | - | 0.12.0 删除：不做灰度，v2 为唯一协议 |
 | 5.4 | 组装问题分级（ERROR 阻断 / WARN 提示） | - | 是 | P5a | DONE | - | 部署前预检，不部分应用 |
 
-### 5.2 P5b 交互事件回流（未开始）
+### 5.2 P5b 交互事件回流
 
 | # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 5.5 | `platform.interaction` 事件驱动工作流运行 | 01§4 | 是 | P5b | TODO | - | token 反查运行上下文 |
-| 5.6 | 消费组装结果中的 `platformSteps` 并执行 | - | 是 | P5b | TODO | - | 组装器已产出该清单 |
-| 5.7 | 平台步骤执行后以新 token 驱动终端 | 01§3 | 是 | P5b | TODO | - | 同一动作不同 token |
-| 5.8 | 交互结果作为工作流新输入写入 run context | 01§4 | 是 | P5b | TODO | - | - |
-| 5.9 | 旧工作流运行时的设备命令直发路径下线 | 02§4 | 否 | P5b | TODO | - | `NodeWorkflowRuntimeService` 改由配置驱动 |
+| 5.5 | `platform.interaction` 事件驱动工作流运行 | 01§4 | 是 | P5b | DONE | token 字段名待确认（T14） | `NodeWorkflowRuntimeService.onInteraction` |
+| 5.5.1 | `contextRef` 承载工作流上下文，替代按 triggerId 反查 | 01§4 | 是 | P5b | DONE | - | 见 S10；`WorkflowContextRef` |
+| 5.5.2 | v2 接入层按设备归属建立租户上下文 | 02§4 | 是 | P5b | DONE | - | 见 S13 / 12§4.16 |
+| 5.6 | 消费组装结果中的 `platformSteps` 并执行 | - | 是 | P5b | DONE | - | 从部署记录固化值读取，见 S11 |
+| 5.6.1 | 平台步骤出口分级（可请求下发 / 只能终端执行） | 04§4 | 是 | P5b | DONE | 需 T15 才能闭环 | `terminal_action_required`，缺口 G25 |
+| 5.7 | 平台步骤执行后以新 token / 新请求驱动终端 | 01§3 | 是 | P5b | DOING | 需 T15 | UI / 音频走新的独立请求已实现；动态签发新 token 的路径未实现，见 5.7.1 |
+| 5.7.1 | 平台为动态节点生成专用绑定并签发新 token | 01§3 | 是 | P5b | BLOCKED | 需 T15 | 文档未定义该绑定形态（G25），暂返回 `terminal_action_required` |
+| 5.8 | 交互结果作为工作流新输入写入 run context | 01§4 | 是 | P5b | DONE | - | `triggerEvent` 记录上报原文 |
+| 5.8.1 | 单 Section 收敛点（场景 / Patch → 完整 Section） | 03§2 | 是 | P5b | DONE | - | 见 S12；`SectionViewResolver` + `PrimaryViewPublisher` |
+| 5.8.2 | WAV → 裸 PCM 下行拆解 | 04§7 | 是 | P5b | DONE | - | 见 S14；`WavPcm`，不做重采样 |
+| 5.9 | 旧工作流运行时的设备命令直发路径下线 | 02§4 | 否 | P5b | DONE | - | `CapabilityNodeExecutorService` 及其测试已删除 |
 
 ### 5.3 P5c 旧协议路径剪除（已开工）
 
@@ -162,6 +168,16 @@ v2 是唯一协议，因此旧路径的删除不再有"把设备按回旧协议"
 | S8 | 工作流节点 → 终端动作的显式映射表 | 两套命名空间不同（`rgb.effect` vs `rgb.effect.set`），文档未定义换算关系；且必须能逐条回答"为什么不下沉" |
 | S9 | 静态前缀截断与跨 slot 不截断 | 01§2 只要求序列"有限、有序、不可编程"，未定义当链条中间出现平台步骤或跨设备步骤时序列到哪里为止 |
 
+P5b 追加的自实现项：
+
+| 编号 | 功能 | 为什么必须 |
+| --- | --- | --- |
+| S10 | `contextRef` 承载工作流上下文 | 01§4 只说"按设备和 token 恢复业务上下文"，未定义平台侧用什么记住上下文；仅凭 `triggerId` 无法区分同一按钮被不同部署绑到不同 slot |
+| S11 | 平台步骤随部署固化（而非运行时重新组装） | 组装阶段已产出 `platformSteps`，但文档未说它存在哪里；每次运行时按当前定义重组会在工作流被编辑后与设备侧已生效配置发生漂移 |
+| S12 | 单 Section 收敛点 | v2 只有 `display.section` 全量替换，而业务侧仍在产出场景与 Patch；文档未定义转换位置，散落在各调用点会形成多处真值 |
+| S13 | v2 接入层的设备租户上下文 | 01§4 要求平台按设备恢复上下文，但未意识到 v2 的 WebSocket 线程没有租户；设备表是全局表而部署表是租户表，不建立租户则查不到部署记录 |
+| S14 | WAV → 裸 PCM 下行拆解 | 04§7 只说下行发二进制音频数据，未说容器形态；artifact 里存的是 WAV 文件，直接整段下发会把 44 字节头当音频播出去 |
+
 ## 7. 首版交付的代码资产
 
 首版（P1–P4 核心）落地的实现文件，均在 `src/main/java/com/zwbd/agentnexus/sdui/v2/` 下，与旧实现物理隔离。
@@ -197,7 +213,24 @@ P5a 追加的实现文件（工作流侧）：
 | `sdui/workflow` | `WorkflowBusinessConfigAssembler` | 按设备组装 `BusinessConfig`，产出 `platformSteps` 与分级 `Issue` |
 | `sdui/workflow` | `NodeWorkflowDeploymentService`（改造） | 部署前组装预检、部署时下发、停止时 reset |
 
+P5b 追加 / 改写的实现文件：
+
+| 包 | 类型 | 职责 |
+| --- | --- | --- |
+| `sdui/workflow` | `NodeWorkflowRuntimeService`（重写） | 由 `BusinessInteraction` 事件驱动，按 `contextRef` 恢复上下文，只跑固化的 `platformSteps` |
+| `sdui/workflow` | `WorkflowContextRef`（新） | `wf:<workflowId>:<triggerNodeId>` 编解码，解析失败返回空 |
+| `sdui/workflow` | `WorkflowPlatformStepExecutor`（新） | 平台步骤执行出口：UI / 音频下发，终端本地动作返回 `terminal_action_required` |
+| `sdui/workflow` | `NodeWorkflowDeploymentEntity`（改造） | 新增 `businessConfigs` JSON 列，固化 `triggers` 与 `platformSteps` |
+| `sdui/workflow` | `CapabilityNodeExecutorService`（**已删除**） | 旧设备命令直发执行器，被 `WorkflowPlatformStepExecutor` 取代 |
+| `sdui/v2/display` | `SectionViewResolver`（新） | 单 Section 收敛点：场景取首页、Patch 合成完整 Section、主视图快照 |
+| `sdui/v2/display` | `PrimaryViewPublisher`（新） | 业务 UI 下发的唯一出口，接 `SectionViewResolver` 与 `DisplayCommandService` |
+| `sdui/v2/audio` | `WavPcm`（新） | WAV 容器拆解，取裸 PCM 载荷；非 WAVE 按裸 PCM 处理 |
+| `sdui/v2/session` | `DeviceTenantContext`（新） | 按设备归属在连接线程上建立租户上下文 |
+| `sdui/v2/transport` | `SduiV2MessageRouter`（改造） | 分发前用 `DeviceTenantContext` 包裹请求 / 事件 / 二进制处理器 |
+| `sdui/ui` | `WorkflowUiContextService` / `DevicePrimaryUiService` / `SduiUiTemplateService`（改造） | 移除 `SectionOrchestrationService` 依赖，改走 `PrimaryViewPublisher` |
+
 测试资产（`src/test/java/com/zwbd/agentnexus/sdui/v2/`）：
+
 
 | 类型 | 说明 |
 | --- | --- |
@@ -211,7 +244,17 @@ P5a 追加的测试资产：
 | `sdui/workflow/WorkflowActionMapperTest` | 17 项：各节点类型的下沉与拒绝理由，含 `$ref`、平台产物、能力门禁等反面用例 |
 | `sdui/workflow/WorkflowBusinessConfigAssemblerTest` | 13 项：静态前缀截断、跨 slot 不截断、上报动作追加、下发校验干跑、各类 ERROR/WARN 路径 |
 
-验证命令与结果：`mvn test` → 289 项通过（0.11.0 为 295 项，0.12.0 随分流开关移除 6 项，无回归）。
+P5b 追加的测试资产：
+
+| 类型 | 说明 |
+| --- | --- |
+| `sdui/workflow/NodeWorkflowRuntimeServiceTest`（重写） | 7 项：交互上报驱动、按固化快照执行、单步失败中止、终端本地动作不算失败、非工作流引用与失效部署的丢弃路径 |
+| `sdui/workflow/WorkflowPlatformStepExecutorTest` | 15 项：UI scene/patch 下发、TTS 与 artifact 播放、PCM 分片、音频启停失败中止、RGB 与录音的 `terminal_action_required` |
+| `sdui/workflow/WorkflowContextRefTest` | 3 项：编解码回环、节点 id 含冒号、非工作流引用返回空 |
+| `sdui/v2/display/SectionViewResolverTest` | 12 项：单 Section 收敛、Patch 合成、无基底返回空、快照维护 |
+| `sdui/v2/audio/WavPcmTest` | 6 项：RIFF 头解析、非 WAVE 回落、截断与空载荷 |
+
+验证命令与结果：`mvn test` → 323 项通过（0.12.0 为 289 项；P5b 删除旧执行器测试、新增 40 项用例，净增 34 项，无回归）。
 
 ## 8. 待终端确认项汇总
 
@@ -231,3 +274,5 @@ P5a 追加的测试资产：
 | T12 | 调色板与索引矩阵的承载通道及位序（平台侧暂假设随 begin 的 JSON 下发、字节内低位在前） | 4.3、4.5 |
 | T13 | 本地响应动作的名称与参数集合（决定工作流节点映射表能否定稿） | 5.1.1 |
 | T14 | 终端上报交互结果时携带的 token 字段名与位置 | 5.1.3、5.5 |
+| T15 | 平台能否为动态节点签发专用绑定 / 新 token 以驱动终端本地动作（G25） | 5.6.1、5.7、5.7.1 |
+| T16 | 下行音频的容器约定：终端是否需要 WAV 头，还是只接裸 PCM（平台侧暂按裸 PCM 发送） | 4.8、5.8.2 |

@@ -82,19 +82,51 @@ public class WorkflowBusinessConfigAssembler {
     /**
      * 一个必须由平台在收到交互上报后执行的步骤。
      *
-     * @param reason 为什么不能下沉
+     * @param triggerNodeId 该步骤所属的触发节点。运行时据此把交互上报映射回平台步骤——
+     *                      同一台设备可能被多条绑定共享，仅凭 deviceId 无法区分是哪次交互的续接。
+     * @param reason        为什么不能下沉
      */
-    public record PlatformStep(String slotId, String nodeId, String nodeType,
+    public record PlatformStep(String triggerNodeId, String slotId, String nodeId, String nodeType,
                                Map<String, Object> params, String reason) {
 
         public Map<String, Object> toMap() {
             Map<String, Object> data = new LinkedHashMap<>();
+            data.put("triggerNodeId", triggerNodeId);
             data.put("slotId", slotId);
             data.put("nodeId", nodeId);
             data.put("nodeType", nodeType);
             data.put("params", params);
             data.put("reason", reason);
             return data;
+        }
+
+        /**
+         * 从持久化的部署记录还原。
+         *
+         * <p>部署时固化的这份步骤集合是运行时的唯一依据：设备侧的配置在部署那一刻就已经确定，
+         * 平台侧的步骤必须与那一份严格对应。按当前能力 Schema 重新组装会引入漂移——设备已经按旧配置
+         * 跑起来了，平台却按新 Schema 算出另一套步骤。</p>
+         */
+        public static PlatformStep fromMap(Map<String, Object> raw) {
+            return new PlatformStep(
+                    string(raw.get("triggerNodeId")),
+                    string(raw.get("slotId")),
+                    string(raw.get("nodeId")),
+                    string(raw.get("nodeType")),
+                    raw.get("params") instanceof Map<?, ?> params ? normalizeMap(params) : Map.of(),
+                    string(raw.get("reason")));
+        }
+
+        private static String string(Object value) {
+            return value == null ? "" : String.valueOf(value);
+        }
+
+        private static Map<String, Object> normalizeMap(Map<?, ?> raw) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                map.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return map;
         }
     }
 
@@ -131,6 +163,29 @@ public class WorkflowBusinessConfigAssembler {
             data.put("localResponses", localResponseCount());
             data.put("platformSteps", platformSteps.stream().map(PlatformStep::toMap).toList());
             data.put("issues", issues.stream().map(Issue::toMap).toList());
+            return data;
+        }
+
+        /**
+         * 随部署记录一起持久化的形态。
+         *
+         * <p>同时留下配置草稿与平台步骤：草稿回答"这台设备当时收到的是什么配置"，步骤回答
+         * "它的本地序列跑完之后平台该接着做什么"。两者都必须在部署那一刻固化——运行时按当前能力
+         * Schema 重新组装会引入漂移。</p>
+         */
+        public Map<String, Object> toPersistedMap() {
+            Map<String, Object> data = new LinkedHashMap<>();
+            List<Map<String, Object>> triggers = new ArrayList<>();
+            for (TriggerBinding binding : config.triggers()) {
+                Map<String, Object> trigger = new LinkedHashMap<>();
+                trigger.put("triggerId", binding.triggerId());
+                trigger.put("source", binding.source() != null ? binding.source().wire() : null);
+                trigger.put("contextRef", binding.contextRef());
+                trigger.put("responses", binding.responses().stream().map(ResponseStep::toWire).toList());
+                triggers.add(trigger);
+            }
+            data.put("triggers", triggers);
+            data.put("platformSteps", platformSteps.stream().map(PlatformStep::toMap).toList());
             return data;
         }
     }
@@ -265,20 +320,20 @@ public class WorkflowBusinessConfigAssembler {
 
         for (NodeWorkflowNode target : NodeWorkflowSupport.executionPlan(workflow, trigger)) {
             if (!target.slotId().equals(trigger.slotId())) {
-                localPlatformSteps.add(new PlatformStep(target.slotId(), target.nodeId(), target.nodeType(),
-                        target.params(), "跨 slot 节点，由平台在收到交互上报后协调"));
+                localPlatformSteps.add(new PlatformStep(trigger.nodeId(), target.slotId(), target.nodeId(),
+                        target.nodeType(), target.params(), "跨 slot 节点，由平台在收到交互上报后协调"));
                 continue;
             }
             WorkflowActionMapper.Mapped mapped = actionMapper.map(target, schema);
             if (!mapped.sinkable()) {
                 platformPhase = true;
-                localPlatformSteps.add(new PlatformStep(target.slotId(), target.nodeId(), target.nodeType(),
-                        target.params(), mapped.reason()));
+                localPlatformSteps.add(new PlatformStep(trigger.nodeId(), target.slotId(), target.nodeId(),
+                        target.nodeType(), target.params(), mapped.reason()));
                 continue;
             }
             if (platformPhase) {
-                localPlatformSteps.add(new PlatformStep(target.slotId(), target.nodeId(), target.nodeType(),
-                        target.params(), "位于平台步骤之后，需平台在收到交互上报后再驱动"));
+                localPlatformSteps.add(new PlatformStep(trigger.nodeId(), target.slotId(), target.nodeId(),
+                        target.nodeType(), target.params(), "位于平台步骤之后，需平台在收到交互上报后再驱动"));
                 continue;
             }
             responses.add(mapped.toStep());
@@ -306,7 +361,10 @@ public class WorkflowBusinessConfigAssembler {
         }
 
         platformSteps.addAll(localPlatformSteps);
-        return new TriggerBinding(triggerId, source, null, responses);
+        // 上下文引用让交互上报回流后能直接定位到本次部署的这个触发节点，不必再按
+        // (deviceId, triggerId) 反查活动部署（见 WorkflowContextRef）。
+        return new TriggerBinding(triggerId, source, null, responses,
+                WorkflowContextRef.of(workflow.id(), trigger.nodeId()).encode());
     }
 
     // ── 工具 ────────────────────────────────────────────────────────────────

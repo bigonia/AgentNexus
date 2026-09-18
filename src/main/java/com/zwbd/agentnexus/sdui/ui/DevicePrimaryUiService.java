@@ -5,6 +5,7 @@ import com.zwbd.agentnexus.common.web.GlobalContext;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import com.zwbd.agentnexus.sdui.ui.repo.DevicePrimaryUiRepository;
 import com.zwbd.agentnexus.sdui.ui.repo.WorkflowUiContextRepository;
+import com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDeploymentEntity;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDeploymentRepository;
 import jakarta.annotation.PreDestroy;
@@ -25,7 +26,7 @@ public class DevicePrimaryUiService {
     private final NodeWorkflowDeploymentRepository deploymentRepository;
     private final WorkflowUiContextRepository contextRepository;
     private final SduiDeviceRepository deviceRepository;
-    private final SectionOrchestrationService sectionOrchestrationService;
+    private final PrimaryViewPublisher primaryViewPublisher;
     private final SectionDataCodec sectionDataCodec;
     private final ScheduledExecutorService restoreExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "sdui-primary-ui-restore");
@@ -38,13 +39,13 @@ public class DevicePrimaryUiService {
                                   NodeWorkflowDeploymentRepository deploymentRepository,
                                   WorkflowUiContextRepository contextRepository,
                                   SduiDeviceRepository deviceRepository,
-                                  SectionOrchestrationService sectionOrchestrationService,
+                                  PrimaryViewPublisher primaryViewPublisher,
                                   SectionDataCodec sectionDataCodec) {
         this.primaryUiRepository = primaryUiRepository;
         this.deploymentRepository = deploymentRepository;
         this.contextRepository = contextRepository;
         this.deviceRepository = deviceRepository;
-        this.sectionOrchestrationService = sectionOrchestrationService;
+        this.primaryViewPublisher = primaryViewPublisher;
         this.sectionDataCodec = sectionDataCodec;
     }
 
@@ -167,12 +168,15 @@ public class DevicePrimaryUiService {
     public Map<String, Object> presentUpdatedContext(WorkflowUiContextEntity context, SectionPatch patch) {
         boolean primary = isPrimaryContext(context);
         if (primary) {
-            boolean sent = sectionOrchestrationService.sendPatch(context.getDeviceId(), patch);
-            return presentationResult(context, "primary_patch", sent);
+            // v2 无 Section 级增量更新：补丁在平台侧合成为完整主视图后再下发。缺少快照时
+            // 回退为下发完整 scene，避免一次界面切换因为"平台没记住上一帧"而丢失。
+            boolean sent = primaryViewPublisher.publishPatch(
+                    context.getDeviceId(), patch, sceneFromContext(context));
+            return presentationResult(context, "primary_section", sent);
         }
 
         SectionScene scene = sceneFromContext(context);
-        boolean sent = sectionOrchestrationService.sendScene(context.getDeviceId(), scene);
+        boolean sent = primaryViewPublisher.publish(context.getDeviceId(), scene);
         scheduleRestore(context.getDeviceId(), DEFAULT_TEMPORARY_UI_MS);
         Map<String, Object> result = presentationResult(context, "temporary_scene", sent);
         result.put("durationMs", DEFAULT_TEMPORARY_UI_MS);
@@ -227,7 +231,7 @@ public class DevicePrimaryUiService {
     }
 
     private boolean sendContextScene(WorkflowUiContextEntity context) {
-        return sectionOrchestrationService.sendScene(context.getDeviceId(), sceneFromContext(context));
+        return primaryViewPublisher.publish(context.getDeviceId(), sceneFromContext(context));
     }
 
     private Map<String, Object> savePrimaryAndSend(String deviceId,

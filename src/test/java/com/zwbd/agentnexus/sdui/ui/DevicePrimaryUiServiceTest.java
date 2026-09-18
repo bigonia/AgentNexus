@@ -6,6 +6,7 @@ import com.zwbd.agentnexus.sdui.repo.SduiDeviceRepository;
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.ui.repo.DevicePrimaryUiRepository;
 import com.zwbd.agentnexus.sdui.ui.repo.WorkflowUiContextRepository;
+import com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDeploymentEntity;
 import com.zwbd.agentnexus.sdui.workflow.repo.NodeWorkflowDeploymentRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -28,7 +29,7 @@ class DevicePrimaryUiServiceTest {
     private NodeWorkflowDeploymentRepository deploymentRepository;
     private WorkflowUiContextRepository contextRepository;
     private SduiDeviceRepository deviceRepository;
-    private SectionOrchestrationService sectionService;
+    private PrimaryViewPublisher publisher;
     private DevicePrimaryUiService service;
 
     @BeforeEach
@@ -38,7 +39,7 @@ class DevicePrimaryUiServiceTest {
         deploymentRepository = mock(NodeWorkflowDeploymentRepository.class);
         contextRepository = mock(WorkflowUiContextRepository.class);
         deviceRepository = mock(SduiDeviceRepository.class);
-        sectionService = mock(SectionOrchestrationService.class);
+        publisher = mock(PrimaryViewPublisher.class);
         SectionTypeCatalog catalog = mock(SectionTypeCatalog.class);
         when(catalog.get(any())).thenReturn(Optional.empty());
         service = new DevicePrimaryUiService(
@@ -46,7 +47,7 @@ class DevicePrimaryUiServiceTest {
                 deploymentRepository,
                 contextRepository,
                 deviceRepository,
-                sectionService,
+                publisher,
                 new SectionDataCodec(catalog)
         );
     }
@@ -70,7 +71,7 @@ class DevicePrimaryUiServiceTest {
             entity.setId("primary-1");
             return entity;
         });
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         Map<String, Object> result = service.setPrimary("dev-a", Map.of(
                 "deploymentId", "dep-1",
@@ -80,7 +81,7 @@ class DevicePrimaryUiServiceTest {
 
         assertEquals("dep-1", result.get("deploymentId"));
         assertEquals(true, result.get("sent"));
-        verify(sectionService).sendScene(eq("dev-a"), any());
+        verify(publisher).publish(eq("dev-a"), any());
     }
 
     @Test
@@ -98,7 +99,7 @@ class DevicePrimaryUiServiceTest {
             entity.setId("primary-1");
             return entity;
         });
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         Map<String, Object> result = service.setPrimary("dev-a", Map.of(
                 "deploymentId", "dep-1",
@@ -109,7 +110,7 @@ class DevicePrimaryUiServiceTest {
         assertEquals("actual_view", result.get("templateKey"));
         assertEquals("main_view", result.get("requestedTemplateKey"));
         assertEquals(true, result.get("templateKeyResolved"));
-        verify(sectionService).sendScene(eq("dev-a"), any());
+        verify(publisher).publish(eq("dev-a"), any());
     }
 
     @Test
@@ -125,7 +126,7 @@ class DevicePrimaryUiServiceTest {
             entity.setId("primary-1");
             return entity;
         });
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         Map<String, Object> result = service.setPrimary("dev-a", Map.of(
                 "deploymentId", "dep-1",
@@ -149,7 +150,7 @@ class DevicePrimaryUiServiceTest {
             entity.setId("primary-1");
             return entity;
         });
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         Map<String, Object> result = service.setPrimaryForDeployment("dep-1", "dev-a", Map.of());
 
@@ -170,18 +171,19 @@ class DevicePrimaryUiServiceTest {
     }
 
     @Test
-    void primaryContextUpdateUsesPatch() {
+    void primaryContextUpdateMergesPatchIntoFullSection() {
         WorkflowUiContextEntity context = context("wf-1", "dep-1", "main-slot", "dev-a", "main_view");
         when(primaryRepository.findByDeviceIdAndDeploymentIdAndSlotIdAndTemplateKey(
                 "dev-a", "dep-1", "main-slot", "main_view")).thenReturn(Optional.of(new DevicePrimaryUiEntity()));
-        when(sectionService.sendPatch(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publishPatch(eq("dev-a"), any(), any())).thenReturn(true);
 
         Map<String, Object> result = service.presentUpdatedContext(context, patch());
 
-        assertEquals("primary_patch", result.get("mode"));
+        // v2 没有 Section 级增量更新：主视图补丁在平台侧合成后作为完整 Section 下发
+        assertEquals("primary_section", result.get("mode"));
         assertEquals(true, result.get("sent"));
-        verify(sectionService).sendPatch(eq("dev-a"), any());
-        verify(sectionService, never()).sendScene(eq("dev-a"), any());
+        verify(publisher).publishPatch(eq("dev-a"), any(), any());
+        verify(publisher, never()).publish(eq("dev-a"), any());
     }
 
     @Test
@@ -189,16 +191,16 @@ class DevicePrimaryUiServiceTest {
         WorkflowUiContextEntity context = context("wf-2", "dep-2", "notice-slot", "dev-a", "notice_view");
         when(primaryRepository.findByDeviceIdAndDeploymentIdAndSlotIdAndTemplateKey(
                 "dev-a", "dep-2", "notice-slot", "notice_view")).thenReturn(Optional.empty());
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         Map<String, Object> result = service.presentUpdatedContext(context, patch());
 
         assertEquals("temporary_scene", result.get("mode"));
         assertEquals(5000L, result.get("durationMs"));
         ArgumentCaptor<SectionScene> sceneCaptor = ArgumentCaptor.forClass(SectionScene.class);
-        verify(sectionService).sendScene(eq("dev-a"), sceneCaptor.capture());
+        verify(publisher).publish(eq("dev-a"), sceneCaptor.capture());
         assertEquals("main", sceneCaptor.getValue().pageId());
-        verify(sectionService, never()).sendPatch(eq("dev-a"), any());
+        verify(publisher, never()).publishPatch(any(), any(), any());
     }
 
     @Test
@@ -218,12 +220,12 @@ class DevicePrimaryUiServiceTest {
         when(primaryRepository.findByDeviceId("dev-a")).thenReturn(Optional.of(primary));
         when(contextRepository.findByDeploymentIdAndSlotIdAndTemplateKey("dep-1", "main-slot", "main_view"))
                 .thenReturn(Optional.of(context));
-        when(sectionService.sendScene(eq("dev-a"), any())).thenReturn(true);
+        when(publisher.publish(eq("dev-a"), any())).thenReturn(true);
 
         boolean sent = service.restorePrimary("dev-a");
 
         assertEquals(true, sent);
-        verify(sectionService).sendScene(eq("dev-a"), any());
+        verify(publisher).publish(eq("dev-a"), any());
     }
 
     private NodeWorkflowDeploymentEntity deployment() {

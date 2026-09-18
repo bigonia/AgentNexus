@@ -8,7 +8,7 @@ import com.zwbd.agentnexus.sdui.handler.EventInputHandler;
 import com.zwbd.agentnexus.sdui.service.CommandService;
 import com.zwbd.agentnexus.sdui.service.AudioService;
 import com.zwbd.agentnexus.sdui.service.audio.AudioRecordSessionManager;
-import com.zwbd.agentnexus.sdui.workflow.CapabilityNodeExecutorService;
+import com.zwbd.agentnexus.sdui.workflow.WorkflowPlatformStepExecutor;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -27,7 +27,7 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
     private final AudioService audioService;
     private final AudioRecordSessionManager audioRecordSessionManager;
     private final DebugArtifactStore artifactStore;
-    private final CapabilityNodeExecutorService executorService;
+    private final WorkflowPlatformStepExecutor platformStepExecutor;
     private final Map<String, NodeTestHandle> tests = new ConcurrentHashMap<>();
 
     public CapabilityNodeTestService(EventInputHandler eventInputHandler,
@@ -36,13 +36,13 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
                                      AudioService audioService,
                                      AudioRecordSessionManager audioRecordSessionManager,
                                      DebugArtifactStore artifactStore,
-                                     CapabilityNodeExecutorService executorService) {
+                                     WorkflowPlatformStepExecutor platformStepExecutor) {
         this.sessionManager = sessionManager;
         this.commandService = commandService;
         this.audioService = audioService;
         this.audioRecordSessionManager = audioRecordSessionManager;
         this.artifactStore = artifactStore;
-        this.executorService = executorService;
+        this.platformStepExecutor = platformStepExecutor;
         eventInputHandler.addPayloadListener(this);
     }
 
@@ -82,10 +82,30 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
         return Optional.of(refresh(handle).toMap());
     }
 
+    /**
+     * 单独试跑一个输出节点。
+     *
+     * <p>走的是运行时同一个平台步骤执行器：调试所见即线上的平台侧行为。终端的本地动作
+     * （RGB、录音）会如实返回 {@code terminal_action_required}，而不是悄悄绕回旧协议的遥控路径。</p>
+     */
     public Map<String, Object> executeOutputTest(String deviceId, Map<String, Object> body) {
         String nodeType = string(body.get("nodeType"));
         Map<String, Object> params = normalizeMap(body.get("params"));
-        return executorService.execute(deviceId, nodeType, params);
+        Map<String, Object> execution = new LinkedHashMap<>();
+        execution.put("workflowId", string(body.get("workflowId")));
+        execution.put("deploymentId", string(body.get("deploymentId")));
+        execution.put("slotId", string(body.get("slotId")));
+
+        WorkflowPlatformStepExecutor.StepOutcome outcome =
+                platformStepExecutor.execute(deviceId, nodeType, params, execution);
+
+        Map<String, Object> response = new LinkedHashMap<>(outcome.detail());
+        response.put("deviceId", deviceId);
+        response.put("nodeType", nodeType);
+        response.put("params", params);
+        response.put("status", outcome.status());
+        response.put("ok", outcome.ok());
+        return response;
     }
 
     @Override

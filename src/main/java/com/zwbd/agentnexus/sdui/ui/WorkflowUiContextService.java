@@ -2,6 +2,7 @@ package com.zwbd.agentnexus.sdui.ui;
 
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.ui.repo.WorkflowUiContextRepository;
+import com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher;
 import com.zwbd.agentnexus.sdui.workflow.model.NodeWorkflowDefinition;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDeploymentEntity;
 import jakarta.transaction.Transactional;
@@ -15,18 +16,18 @@ public class WorkflowUiContextService {
     private final WorkflowUiContextRepository repository;
     private final SduiUiTemplateService templateService;
     private final SectionDataCodec sectionDataCodec;
-    private final SectionOrchestrationService sectionOrchestrationService;
+    private final PrimaryViewPublisher primaryViewPublisher;
     private final DevicePrimaryUiService primaryUiService;
 
     public WorkflowUiContextService(WorkflowUiContextRepository repository,
                                     SduiUiTemplateService templateService,
                                     SectionDataCodec sectionDataCodec,
-                                    SectionOrchestrationService sectionOrchestrationService,
+                                    PrimaryViewPublisher primaryViewPublisher,
                                     DevicePrimaryUiService primaryUiService) {
         this.repository = repository;
         this.templateService = templateService;
         this.sectionDataCodec = sectionDataCodec;
-        this.sectionOrchestrationService = sectionOrchestrationService;
+        this.primaryViewPublisher = primaryViewPublisher;
         this.primaryUiService = primaryUiService;
     }
 
@@ -50,7 +51,7 @@ public class WorkflowUiContextService {
 
             Map<String, Object> variables = templateService.variableValues(template.getDefinition(), SduiUiTemplateService.map(config.get("variables")));
             SectionScene scene = templateService.toScene(template, variables);
-            boolean sent = sectionOrchestrationService.sendScene(deviceId, scene);
+            boolean sent = primaryViewPublisher.publish(deviceId, scene);
 
             WorkflowUiContextEntity context = repository
                     .findByDeploymentIdAndSlotIdAndTemplateKey(deployment.getId(), slotId, templateKey)

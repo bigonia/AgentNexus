@@ -82,7 +82,7 @@ class SduiUiTemplateServiceTest {
         service = new SduiUiTemplateService(
                 repository,
                 new SectionDataCodec(mockCatalog),
-                mock(SectionOrchestrationService.class),
+                mock(com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher.class),
                 mock(DeviceCapabilityProjection.class),
                 mockCatalog,
                 mockPageService

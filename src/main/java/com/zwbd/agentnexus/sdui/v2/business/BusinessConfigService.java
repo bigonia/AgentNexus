@@ -100,7 +100,11 @@ public class BusinessConfigService {
             TriggerSource source = binding.source() != null
                     ? binding.source()
                     : TriggerSource.infer(binding.triggerId());
-            String contextRef = "binding:" + binding.triggerId();
+            // 业务侧给定了上下文引用就用它（工作流部署写入 wf:<workflowId>:<triggerNodeId>），
+            // 否则退化成只标识绑定的形式，供非工作流场景关联日志。
+            String contextRef = binding.hasContext()
+                    ? binding.contextRef()
+                    : "binding:" + binding.triggerId();
 
             String triggerToken = binding.token();
             if (source == TriggerSource.PLATFORM && (triggerToken == null || triggerToken.isBlank())) {
@@ -124,7 +128,7 @@ public class BusinessConfigService {
                 steps.add(step.withParams(params));
             }
 
-            bindings.add(new TriggerBinding(binding.triggerId(), source, triggerToken, steps));
+            bindings.add(new TriggerBinding(binding.triggerId(), source, triggerToken, steps, binding.contextRef()));
         }
 
         return new Prepared(draft.withTriggers(bindings).withVersion(version), issued);

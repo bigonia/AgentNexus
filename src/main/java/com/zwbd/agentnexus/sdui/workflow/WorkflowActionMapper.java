@@ -13,7 +13,7 @@ import java.util.Map;
  * 把工作流输出节点翻译成终端的本地响应动作，并判定能否下沉到 {@code BusinessConfig}。
  *
  * <h2>为什么需要这一层</h2>
- * <p>旧模型下工作流的每个输出节点都由平台逐条下发设备命令（{@link CapabilityNodeExecutorService}）。
+ * <p>旧模型下工作流的每个输出节点都由平台逐条下发设备命令（现已删除的 {@code CapabilityNodeExecutorService}）。
  * 新模型下终端自己按序执行静态响应序列，平台只下发配置。但工作流节点类型与终端的能力动作不是同一套
  * 命名空间，而且并非所有节点都能独立执行——{@code audio.play} 要先有 TTS 产物，{@code ui.update}
  * 要先做模板渲染。所以需要一处显式声明"哪些节点可以变成静态动作、哪些必须留给平台"。</p>
@@ -107,7 +107,10 @@ public class WorkflowActionMapper {
         return switch (control) {
             case "start" -> verify("audio.record.start", Map.of(), schema);
             case "stop" -> verify("audio.record.stop", Map.of(), schema);
-            case "toggle" -> Mapped.hold("audio.record 的 toggle 依赖运行时录音状态，非静态动作");
+            // 01§5 明确 toggle 是"音频模块根据真实状态解释的便利动作"，由 terminal 侧解析。
+            // 它的动作名与参数都是静态的，运行时状态判断是终端自己的职责，因此可以下沉；
+            // 终端没声明这个便利动作时由 verify 门禁拦下。
+            case "toggle" -> verify("audio.record.toggle", Map.of(), schema);
             case "" -> Mapped.hold("audio.record 缺少 control 参数");
             default -> Mapped.hold("audio.record 不支持的 control 取值: " + control);
         };

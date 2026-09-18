@@ -84,6 +84,7 @@ rm -rf target/maven-status
 | G15 | token 格式与长度上限 | 01§3、01§4 | 前缀 `pt_`（触发器）/ `rt_`（上报）+ 24 字符随机串，总长 ≤ 64；上限 48 字节 | 中 |
 | G16 | `configVersion` 是否回显 | 01§6.2 | 假设终端原样保存但不回显；平台侧只用它做本地漂移检测 | 中：若无回显则无法确认终端实际生效版本 |
 | G17 | 平台侧业务态存储位置 | 02§4 | 首期内存实现，标注 TODO 待接持久化 | 低：重启丢失，可由平台重发配置恢复 |
+| G25 | 平台为动态节点生成专用绑定并签发 token 的形态 | 01§3 | 未实现：遇到只能由终端执行的动作（`usableIn=binding`）时返回 `terminal_action_required` 而不自造绑定 | 中：`rgb.effect` / `audio.record` 类平台步骤无法闭环，需终端确认后再定 |
 
 ### 3.4 业务面
 
@@ -96,6 +97,7 @@ rm -rf target/maven-status
 | G22 | 音频消息名称与超时值 | 04§10 | 下行 `audio.start/stop/abort`，上行同名事件带 `reason`；平台侧接收超时 15s | 中 |
 | G23 | `buffer_full` 之后平台如何使用部分数据 | 04§7 | 平台默认保留已收部分并标记异常终止，由业务层决定取舍 | 低 |
 | G24 | 系统命令的参数与错误语义 | 04§5 | `system.volume.set{value}`、`system.brightness.set{value}`、`system.reboot{}`、`system.provisioning.start{}` | 低 |
+| G26 | 下行音频的容器约定 | 04§7 | 平台侧发送裸 PCM（拆掉 WAV 头），如实记录采样率 / 声道 / 位宽；不重采样 | 中：终端若期望 WAV 头则需对齐，见 T16 |
 
 ## 4. 实现中发现的设计问题
 
@@ -160,11 +162,12 @@ rm -rf target/maven-status
 
 推论与实现：
 
-- `audio.record` 的 `control=toggle` 不能下沉——依赖终端运行时录音状态；
 - `audio.play` 带 `text` / `artifact_id` / `audio_file` 不能下沉——需要平台先产出音频；
 - 任何含 `$ref` 的节点不能下沉。
 
 `WorkflowActionMapper` 为每种节点类型显式给出"下沉或拒绝 + 拒绝理由"。这条规则的价值在于：配置里没有某个节点时，永远能查到它为什么不在，而不是一个静默的省略。
+
+> **修正（2026-09-18，P5b）**：本节原先还写了"`audio.record` 的 `control=toggle` 不能下沉——依赖终端运行时录音状态"。该判定把"运行时状态判断"误当成了"参数动态"。01§5 明确 `toggle` 是**音频模块根据真实状态解释的便利动作**，其动作名与参数（空）都是静态的，状态判断是终端自己的职责，因此可以下沉为 `audio.record.toggle`；终端未声明该便利动作时由能力门禁拦下。已改为下沉并补进 `WorkflowActionMapperTest`。判据因此收敛为一条：**只看动作名与参数是否静态、是否依赖平台产物，不看终端是否需要读自身状态。**
 
 ### 4.10 静态前缀截断与跨 slot 不截断（2026-09-18）
 
@@ -209,6 +212,40 @@ P5a 引入了 `DeviceProtocolRouter` + `sdui.routing`（优先级 黑名单 > �
 - `common/web/GlobalContextInterceptor` 的 `X-Space-Id` 兜底与 `common/config/SwaggerConfig` 的对应说明——这是与旧前端约定的身份传递兼容层，涉及鉴权语义，与本次协议重构无关，贸然移除可能影响登录链路。
 - `sdui/event/EventPayload`、`EventRegistry`、`service/audio/AudioRecordHandler` 内的 `backward compat` 分支——它们服务的是**同一协议内**的旧报文形态，属 P5c 剪除范围，已登记在 §7，本阶段不动。
 
+### 4.14 交互回流：上下文的承载与平台步骤的来源（2026-09-18）
+
+01§4 说"平台根据设备和 token 恢复业务上下文"，但没定义平台侧拿什么记住上下文。P5a 的做法是按上报里的 `triggerId` 去反查活动部署——这在同一工作流的多个部署把同一个物理按钮绑到不同 slot 时不成立，反查结果不唯一。
+
+**裁决**：token 注册时携带 `contextRef`，形如 `wf:<workflowId>:<triggerNodeId>`（S10）。`workflowId` + `triggerNodeId` 在一次工作流定义内唯一，可直接定位到"哪一次部署的哪个触发节点"，不需要反查。`contextRef` 只在平台侧注册表内流转，不进 `BusinessConfig` 的下行报文——终端不感知也不回传。解析失败返回空并安静跳过，以兼容非工作流场景写入的 `binding:<triggerId>`。
+
+另一个空缺是"平台步骤从哪来"（Q6）。P5b 的裁决是**随部署固化**：部署时把 `triggers` 与 `platformSteps` 一起写入 `NodeWorkflowDeploymentEntity.businessConfigs`，运行时读取。若改成运行时按当前能力 Schema 与工作流定义重新组装，工作流一旦被编辑，平台侧执行的就不再是设备侧已生效配置对应的那一份，形成静默漂移。代价是工作流定义变更后必须重新部署才生效——这与设备侧的行为一致，不是缺陷。
+
+### 4.15 平台步骤中"只能由终端执行"的动作（2026-09-18）
+
+平台步骤里混着两类节点。`display.section` / `ui.update` / `audio.play` 平台可以作为请求下发；而 `rgb.effect` / `audio.record` 在能力 Schema 里只声明 `usableIn=binding`——平台没有请求可发。
+
+可以走的三条路：① 退回旧协议的遥控路径（与"v2 是唯一协议"直接冲突）；② 自造一套"平台动态生成绑定并签发 token"的形态（文档未定义，会先固化一个错的接口）；③ 如实返回 `terminal_action_required`。
+
+**裁决**：选 ③。第 3 条路只说明模型的真实结果——动作所有权在终端的本地响应序列，需要终端的配合才能让平台发起。已登记为缺口 G25 / 待确认项 T15。选它的理由是：前两条都会**掩盖**这个缺口，而缺口的代价只是"这类节点暂时不闭环"，代价可控；自造接口的代价是终端按错形态实现后再改。
+
+注意 `terminal_action_required` 在运行记录里是 **`ok=true`**（平台已尽到职责，只是这一步不由平台交付），不计入失败，后续平台步骤继续执行。
+
+### 4.16 v2 接入层遗漏设备租户上下文（2026-09-18，P5b 修复）
+
+P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一个 P1–P4 遗留的真实缺陷：**v2 的 WebSocket 线程上没有租户**。
+
+平台数据隔离靠 Hibernate `@TenantId`，租户取自线程上的 `GlobalContext`（见 `UserIdResolver`）。HTTP 请求会设置它，WebSocket 线程不会，于是租户退化成 `default`。而设备表 `sdui_device` 是一张**全局表**（用 `ownerUserId` 列记归属），部署 / 运行 / UI 上下文 / artifact 才是租户表。结果是同一线程上"读设备成功、读该设备的部署记录却查不到"——旧协议栈的 `MessageRouter` 做了这一步，v2 接入层漏了。
+
+**平台侧处理**：新增 `DeviceTenantContext`，在路由分发点（请求 / 事件 / 二进制三类）按设备归属包裹处理器，作为 v2 侧唯一的租户建立入口（S13）。读设备这一步刻意放在设租户之前：租户信息本身来自设备行，而 `sdui_device` 没有 `@TenantId`，所以这一步天然可行；若将来它被改成租户表，这里会立刻查不到设备——属于显式失败，而不是静默串租户。
+
+这个缺陷的教训值得记下来：**P1–P4 的单测都是不落库的 mock 测试，租户不匹配在 mock 层完全不暴露**。跨租户的读写只有在真实持久层上才会现形。
+
+### 4.17 单 Section 收敛点与下行音频容器（2026-09-18）
+
+**单 Section 收敛。** v2 只有 `display.section` 全量替换，没有 Section 级增量更新，而平台侧的业务写法里仍有"场景"与"Patch"。若让每个下发点自己决定怎么转换，就会出现多处真值。收敛到唯一一处 `SectionViewResolver`（S12）：场景取首页 Section 作为主视图；Patch 在平台侧合成为完整 Section 后再下发；平台没有当前快照时**回退为下发完整场景**——比静默失败更接近调用方意图（把界面切过去）。业务侧统一经 `PrimaryViewPublisher` 出口。
+
+**下行音频容器。** artifact 里存的是 WAV 文件，而 04§7 只说"二进制帧承载音频数据"。直接把 WAV 整段发出去会把 44 字节头当音频播出来。裁决：拆出裸 PCM 载荷发送（S14），不做重采样——采样率由终端按自身声明处理，平台如实记录 `declaredSampleRate` 便于比对。终端的容器期望尚未确认，登记为 T16。
+
 ## 5. 未决问题
 
 | # | 问题 | 影响 | 状态 |
@@ -218,7 +255,9 @@ P5a 引入了 `DeviceProtocolRouter` + `sdui.routing`（优先级 黑名单 > �
 | Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | **已关闭（0.12.0）**：不做灰度。分流开关已删除，v2 是唯一协议，见 §4.12 |
 | Q4 | Node Workflow 产出配置的粒度（整份配置 / 片段合并） | 工作流编排模型 | **已解决（P5a）**：以 deployment 为粒度；节点产出片段，部署时按设备合并为全量配置 |
 | Q5 | 是否需要一个统一的设备侧操作审计视图 | 可观测性 | 待定 |
-| Q6 | 组装产出的 `platformSteps` 由谁持有（内存 / 随部署落库） | P5b 的交互回流能否跨平台重启 | P5b 设计时 |
+| Q6 | 组装产出的 `platformSteps` 由谁持有（内存 / 随部署落库） | P5b 的交互回流能否跨平台重启 | **已解决（P5b）**：随部署固化进 `businessConfigs`，可跨重启，见 §4.14 |
+| Q7 | 平台能否为动态节点签发专用绑定 / 新 token | `rgb.effect` / `audio.record` 类平台步骤能否闭环 | 待终端确认（G25 / T15） |
+| Q8 | 平台步骤在连接线程上同步执行 | 一次含 TTS 与音频下行的工作流可能占用秒级消息线程时间 | 待定；移出线程需要一并传递租户上下文（`GlobalContext` 是 ThreadLocal），旧实现同样同步，无退化 |
 
 ## 6. 开发过程记录
 
@@ -236,8 +275,13 @@ P5a 引入了 `DeviceProtocolRouter` + `sdui.routing`（优先级 黑名单 > �
 | 2026-09-18 | 验证 | `mvn test` 295 项通过（新增 36 项 P5a 用例，无回归） |
 | 2026-09-18 | 撤销设备级分流开关（0.12.0） | 删除 `DeviceProtocolRouter` / `SduiRoutingProperties` / `sdui.routing`，v2 成为唯一协议（§4.12）；顺带清理 `ai` 模块三处死代码（§4.13） |
 | 2026-09-18 | 验证 | `mvn test` 289 项通过（随分流开关移除 6 项，无回归） |
+| 2026-09-18 | 交付 P5b 交互事件回流 | `contextRef` 承载上下文（§4.14）、`platformSteps` 随部署固化（§4.14）、`WorkflowPlatformStepExecutor` 替代 `CapabilityNodeExecutorService` 并将平台步骤按出口分级（§4.15）、单 Section 收敛点与下行 PCM 拆解（§4.17）、修复 v2 接入层缺失的设备租户上下文（§4.16） |
+| 2026-09-18 | 修正 `audio.record` 的 `toggle` 下沉判定 | 按 01§5 `toggle` 是终端侧便利动作、参数静态，改为下沉为 `audio.record.toggle`（§4.9 修正） |
+| 2026-09-18 | 验证 | `mvn test` 323 项通过（删除旧执行器测试、新增 40 项 P5b 用例，净增 34 项，无回归） |
 
 后续进入 P5b：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。P5b 完成后才具备"把运行时换到 v2、整块移除旧协议栈"的条件。
+
+**P5b 已完成**：平台侧运行时（工作流续接、主视图下发、音频下行）已全部走 v2，旧协议栈不再有业务侧调用者，只剩"同协议内部互相依赖"这一层。P5c 的准入门槛因此回落为单一条件——**终端固件全量切换**。
 
 ## 7. 待清除模块清单（P5c 用）
 
@@ -248,6 +292,8 @@ P5a 阶段把所有将被删除的旧协议路径统一标注为 `@Deprecated(si
 - 代码层面若需回滚，撤销 `@Deprecated` 标注即可，代码始终可用。
 
 ⚠️ **0.12.0 已删除设备级分流开关**（§4.12），因此**回滚不再能按设备进行**：撤销标注会让旧协议对所有设备同时恢复，无法只让某台设备回退排查。执行本表时请一次性完成，并确认终端已全量切换。
+
+✅ **P5b 已按计划删除一项**：`sdui/workflow/CapabilityNodeExecutorService.java` 及其测试。它不属于旧协议消息入口，而是**工作流运行时里的旧协议调用者**——通过 `CommandService` / `AudioService` / `SectionOrchestrationService` 驱动设备。P5b 把运行时换到 v2 后它彻底失去调用方，遂直接删除（连同 `CapabilityNodeTestService` 的注入一并改为 `WorkflowPlatformStepExecutor`）。这是本清单外唯一在 P5b 删除的实现类，其余各项仍按"终端切换后一次性移除"执行。
 
 **规模提示**：本表列的是入口文件，实际下游还有约 70 个 `sdui` 非 v2 主代码文件（旧协议簇传递闭包共约 79 个）与约 23 个测试文件。逐文件引用关系见 §4.12 的核查结论。
 
@@ -274,6 +320,9 @@ P5a 阶段把所有将被删除的旧协议路径统一标注为 `@Deprecated(si
 | # | 限制 | 原因 | 回收条件 |
 | --- | --- | --- | --- |
 | L1 | 业务配置与 token 只在内存（G17） | 平台重启后由业务层重新 `business.update` 即可恢复，首期不值得引入持久化 | 需要跨重启保证时 |
-| L2 | `platformSteps` 目前只回传给部署接口，未持久化 | P5b 才有消费方；提前落库会固化尚未定型的结构 | P5b 设计定稿（Q6） |
+| L2 | ~~`platformSteps` 未持久化~~ | **已回收（P5b）**：随部署固化进 `NodeWorkflowDeploymentEntity.businessConfigs`，可跨平台重启（§4.14） | — |
 | L3 | 组装产出的配置版本号不回填到部署响应 | 下发是异步的，回填会让部署接口等待设备 ACK | 需要"部署即拿到版本"的交互时 |
 | L4 | 组装阶段的参数取值域校验依赖下发校验器的干跑 | 刻意不在组装器里复制一份参数校验规则——复制会形成两处真值，改动必然漂移（见 §4.11） | 无需回收，属于刻意的职责划分 |
+| L5 | `rgb.effect` / `audio.record` 类平台步骤不闭环 | 能力 Schema 只声明 `usableIn=binding`，平台无请求可发，只能返回 `terminal_action_required`（G25） | 终端确认 T15 后 |
+| L6 | 平台步骤在连接消息线程上同步执行 | TTS 合成与音频下行可能占用秒级时间；移出该线程需要一并传递租户上下文（`GlobalContext` 是 ThreadLocal） | 出现可观测的线程阻塞时（Q8） |
+| L7 | 主视图快照只在内存 | v2 无增量更新，Patch 需要快照合成；平台重启后首次 Patch 会回退为下发完整场景 | 需要跨重启保持增量能力时 |
