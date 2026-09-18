@@ -1,0 +1,178 @@
+# 功能清单与实现台账
+
+> 建立日期：2026-09-18
+> 用途：平台侧（AgentNexus）为对齐 LCD_085 重构所需的全部功能项、来源、阶段、状态与终端依赖。
+> 维护规则：每完成一项在此更新状态。状态取值：`TODO` / `DOING` / `DONE` / `BLOCKED` / `DEFERRED`。
+> 与 [10_PLATFORM_UPGRADE.md](10_PLATFORM_UPGRADE.md) 的分工：本文只做台账，设计理由写在方案文档，未定义项的处理原则写在 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md)。
+
+## 图例
+
+- **来源**：`01§2` 表示 [01_INTERACTION_MODEL.md](01_INTERACTION_MODEL.md) 第 2 节，其余同理。
+- **自实现** 列标记为 `是` 的条目，是设计文档中没有直接规定、但平台侧功能开发必须补齐的内容。
+- **终端依赖**：`-` 表示平台侧可独立完成；其余表示需要终端契约确认。
+
+## 1. 协议内核（P1）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1.1 | Request / Result / Event 三种 JSON 信封编解码 | 04§5 | 否 | P1 | DONE | - | `sdui/v2/protocol` |
+| 1.2 | 信封判定规则与非法报文拒绝 | 04§5 | 否 | P1 | DONE | - | 顺序判定，避免 `name`+`id` 歧义 |
+| 1.3 | 请求生命周期登记与一次性结果匹配 | 04§5、04§9 | 是 | P1 | DONE | - | 文档未定义超时登记结构 |
+| 1.4 | 普通请求超时处理（不自动重放） | 04§6 | 否 | P1 | DONE | - | 定时扫描 |
+| 1.5 | 新二进制帧头与 dataType 识别 | 04§8.1 | 是 | P1 | DONE | 需终端确认字段序 | 文档未定义帧头 |
+| 1.6 | 二进制帧大小上限与出站队列上限 | 04§8 | 是 | P1 | DONE | 需终端声明上限 | 文档只给原则 |
+| 1.7 | 无活动生命周期时二进制数据丢弃 | 04§8.1 | 否 | P1 | DONE | - | 计数告警 |
+| 1.8 | 单连接接管（新连接替换旧连接） | 04§2 | 否 | P1 | DONE | - | 独立于旧 `DeviceSessionManager` |
+| 1.9 | 旧连接迟到消息全部忽略 | 04§2、04§9 | 否 | P1 | DONE | - | 连接代次校验 |
+| 1.10 | 握手：protocol_version / capability_hash | 04§3 | 否 | P1 | DONE | 承载位置待确认 | 参数与首条消息双支持 |
+| 1.11 | v2 WebSocket 端点与旧端点并存 | 04§1 | 是 | P1 | DONE | - | `/ws/sdui/v2` |
+| 1.12 | 模拟终端（测试桩） | - | 是 | P1 | DONE | - | 无真实设备时的验收手段 |
+
+## 2. 能力域（P2）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2.1 | `CapabilitySchemaV2` 模型（trigger/action/surface/audio） | 04§4 | 否 | P2 | DONE | 需终端按此结构上报 | 准确语法待定 |
+| 2.2 | `capability_hash` 生成与校验 | 04§4 | 是 | P2 | DONE | 算法需双方一致 | 算法文档未定义 |
+| 2.3 | hash 缓存：已知 hash 直接用 | 04§4 | 否 | P2 | DONE | - | 按 hash 全局共享 |
+| 2.4 | 未知 hash → 请求完整 Schema → 校验 | 04§4 | 否 | P2 | DONE | 需 `capability.get` 名称确认 | 控制流程文档未定义 |
+| 2.5 | Schema 校验失败进入能力同步阶段 | 04§4 | 是 | P2 | DONE | - | 暂不接受业务下发 |
+| 2.6 | 绑定表配置校验器（Trigger/Action/参数/长度） | 04§4、01§2 | 是 | P2 | DONE | - | 校验规则来自平台配置 |
+| 2.7 | 能力目录投影到新模型 | 04§4 | 是 | P2 | TODO | - | 与 `sdui-event-catalog.yml` 收敛同步，尚未开始 |
+| 2.8 | 动作自然语言解释与速查表留在平台 | 04§4 | 是 | P2 | TODO | - | 不随连接下发 |
+
+## 3. 业务配置域（P3）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 3.1 | `BusinessConfig` 绑定表模型（Trigger → Response 序列） | 01§2、01§3 | 否 | P3 | DONE | 结构需终端确认 | 字段名待对接 |
+| 3.2 | 序列约束：有限、有序、不可编程 | 01§2 | 否 | P3 | DONE | - | 长度与白名单可配 |
+| 3.3 | 全量原子替换下发 `business.update` | 01§6.2 | 否 | P3 | DONE | - | 无增量命令 |
+| 3.4 | `business.reset` 语义与平台侧业务态清理 | 01§6.1 | 否 | P3 | DONE | - | 不含连接与系统态 |
+| 3.5 | 平台 Trigger token 生成与注册表 | 01§3 | 是 | P3 | DONE | token 长度上限待定 | 文档只说不透明 |
+| 3.6 | 上报 token 注册表与业务上下文反查 | 01§4 | 是 | P3 | DONE | - | 与 Trigger token 分离 |
+| 3.7 | `business.trigger(token)` 下发与一次性结果 | 01§3 | 否 | P3 | DONE | - | - |
+| 3.8 | 业务切换编排（reset → update） | 01§6.3 | 是 | P3 | DONE | - | 文档未给平台侧编排细节 |
+| 3.9 | 重连后幂等重发完整配置 | 04§3 | 否 | P3 | DONE | - | 不使用 boot_id |
+| 3.10 | 配置版本号与漂移检测 | 01§6.2 | 是 | P3 | DONE | 需终端回显版本 | 文档未定义回显 |
+
+## 4. 业务面迁移（P4）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4.1 | `display.section` 单 Section 全量替换 | 03§2 | 否 | P4 | DONE | 需确认名称 | - |
+| 4.2 | Section 类型收敛为 5 类 | 03§2.1 | 否 | P4 | DOING | - | 新模型已按 5 类声明；YAML 目录尚未裁剪 |
+| 4.3 | `display.image.begin/end` + binary 全屏图片 | 03§3 | 否 | P4 | DONE | 调色板格式待定 | - |
+| 4.4 | RGB565 调色板模型与校验 | 03§3 | 是 | P4 | DONE | - | - |
+| 4.5 | `display.canvas.open/close` + binary 帧 | 03§4 | 否 | P4 | DONE | 分辨率/色数上限待定 | - |
+| 4.6 | Canvas 丢帧保留最新策略 | 03§4.3 | 是 | P4 | DONE | - | 文档只给原则 |
+| 4.7 | 三种主视图互斥管理 | 03§1 | 是 | P4 | DONE | - | 平台侧需记录当前视图 |
+| 4.8 | 音频下行 `audio.start` → binary → `audio.stop/abort` | 04§7 | 否 | P4 | DONE | 名称待确认 | - |
+| 4.9 | 音频上行接收态与唯一性约束 | 04§7 | 否 | P4 | DONE | - | 每设备唯一 |
+| 4.10 | `buffer_full` 异常终止与部分数据取舍 | 04§7 | 否 | P4 | DONE | - | - |
+| 4.11 | 音频平台侧超时终止 | 04§9 | 否 | P4 | DONE | 超时值待定 | - |
+| 4.12 | 系统命令 `system.*` 统一 request/result | 02§4、04§5 | 否 | P4 | DONE | - | 复用硬件实现 |
+| 4.13 | 系统命令期望值由平台维护 | 02§4 | 否 | P4 | DONE | - | 终端不持久化 |
+| 4.14 | 平台交互上报事件入库 | 01§4 | 否 | P4 | DONE | - | `platform.interaction` |
+| 4.15 | 上报 token 无效/找不到绑定的错误处理 | 01§3 | 是 | P4 | DONE | - | 错误名待定 |
+
+## 5. 工作流对接与收尾（P5）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5.1 | 工作流部署产出 `BusinessConfig` | 02§2 | 是 | P5 | TODO | - | 文档未描述平台编排形态 |
+| 5.2 | `platform.interaction` 事件驱动工作流运行 | 01§4 | 是 | P5 | TODO | - | token 反查运行上下文 |
+| 5.3 | 交互结果作为工作流新输入 | 01§4 | 是 | P5 | TODO | - | - |
+| 5.4 | 删除旧 `cmd/control` 与 ACK 路径 | 02§4、04§5 | 否 | P5 | TODO | - | 见方案 §10 |
+| 5.5 | 删除 TLV 输入路径 | 04§1 | 否 | P5 | TODO | - | - |
+| 5.6 | 删除 Section Patch 与多 Section 拼接 | 03§2 | 否 | P5 | TODO | - | - |
+| 5.7 | 删除 Base64 音频路径 | 04§1 | 否 | P5 | TODO | - | - |
+| 5.8 | 前端调试页面对齐 v2 | - | 是 | P5 | TODO | - | 静态页需同步 |
+
+## 6. 自实现补充功能汇总
+
+以下功能在设计文档中没有直接规定，但平台侧实现必须补齐，已在 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) 中记录理由与风险。
+
+| 编号 | 功能 | 为什么必须 |
+| --- | --- | --- |
+| 1.3 | 请求生命周期登记结构 | 文档定义了"只返回一次结果"，但未定义平台如何登记与匹配 |
+| 1.5 | 二进制帧头 | 文档要求"最小数据类型标识"，未定义字节布局 |
+| 1.6 | 帧大小与队列上限 | 文档只给"必须有上限"的原则，需要可配置的具体值 |
+| 1.9 | 连接代次校验 | 文档要求忽略旧连接消息，未给判定手段 |
+| 1.11 | 新端点和过渡期并存 | 文档要求最终只有一套协议，但开发期必须可回归 |
+| 1.12 | 模拟终端 | 终端未就绪时无法验证平台侧，必须自建测试桩 |
+| 2.2 | hash 算法 | 文档明确"实现阶段确定" |
+| 2.5 | 能力同步阶段的准入拦截 | 文档定义了该阶段，未定义平台如何拦截业务下发 |
+| 2.6 | 配置校验器 | 文档要求校验，未定义校验规则来源 |
+| 3.5 / 3.6 | token 注册表结构 | 文档只说不透明 token，未定义平台存储 |
+| 3.8 | 切换编排 | 文档给了两步语义，未给平台侧执行与失败处理 |
+| 3.10 | 配置版本回显 | 全量替换需要可观测的版本，否则无法判断漂移 |
+| 4.4 | RGB565 调色板模型 | 文档给了语义，未给平台侧数据模型 |
+| 4.6 | 丢帧策略实现 | 文档只给原则 |
+| 4.7 | 主视图互斥状态机 | 文档给定互斥，未定义平台侧跟踪方式 |
+| 4.15 | 无效 token 错误路径 | 文档提到返回错误，未给错误名 |
+
+首版实现过程中额外补齐的自实现项（详见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §4）：
+
+| 编号 | 功能 | 为什么必须 |
+| --- | --- | --- |
+| S1 | 接管时立即结束旧连接未完成请求 | 文档只说"忽略旧连接消息"与"超时处理"，两者之间存在悬挂窗口 |
+| S2 | 业务清理的跨域协调者 | 01§6.1 列出的清理项分散在音频域与显示域，需要一个集中表达范围的位置 |
+| S3 | 干跑校验的 token 回收 | 预检会签发 token，若不回收会在注册表留下永不使用的条目 |
+| S4 | 上行音频流的开始宣告约定 | 04§7 只描述生命周期形状，未定义终端如何告知平台上行流已开始 |
+| S5 | 调色板随会话开始放入 JSON body | 03§3/§4 只要求"完整提供调色板"，未定义承载通道；首期色数上限下体积可忽略 |
+| S6 | 连接 attach 的幂等保护 | 避免重复建立连接对象或误自增代次，导致代次校验失效 |
+| S7 | 出站"在途消息"上限而非排队 | 旧实现无上限；文档只要求"队列有固定上限"，这里选择同步有界发送而非内存排队 |
+
+## 7. 首版交付的代码资产
+
+首版（P1–P4 核心）落地的实现文件，均在 `src/main/java/com/zwbd/agentnexus/sdui/v2/` 下，与旧实现物理隔离。
+
+| 包 | 类型 | 职责 |
+| --- | --- | --- |
+| `v2/protocol` | `Envelope` / `EnvelopeCodec` | 三种信封及其判定规则 |
+| `v2/protocol` | `BinaryFrameCodecV2` / `BinaryDataType` | 新二进制帧头与数据类型 |
+| `v2/protocol` | `ProtocolErrors` / `ProtocolException` / `V2Names` | 错误名与消息名常量 |
+| `v2/session` | `DeviceConnectionRegistry` / `DeviceConnection` / `DeviceHandshake` | 单连接接管与代次校验 |
+| `v2/session` | `PendingRequestRegistry` | 未完成请求登记、超时与接管清理 |
+| `v2/capability` | `CapabilitySchemaV2` / `CapabilityHash` / `CapabilityRegistryV2` | Schema 模型、hash、缓存与协商状态 |
+| `v2/business` | `BusinessConfig` / `TriggerBinding` / `ResponseStep` / `TriggerSource` | 绑定表模型 |
+| `v2/business` | `BusinessConfigValidator` | 配置校验（结构 + 能力约束） |
+| `v2/business` | `InteractionTokenService` | 双域不透明 token 注册表 |
+| `v2/business` | `BusinessConfigService` | reset / update / trigger / 上报受理 / 接管重发 |
+| `v2/business` | `BusinessInteraction` / `BusinessClearedEvent` / `BusinessCleanupCoordinator` | 业务领域事件与跨域清理 |
+| `v2/display` | `DisplaySessionService` / `DisplayCommandService` | 主视图互斥、图片与 Canvas 会话 |
+| `v2/display` | `PaletteImageCodec` | 调色板与索引矩阵编解码校验 |
+| `v2/audio` | `AudioStreamService` / `AudioCommandService` | 音频方向互斥、异常终止与超时 |
+| `v2/system` | `SystemCommandService` | 系统命令与期望值维护 |
+| `v2/transport` | `SduiV2WebSocketHandler` / `SduiV2MessageRouter` | v2 端点与按名称路由 |
+| `v2/transport` | `DeviceSender` / `PlatformRequestService` | 有界出站与请求生命周期 |
+| `v2/transport` | `V2SessionBootstrapService` | 接管后的能力确认与配置重发编排 |
+| `v2/transport/sink` | `PlatformInteractionEventSink` / `AudioLifecycleEventSink` / `AudioUplinkBinarySink` / `CanvasFrameBinarySink` / `ImageChunkBinarySink` / `CapabilitySchemaBinarySink` | 上行事件与二进制接收器 |
+| `v2` | `V2ProtocolProperties` / `V2Config` / `OperationResult` | 可配置上限与装配 |
+
+测试资产（`src/test/java/com/zwbd/agentnexus/sdui/v2/`）：
+
+| 类型 | 说明 |
+| --- | --- |
+| `sim/SimulatedLcd085Device` | LCD_085 模拟终端测试桩：典型能力 Schema、握手、上下行报文构造与解析 |
+| 单元测试 14 个类 / 134 个用例 | 覆盖信封判定、帧编解码、hash 性质、配置校验、token 隔离、接管代次、请求超时、主视图互斥、位打包、音频互斥、路由分发、初始化编排 |
+
+验证命令与结果：`mvn test` → 259 项通过（含既有 125 项，无回归）。
+
+## 8. 待终端确认项汇总
+
+| 编号 | 事项 | 阻塞的功能 |
+| --- | --- | --- |
+| T1 | 握手字段承载位置（连接参数 / 首条消息） | 1.10 |
+| T2 | `capability_hash` 算法与编码 | 2.2、2.4 |
+| T3 | 二进制帧头字节布局与 dataType 取值 | 1.5、4.3、4.5、4.8 |
+| T4 | 业务配置 JSON 结构与上限 | 3.1、3.3 |
+| T5 | 错误码最小集合 | 3.4、4.15、全部失败路径 |
+| T6 | 五类 Section 的字段与限制 | 4.2 |
+| T7 | 图片调色板与索引矩阵编码 | 4.3 |
+| T8 | Canvas 分辨率、色数、帧率上限 | 4.5 |
+| T9 | 音频开始/结束/异常消息名称与超时值 | 4.8、4.11 |
+| T10 | 系统命令参数与错误语义 | 4.12 |
+| T11 | 上行音频流的开始宣告方式（平台侧暂约定为 `audio.start` 事件） | 4.9、4.11 |
+| T12 | 调色板与索引矩阵的承载通道及位序（平台侧暂假设随 begin 的 JSON 下发、字节内低位在前） | 4.3、4.5 |

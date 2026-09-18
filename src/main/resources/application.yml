@@ -165,3 +165,17 @@ sdui:
     whisper-path: whisper
     whisper-model: base
     language: zh
+  # LCD_085 重构后的 v2 协议上限与超时。
+  # 数值来源见 docs/sdui/lcd085-refactor/2026-09-18/12_DESIGN_NOTES.md 缺口 G4 / G6，
+  # 终端升级完成后需要按固件实际能力对齐。
+  v2:
+    request-timeout-ms: 10000
+    request-timeout-scan-ms: 1000
+    max-binary-frame-bytes: 8192
+    max-control-queue: 256
+    max-bindings-per-config: 32
+    max-responses-per-binding: 8
+    max-token-length: 48
+    audio-receive-timeout-ms: 15000
+    audio-timeout-scan-ms: 2000
+    canvas-pending-frame-depth: 1

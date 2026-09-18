@@ -34,3 +34,14 @@ Section 是服务端下发 UI 的数据单元。当前 Java 模型包含 14 类�
 ## 当前实现与重构提案
 
 本文件描述当前代码实现。`lcd085-refactor/` 下的文档是 LCD_085 的后续重构提案，不能据此推断现有协议、API 或终端行为。
+
+## v2 通道（LCD_085 重构，开发中）
+
+`com.zwbd.agentnexus.sdui.v2` 是 LCD_085 重构后的新协议通道，与上述旧实现**并行运行**，旧实现保持不变。
+
+- 端点：`/ws/sdui/v2`，只处理 v2 信封与 v2 二进制帧；旧端点 `/ws/sdui` 不受影响。
+- 控制面按消息名分发（`Envelope.Request` / `Result` / `Event`），数据面按 `BinaryDataType` 分发。
+- 装配入口：`SduiV2WebSocketHandler` → `SduiV2MessageRouter`；上限与超时集中在 `V2ProtocolProperties`（配置前缀 `sdui.v2`）。
+- 测试桩：`src/test/java/.../sdui/v2/sim/SimulatedLcd085Device.java` 提供无设备条件下的端到端回归能力。
+
+设计依据与实施进度见 [LCD_085 重构设计](lcd085-refactor/2026-09-18/README.md)、[平台侧升级方案](lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md) 与 [功能清单](lcd085-refactor/2026-09-18/11_FEATURE_MATRIX.md)。v2 尚未替换旧协议；旧路径的删除属于 P5 阶段。

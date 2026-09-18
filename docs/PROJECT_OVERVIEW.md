@@ -23,6 +23,7 @@ HTTP 客户端 ── REST / SSE ──> 管理与调试 API
 | 目录 | 职责 |
 | --- | --- |
 | `sdui/` | 设备 WebSocket、协议、能力目录、Section、工作流、调试与音频。 |
+| `sdui/v2/` | LCD_085 重构后的 v2 协议通道（端点 `/ws/sdui/v2`），与旧实现并行，尚未替换。 |
 | `ai/` | Agent、对话、MCP。 |
 | `drawthings/` | 本地 DrawThings 图像生成接入。 |
 | `security/` | 认证与 JWT。 |
