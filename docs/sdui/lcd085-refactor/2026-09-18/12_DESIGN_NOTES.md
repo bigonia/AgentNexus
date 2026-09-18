@@ -368,7 +368,7 @@ P5b 把工作流运行时挂到 `platform.interaction` 上之后，暴露了一�
 | 2026-09-18 | P5c 前置：引用图复核删除清单 | 新增 `scripts/sdui-refgraph/refgraph.py`；查明 v2 硬依赖只有 6 个类、`sdui` 对外封闭、删除难点在控制层；修正原清单两处错误（§4.18），§7 重写为三步可执行清单 |
 | 2026-09-18 | 交付 0.14.0 闭环接口集 | 新增契约 `docs/sdui/front/CLIENT_API.md`；按域改写全部 sdui 控制器（设备 / 能力 / 板型 / 事件 / 工作流 / 调试）；新建 `CapabilityQueryService`（能力唯一出口）、`PlatformRequestDispatcher`（调试下行唯一出口）、`DebugStreamHub`（调试流）；保留模块统一换用 `DeviceConnectionRegistry`（§4.19）；删除重复端点 `/debug/node-workflows/**`，补上缺失的 `/deployments/{deploymentId}/config` |
 | 2026-09-18 | 关闭 Q9、新增 Q10 | 扫描前端调用点（`scripts/sdui-front-paths.py`）确定实际使用面；修正 `CapabilityNodeController` 的错误弃用注释；§7.2 阻塞量 59 → 18（§4.19） |
-| 2026-09-18 | 撤销 Q10、修正引用图两处口径、纠正两处误标弃用 | 保留闭包 39 个，§7.3 重写为"控制层裁剪**不能**释放旧能力 / 事件模型，前提是先解耦 `ui` 包"；"引用数"口径改为"释放量"逐个推演（§7.2）；`SectionPatch` / `SectionTypeCatalog` 移除错误的 `@Deprecated`；新增 T16（§4.19 / §4.21） |
+| 2026-09-18 | 撤销 Q10、修正引用图两处口径、纠正两处误标弃用 | 保留闭包 39 个，§7.3 重写为"控制层裁剪**不能**释放旧能力 / 事件模型，前提是先解耦 `ui` 包"；"引用数"口径改为"释放量"逐个推演（§7.2）；`SectionPatch` / `SectionTypeCatalog` 移除错误的 `@Deprecated`；新增 T17（§4.19 / §4.21） |
 | 2026-09-18 | 修正引用图第三类误判：接线根 | `WebSocketConfig`（`@Configuration`，注册 `/ws/sdui/v2`）原被列为 A 类可删，照删会让 v2 端点在编译与测试全绿的情况下消失。脚本新增接线根判据，A 类 15 → 12（§4.20） |
 | 2026-09-18 | 验证 | `mvn test` **350 项通过**（新增 `PlatformRequestDispatcher` / `DebugStreamHub` / `CapabilityQueryService` 等 29 项用例；删除重复控制器 `NodeWorkflowDebugController` 及其 2 项测试；无回归） |
 
@@ -522,7 +522,7 @@ ui.SduiUiTemplateService
 | T13 | 本地响应动作的名称与参数集合 | `WorkflowActionMapper` 的映射表无法定稿，直接影响"哪些节点该下沉" |
 | ~~—~~ | ~~§7.2 控制层端点的实际使用情况~~ | **已关闭（0.14.0）**：`scripts/sdui-front-paths.py` 给出前端实际调用面，见 §7.2。调试域只有 `node-tests` 三个端点在用 |
 | ~~Q10~~ | ~~`/section-triggers` 改由 v2 Schema 派生~~ | **已关闭（0.14.1）**：定性有误。数据源是平台页面定义与类型目录；v2 的 `UiSpec` 只有类型名名单，派生三级树不成立；v2 已裁决 Section 门禁归 Schema 校验。不阻塞 P5c（§4.19） |
-| **T16** | `ui` 包如何从旧能力 / 事件模型解耦（入口是 `SduiUiTemplateService` / `DevicePrimaryUiService` / `WorkflowUiContextService`） | 不解耦则保留闭包 39 个类一个都删不掉，P5c 无法收尾（§7.3 / §7.4）。**这是 P5c 真正的前置工作** |
+| **T17** | `ui` 包如何从旧能力 / 事件模型解耦（入口是 `SduiUiTemplateService` / `DevicePrimaryUiService` / `WorkflowUiContextService`） | 不解耦则保留闭包 39 个类一个都删不掉，P5c 无法收尾（§7.3 / §7.4）。**这是 P5c 真正的前置工作** |
 
 ### 7.6 测试与调试资产
 
