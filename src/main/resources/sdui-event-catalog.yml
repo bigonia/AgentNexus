@@ -432,3 +432,83 @@ sections:
             - {name: tabId, type: string, required: false}
             - {name: activeTab, type: int, required: false}
             - {name: ts, type: int, required: false}
+
+    - type: dashboard_section
+      displayName: Dashboard
+      constraints: {max_metrics: 8, max_alerts: 8}
+      fields:
+        - {name: title, type: string, label: Title, default: Dashboard, parameterizable: true}
+        - {name: subtitle, type: string, label: Subtitle, default: Live overview, parameterizable: true}
+        - {name: primaryMetricId, type: string, label: Primary metric ID, default: "", parameterizable: true}
+        - name: metrics
+          type: array
+          label: Metrics
+          children:
+            - {name: id, type: string, label: Metric ID, default: ""}
+            - {name: label, type: string, label: Label, default: "", parameterizable: true}
+            - {name: value, type: string, label: Value, default: "", parameterizable: true}
+            - {name: unit, type: string, label: Unit, default: "", parameterizable: true}
+            - {name: tone, type: enum, values: [primary, success, warning, danger, neutral], label: Tone, default: primary, parameterizable: true}
+            - {name: detail, type: string, label: Detail, default: "", parameterizable: true}
+            - {name: progress, type: int, min: 0, max: 100, label: Progress, default: 0, parameterizable: true}
+        - name: alerts
+          type: array
+          label: Alerts
+          children:
+            - {name: id, type: string, label: Alert ID, default: ""}
+            - {name: title, type: string, label: Title, default: "", parameterizable: true}
+            - {name: level, type: enum, values: [info, important, warning, dangerous], label: Level, default: info, parameterizable: true}
+            - {name: time, type: string, label: Time, default: "", parameterizable: true}
+            - {name: acknowledged, type: boolean, label: Acknowledged, default: false, parameterizable: true}
+      events:
+        - id: ui:dashboard.metric.opened
+          subtype: interaction
+          direction: INBOUND
+          displayName: Dashboard metric opened
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: dashboard.metric.opened}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: true}
+            - {name: ts, type: int, required: false}
+
+    - type: speak_section
+      displayName: Speak
+      fields:
+        - {name: title, type: string, label: Title, default: Speak, parameterizable: true}
+        - {name: hint, type: string, label: Hint, default: Hold to speak, parameterizable: true}
+        - {name: sessionId, type: string, label: Session ID, default: local_speak, parameterizable: true}
+        - {name: maxDurationMs, type: int, min: 1000, max: 120000, label: Maximum duration, default: 30000, parameterizable: true}
+        - {name: status, type: enum, values: [idle, recording, processing, result, error], label: Status, default: idle, parameterizable: true}
+        - {name: transcript, type: string, label: Transcript, default: "", parameterizable: true}
+      events:
+        - id: ui:speak.recording.started
+          subtype: interaction
+          direction: INBOUND
+          displayName: Speak recording started
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: speak.recording.started}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: ts, type: int, required: false}
+        - id: ui:speak.recording.completed
+          subtype: interaction
+          direction: INBOUND
+          displayName: Speak recording completed
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: speak.recording.completed}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: ts, type: int, required: false}
+        - id: ui:speak.recording.failed
+          subtype: interaction
+          direction: INBOUND
+          displayName: Speak recording failed
+          transport: {protocol: ui3_binary, msgType: 9, eventKind: 1, eventName: speak.recording.failed}
+          payloadSchema:
+            - {name: pageId, type: string, required: false}
+            - {name: sectionId, type: string, required: true}
+            - {name: nodeId, type: string, required: false}
+            - {name: ts, type: int, required: false}

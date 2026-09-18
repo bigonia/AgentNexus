@@ -42,7 +42,8 @@ public class SectionTriggerCatalogService {
             "action_section",  new ElementExtractor("actions",  "id", "label", "button"),
             "toggle_section",  new ElementExtractor("options",  "id", "label", "toggle_option"),
             "list_section",    new ElementExtractor("items",    "id", "title", "list_item"),
-            "nav_section",     new ElementExtractor("tabs",     "id", "label", "nav_tab")
+            "nav_section",     new ElementExtractor("tabs",     "id", "label", "nav_tab"),
+            "dashboard_section", new ElementExtractor("metrics", "id", "label", "dashboard_metric")
     );
 
     public SectionTriggerCatalogService(PageService pageService,

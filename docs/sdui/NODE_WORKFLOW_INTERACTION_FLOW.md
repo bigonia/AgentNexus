@@ -357,7 +357,7 @@ SectionOrchestrationService.sendScene(deviceId, scene)
         │   根据 sizeClass 选择 RICH / COMPACT 模式
         │
         ├─ ② SectionSceneBuilder 序列化
-        │   SectionScene → JSON (含 12 种 SectionData 类型)
+        │   SectionScene → JSON（含当前 14 种 SectionData 类型）
         │
         ├─ ③ 记住页面状态 (pageStatesByDevice)
         │

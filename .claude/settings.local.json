@@ -47,7 +47,13 @@
       "Bash(rm -v src/main/java/com/zwbd/agentnexus/ai/web/controller/DocumentManagementController.java)",
       "Bash(rm -v src/main/java/com/zwbd/agentnexus/ai/repository/RAGDocumentRepository.java)",
       "Bash(rm -rfv src/main/java/com/zwbd/agentnexus/ai/dto/document/)",
-      "Bash(rm -rfv src/main/java/com/zwbd/agentnexus/ai/custom/)"
+      "Bash(rm -rfv src/main/java/com/zwbd/agentnexus/ai/custom/)",
+      "Bash(npm --version)",
+      "Read(//c/Program Files/**)",
+      "Read(//c//**)",
+      "Bash(sc query *)",
+      "Bash(netstat -ano)",
+      "PowerShell($svc = Get-CimInstance Win32_Service -Filter \"Name='postgresql-x64-17'\"; $svc.PathName; Get-ChildItem -Path \"C:\\\\Program Files\\\\PostgreSQL\" -Filter psql.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)"
     ]
   }
 }

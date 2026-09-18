@@ -70,4 +70,32 @@ public sealed interface SectionData {
         @Override public String type() { return "nav_section"; }
         public record NavTab(String id, String label) {}
     }
+
+    record DashboardData(
+            String title,
+            String subtitle,
+            String primaryMetricId,
+            List<DashboardMetric> metrics,
+            List<DashboardAlert> alerts
+    ) implements SectionData {
+        @Override public String type() { return "dashboard_section"; }
+        public record DashboardMetric(
+                String id, String label, String value, String unit,
+                String tone, String detail, int progress
+        ) {}
+        public record DashboardAlert(
+                String id, String title, String level, String time, boolean acknowledged
+        ) {}
+    }
+
+    record SpeakData(
+            String title,
+            String hint,
+            String sessionId,
+            int maxDurationMs,
+            String status,
+            String transcript
+    ) implements SectionData {
+        @Override public String type() { return "speak_section"; }
+    }
 }

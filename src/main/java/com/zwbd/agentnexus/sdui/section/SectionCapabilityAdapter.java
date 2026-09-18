@@ -51,7 +51,9 @@ public class SectionCapabilityAdapter {
             Map.entry("overlay_section", 0),   // rendered on overlay layer, not in flow
             Map.entry("list_section", 65),
             Map.entry("toggle_section", 60),
-            Map.entry("nav_section", 50)
+            Map.entry("nav_section", 50),
+            Map.entry("dashboard_section", 410),
+            Map.entry("speak_section", 410)
     );
 
     public SectionCapabilityAdapter(CapabilityCatalog catalog) {
@@ -222,6 +224,23 @@ public class SectionCapabilityAdapter {
                 return new SectionData.TextData(d.title(), d.body().substring(0, max) + "...");
             }
             return d;
+        }
+        if (data instanceof SectionData.DashboardData d) {
+            int maxMetrics = limits.getOrDefault("max_dashboard_metrics", 8);
+            int maxAlerts = limits.getOrDefault("max_dashboard_alerts", 8);
+            var metrics = d.metrics().size() > maxMetrics
+                    ? d.metrics().subList(0, maxMetrics) : d.metrics();
+            var alerts = d.alerts().size() > maxAlerts
+                    ? d.alerts().subList(0, maxAlerts) : d.alerts();
+            return new SectionData.DashboardData(
+                    d.title(), d.subtitle(), d.primaryMetricId(), metrics, alerts);
+        }
+        if (data instanceof SectionData.SpeakData d) {
+            int duration = Math.max(1_000, Math.min(d.maxDurationMs(), 120_000));
+            String transcript = d.transcript() != null && d.transcript().length() > 240
+                    ? d.transcript().substring(0, 240) : d.transcript();
+            return new SectionData.SpeakData(
+                    d.title(), d.hint(), d.sessionId(), duration, d.status(), transcript);
         }
         if (data instanceof SectionData.OverlayData d) {
             int max = limits.getOrDefault("max_overlay_body", 100);

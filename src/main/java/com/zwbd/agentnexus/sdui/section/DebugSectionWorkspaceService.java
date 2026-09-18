@@ -187,7 +187,8 @@ public class DebugSectionWorkspaceService {
             "action_section", new ChildExtractor("actions", "id", "label"),
             "toggle_section", new ChildExtractor("options", "id", "label"),
             "list_section",   new ChildExtractor("items",   "id", "title"),
-            "nav_section",    new ChildExtractor("tabs",    "id", "label")
+            "nav_section",    new ChildExtractor("tabs",    "id", "label"),
+            "dashboard_section", new ChildExtractor("metrics", "id", "label")
     );
 
     /**

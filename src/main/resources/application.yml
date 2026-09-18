@@ -53,8 +53,10 @@ spring:
 #                - -y
 #                - "@antv/mcp-server-chart"
             playwright:
-              command: npx
+              command: cmd
               args:
+                - /c
+                - npx
                 - -y
                 - "@playwright/mcp@latest"
 #        sse:

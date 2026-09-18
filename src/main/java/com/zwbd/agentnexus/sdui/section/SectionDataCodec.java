@@ -136,6 +136,46 @@ public class SectionDataCodec {
                 }
                 yield new SectionData.NavData(tabs, num(safeFields, "activeTab", 0));
             }
+            case "dashboard_section" -> {
+                List<SectionData.DashboardData.DashboardMetric> metrics = new ArrayList<>();
+                Object rawMetrics = safeFields.get("metrics");
+                if (rawMetrics instanceof List<?> list) {
+                    for (Object item : list) {
+                        if (item instanceof Map<?, ?> map) {
+                            Map<String, Object> metric = (Map<String, Object>) map;
+                            metrics.add(new SectionData.DashboardData.DashboardMetric(
+                                    str(metric, "id", sectionId + "_metric_" + metrics.size()),
+                                    str(metric, "label", ""), str(metric, "value", ""),
+                                    str(metric, "unit", ""), str(metric, "tone", "primary"),
+                                    str(metric, "detail", ""), num(metric, "progress", 0)));
+                        }
+                    }
+                }
+                List<SectionData.DashboardData.DashboardAlert> alerts = new ArrayList<>();
+                Object rawAlerts = safeFields.get("alerts");
+                if (rawAlerts instanceof List<?> list) {
+                    for (Object item : list) {
+                        if (item instanceof Map<?, ?> map) {
+                            Map<String, Object> alert = (Map<String, Object>) map;
+                            alerts.add(new SectionData.DashboardData.DashboardAlert(
+                                    str(alert, "id", sectionId + "_alert_" + alerts.size()),
+                                    str(alert, "title", ""), str(alert, "level", "info"),
+                                    str(alert, "time", ""), bool(alert, "acknowledged", false)));
+                        }
+                    }
+                }
+                yield new SectionData.DashboardData(
+                        str(safeFields, "title", "Dashboard"),
+                        str(safeFields, "subtitle", "Live overview"),
+                        str(safeFields, "primaryMetricId", ""), metrics, alerts);
+            }
+            case "speak_section" -> new SectionData.SpeakData(
+                    str(safeFields, "title", "Speak"),
+                    str(safeFields, "hint", "Hold to speak"),
+                    str(safeFields, "sessionId", "local_speak"),
+                    num(safeFields, "maxDurationMs", 30000),
+                    str(safeFields, "status", "idle"),
+                    str(safeFields, "transcript", ""));
             default -> null;
         };
     }
@@ -257,6 +297,35 @@ public class SectionDataCodec {
             }
             fields.put("tabs", tabs);
             fields.put("activeTab", d.activeTab());
+            return fields;
+        }
+        if (data instanceof SectionData.DashboardData d) {
+            fields.put("title", d.title());
+            fields.put("subtitle", d.subtitle());
+            fields.put("primaryMetricId", d.primaryMetricId());
+            List<Map<String, Object>> metrics = new ArrayList<>();
+            for (var metric : d.metrics()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", metric.id()); item.put("label", metric.label());
+                item.put("value", metric.value()); item.put("unit", metric.unit());
+                item.put("tone", metric.tone()); item.put("detail", metric.detail());
+                item.put("progress", metric.progress()); metrics.add(item);
+            }
+            fields.put("metrics", metrics);
+            List<Map<String, Object>> alerts = new ArrayList<>();
+            for (var alert : d.alerts()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", alert.id()); item.put("title", alert.title());
+                item.put("level", alert.level()); item.put("time", alert.time());
+                item.put("acknowledged", alert.acknowledged()); alerts.add(item);
+            }
+            fields.put("alerts", alerts);
+            return fields;
+        }
+        if (data instanceof SectionData.SpeakData d) {
+            fields.put("title", d.title()); fields.put("hint", d.hint());
+            fields.put("sessionId", d.sessionId()); fields.put("maxDurationMs", d.maxDurationMs());
+            fields.put("status", d.status()); fields.put("transcript", d.transcript());
             return fields;
         }
         return fields;
