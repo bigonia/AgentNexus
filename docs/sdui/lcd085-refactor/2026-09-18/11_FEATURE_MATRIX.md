@@ -114,18 +114,22 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 
 准入条件：**终端固件全量切换到 v2**。分流开关已在 0.12.0 删除——本项目不做灰度，
 v2 是唯一协议，因此旧路径的删除不再有"把设备按回旧协议"的回退手段，只能等终端切换完成。
-以下各项当前已标注 `@Deprecated(since = "0.10.0")` 并保留可用，清单见
-[12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7。
+以下各项当前已标注 `@Deprecated(since = "0.10.0")` 并保留可用。删除清单、执行顺序与必保边界经过引用图复核，见
+[12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7 与 §4.18；复核脚本 `scripts/sdui-refgraph/refgraph.py`，每次裁剪后重跑即可得到当刻清单。
 
 | # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 5.9.1 | 引用图复核删除清单，产出可执行顺序与必保边界 | - | 是 | P5c | **DONE** | - | 见 12§4.18；发现 v2 硬依赖仅 6 类、原清单 2 处错误已修正 |
 | 5.10 | 删除旧 `cmd/control` 与 ACK 路径 | 02§4、04§5 | 否 | P5c | DEFERRED | 终端切换完成 | 见方案 §10，已 deprecated |
+| 5.10.1 | 裁剪控制层对旧能力 / 事件模型的暴露 | - | 是 | P5c | TODO | 需业务确认端点用途（Q9） | **前置**：阻塞 87 个待删类中的大多数，8 个端点见 12§7.2 |
+| 5.10.2 | 删除无需改造即可移除的 6 类 + 旧 WS 端点 | - | 是 | P5c | DEFERRED | 终端切换完成 | 12§7.1；含真死代码 `SemanticCommand` |
 | 5.11 | 删除 TLV 输入路径 | 04§1 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
-| 5.12 | 删除 Section Patch 与多 Section 拼接 | 03§2 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.12 | 删除旧 Section 编排与多 Section 拼接 | 03§2 | 否 | P5c | DEFERRED | 终端切换完成 | **修正**：`SectionPatch` 等模型被 v2 收敛点复用，保留；只删 `SectionOrchestrationService` 的下行编码路径（12§4.18 裁决二） |
 | 5.13 | 删除 Base64 音频路径 | 04§1 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
 | 5.14 | 删除旧 16 字节二进制帧头 | 04§8 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
-| 5.15 | Section 14 类目录收敛为 5 类 | 03§2.1 | 否 | P5c | DEFERRED | 需 T6 定稿 | 与 4.2 合并 |
+| 5.15 | Section 14 类目录收敛为 5 类 | 03§2.1 | 否 | P5c | DEFERRED | 需 T6 定稿 | **修正**：`SectionTypeCatalog` 服务须保留（ui 层用于模板校验），只收敛类型集合 |
 | 5.16 | 删除能力名称上报路径 | 04§4 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.16.1 | 删除旧上行音频处理链 | 04§7 | 否 | P5c | **BLOCKED** | 需 T11 先落地 | `AudioRecordHandler` / `AudioRecordChunkHandler` / `AudioRecordSessionManager` 是平台唯一录音通路 |
 | 5.17 | 删除 `DeviceProtocolRouter` 与 `sdui.routing` | - | 是 | P5a | **DONE** | - | 0.12.0 已删除 |
 | 5.18 | 前端调试页面对齐 v2 | - | 是 | P5c | TODO | - | `static/sdui-*.html` 三个页面 |
 
