@@ -79,6 +79,9 @@ class NodeWorkflowControllerTest {
         when(deploymentService.deploy(eq("wf-1"), anyMap())).thenReturn(Map.of("deploymentId", "dep-1"));
         when(deploymentService.list("wf-1")).thenReturn(List.of(Map.of("deploymentId", "dep-1")));
         when(deploymentService.get("wf-1", "dep-1")).thenReturn(Map.of("deploymentId", "dep-1", "status", "active"));
+        when(deploymentService.config("wf-1", "dep-1")).thenReturn(Map.of(
+                "deploymentId", "dep-1",
+                "businessConfigs", Map.of("dev-a", Map.of("triggers", List.of("button.trigger")))));
         when(deploymentService.stop("wf-1", "dep-1")).thenReturn(Map.of("stopped", true));
         when(runtimeService.testTrigger(eq("wf-1"), eq("dep-1"), anyMap())).thenReturn(Map.of("runId", "run-1"));
         when(runtimeService.listRuns("wf-1", "dep-1")).thenReturn(List.of(Map.of("runId", "run-1")));
@@ -91,6 +94,11 @@ class NodeWorkflowControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.deploymentId").value("dep-1"));
         mockMvc.perform(get("/api/v1/sdui/node-workflows/wf-1/deployments"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].deploymentId").value("dep-1"));
+        mockMvc.perform(get("/api/v1/sdui/node-workflows/wf-1/deployments/dep-1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("active"));
+        mockMvc.perform(get("/api/v1/sdui/node-workflows/wf-1/deployments/dep-1/config"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.businessConfigs['dev-a'].triggers[0]").value("button.trigger"));
         mockMvc.perform(post("/api/v1/sdui/node-workflows/wf-1/deployments/dep-1/test-trigger")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.runId").value("run-1"));

@@ -1,425 +1,243 @@
 package com.zwbd.agentnexus.sdui.capability.node;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
-import com.zwbd.agentnexus.sdui.capability.CapabilityCatalog;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContractService;
-import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
-import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
-import lombok.extern.slf4j.Slf4j;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilitySchemaV2;
+import com.zwbd.agentnexus.sdui.workflow.NodeTypeRegistry;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-@Slf4j
+/**
+ * 工作流编辑器的节点目录。
+ *
+ * <p>回答编排阶段的唯一问题：<b>在这台设备上，可以往工作流里放哪些节点</b>。内容由两处既有真值
+ * 推导，不新引入第三份：</p>
+ *
+ * <ul>
+ *   <li><b>节点类型</b>来自 {@link NodeTypeRegistry}——运行时按同一登记表执行，避免"编辑器里有、
+ *       运行时没实现"或反过来的漂移。</li>
+ *   <li><b>可用性</b>来自设备声明的 {@link CapabilitySchemaV2}——输出节点要求动作出现在 Schema 的
+ *       {@code actions[]} 中；触发节点要求触发源声明 {@code configurable}。</li>
+ * </ul>
+ *
+ * <p>不可用的节点不静默省略，而是进入 {@code unresolvedNodes} 并附原因。配置里没有某个节点时，
+ * 必须能查到它为什么不在。</p>
+ *
+ * <p>本类只描述"怎么配"，不判定"能不能下沉"。下沉由 {@code WorkflowActionMapper} 在组装期判定，
+ * 并会再次校验设备声明——两处判据都指向同一个设备 Schema，因此不会得出相反结论。</p>
+ */
 @Service
+@RequiredArgsConstructor
 public class CapabilityNodeCatalogService {
 
-    private final SduiCapabilityService capabilityService;
-    private final CapabilityContractService contractService;
-    private final CapabilityCatalog catalog;
-    private final DeviceSessionManager sessionManager;
+    private final NodeTypeRegistry nodeTypes;
+    private final CapabilityQueryService capabilities;
 
-    public CapabilityNodeCatalogService(SduiCapabilityService capabilityService,
-                                        CapabilityContractService contractService,
-                                        CapabilityCatalog catalog,
-                                        DeviceSessionManager sessionManager) {
-        this.capabilityService = capabilityService;
-        this.contractService = contractService;
-        this.catalog = catalog;
-        this.sessionManager = sessionManager;
-    }
+    /** 节点类型的展示信息。可执行性不在这里——那由设备 Schema 决定。 */
+    private record Presentation(String displayName, String description, CapabilityNodeRuntimeMode mode) {}
+
+    private static final Map<String, Presentation> PRESENTATIONS = Map.of(
+            "rgb.effect", new Presentation("RGB 灯光", "设备 RGB LED 灯光效果", CapabilityNodeRuntimeMode.ACTION),
+            "audio.record", new Presentation("音频采集", "设备麦克风音频采集", CapabilityNodeRuntimeMode.SESSION),
+            "audio.play", new Presentation("音频播放", "播放设备内置提示音，或由平台产出音频", CapabilityNodeRuntimeMode.ACTION),
+            "display.section", new Presentation("Section 显示", "创建或替换终端主视图 Section", CapabilityNodeRuntimeMode.UI_PATCH),
+            "ui.update", new Presentation("UI 更新", "由平台按模板渲染后下发 Section", CapabilityNodeRuntimeMode.UI_PATCH));
+
+    /** 触发节点的类型名必须以 {@code .trigger} 结尾——工作流引擎据此识别入口节点。 */
+    private static final String GENERIC_TRIGGER_TYPE = "trigger";
 
     public CapabilityNodeCatalog buildForDevice(String deviceId) {
         return buildForDevice(deviceId, null, null);
     }
 
     /**
-     * Build capability nodes for a device.
+     * 构建设备节点目录。
      *
-     * <p>The {@code pageId} and {@code pageJson} parameters are accepted for backward
-     * compatibility but are no longer used — section trigger nodes have moved to the
-     * dedicated {@code /section-triggers} endpoint.</p>
+     * <p>{@code pageId} 与 {@code pageJson} 保留以兼容既有调用方，但不再参与节点解析：Section
+     * 触发树由 {@code /board-types/{board}/section-triggers} 单独承担。</p>
      */
     public CapabilityNodeCatalog buildForDevice(String deviceId, String pageId, String pageJson) {
-        CapabilityContract contract = contractService.buildContract(deviceId);
-        Optional<CapabilitySchema.CapabilitySnapshot> capsOpt = capabilityService.getCapabilities(deviceId);
-        if (capsOpt.isEmpty()) {
-            return new CapabilityNodeCatalog(
-                    deviceId,
-                    sessionManager.isDeviceOnline(deviceId),
-                    contract.status(),
-                    List.of(),
-                    unresolvedFromContract(contract)
-            );
-        }
-
-        CapabilitySchema.CapabilitySnapshot caps = capsOpt.get();
-        Set<String> inputs = new LinkedHashSet<>(safeList(caps.inputs()));
-        Set<String> outputs = new LinkedHashSet<>(safeList(caps.outputs()));
+        CapabilitySchemaV2 schema = capabilities.schemaOf(deviceId).orElse(null);
+        String status = String.valueOf(capabilities.sync(deviceId).get("state"));
         List<CapabilityNodeDefinition> nodes = new ArrayList<>();
-
-        for (String inputName : inputs) {
-            buildInputTriggerNode(inputName).ifPresent(nodes::add);
-        }
-
-        if (inputs.contains("audio.record") || outputs.contains("audio.record")) {
-            nodes.add(audioRecordNode(inputs.contains("audio.record"), outputs.contains("audio.record")));
-        }
-
-        if (outputs.contains("rgb.effect")) {
-            buildRgbNode().ifPresent(nodes::add);
-        }
-
-        if (outputs.contains("audio.stream")) {
-            nodes.add(audioPlayNode());
-        }
-
-        if (caps.display() != null) {
-            nodes.add(uiUpdateNode(caps.display()));
-            nodes.add(displaySectionNode(caps.display()));
-        }
-
-        return new CapabilityNodeCatalog(
-                deviceId,
-                sessionManager.isDeviceOnline(deviceId),
-                contract.status(),
-                nodes,
-                unresolvedFromContract(contract)
-        );
-    }
-
-    /**
-     * Build a trigger node for any physical input (buttons.*, motion, etc.).
-     *
-     * Uses the generic catalog definition — new physical inputs added to
-     * capability-catalog.yml automatically appear without code changes.
-     * Platform-mediated inputs (audio.record, etc.) are handled separately.
-     */
-    private Optional<CapabilityNodeDefinition> buildInputTriggerNode(String inputName) {
-        CapabilityCatalog.InputDef inputDef = catalog.getInput(inputName).orElse(null);
-        if (inputDef == null || inputDef.platform()) {
-            return Optional.empty();
-        }
-
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (String eventName : safeList(inputDef.events())) {
-            if (inputDef.isInternalEvent(eventName)) continue;
-            events.add(Map.of(
-                    "eventId", normalizeInputEventId(inputName, eventName),
-                    "eventName", eventName,
-                    "displayName", inputDef.eventDisplayName(eventName)
-            ));
-        }
-        if (events.isEmpty()) {
-            return Optional.empty();
-        }
-
-        String instanceId = inputName.startsWith("buttons.")
-                ? inputName.substring("buttons.".length()) : inputName;
-        String nodeType = inputName.startsWith("buttons.")
-                ? "button.trigger" : inputName + ".trigger";
-
-        // Parameters: eventId enum from available events
-        List<Map<String, Object>> parameters = new ArrayList<>();
-        if (!events.isEmpty()) {
-            parameters.add(Map.of(
-                    "name", "eventId",
-                    "type", "enum",
-                    "required", true,
-                    "label", "触发事件",
-                    "values", events
-            ));
-        }
-
-        // Artifacts: use catalog artifacts if defined, otherwise fallback to payloadSchema
-        List<CapabilityNodeArtifactSchema> artifacts = catalogArtifacts(inputDef.artifacts());
-        if (artifacts.isEmpty()) {
-            artifacts = List.of(new CapabilityNodeArtifactSchema("event", "object", "事件负载", true,
-                    Map.of("fields", payloadFields(inputDef.payloadSchema()))));
-        }
-
-        return Optional.of(new CapabilityNodeDefinition(
-                nodeType,
-                inputName,
-                instanceId,
-                inputDef.displayName() != null ? inputDef.displayName() : instanceId,
-                inputDef.description(),
-                CapabilityNodeRuntimeMode.TRIGGER,
-                List.of(),
-                List.of(new CapabilityNodePort("event", "output", "event",
-                        "输入事件", true, Map.of())),
-                parameters,
-                artifacts,
-                Map.of("kind", "device_input", "inputName", inputName, "events", events),
-                Map.of("triggerOnly", true)
-        ));
-    }
-
-    private CapabilityNodeDefinition audioRecordNode(boolean hasInput, boolean hasOutput) {
-        CapabilityCatalog.InputDef inputDef = catalog.getInput("audio.record").orElse(null);
-        CapabilityCatalog.OutputDef outputDef = catalog.getOutput("audio.record").orElse(null);
-        List<Map<String, Object>> controls = List.of(
-                Map.of("value", "start", "displayName", "开始录制"),
-                Map.of("value", "stop", "displayName", "停止录制"),
-                Map.of("value", "toggle", "displayName", "切换录制")
-        );
-
-        List<Map<String, Object>> events = new ArrayList<>();
-        if (inputDef != null) {
-            for (String eventName : safeList(inputDef.events())) {
-                events.add(Map.of(
-                        "eventId", eventName,
-                        "eventName", eventName,
-                        "displayName", inputDef.eventDisplayName(eventName),
-                        "namespacedEventId", normalizeInputEventId("audio.record", eventName)
-                ));
-            }
-        }
-
-        return new CapabilityNodeDefinition(
-                "audio.record",
-                "audio.record",
-                "audio-record",
-                inputDef != null && inputDef.displayName() != null ? inputDef.displayName() : "音频采集",
-                inputDef != null ? inputDef.description() : "设备麦克风音频采集",
-                CapabilityNodeRuntimeMode.SESSION,
-                List.of(new CapabilityNodePort("control", "input", "enum",
-                        "控制", true, Map.of("values", controls))),
-                List.of(
-                        new CapabilityNodePort("completed", "output", "event", "录音完成", false,
-                                Map.of("events", events)),
-                        new CapabilityNodePort("audio_file", "output", "audio_file", "音频文件", false, Map.of()),
-                        new CapabilityNodePort("text", "output", "string", "转写文本", false, Map.of())
-                ),
-                List.of(Map.of("name", "control", "type", "enum", "required", true,
-                        "values", controls, "default", "toggle")),
-                catalogArtifacts(inputDef != null ? inputDef.artifacts() : List.of()),
-                Map.of("kind", "device_session",
-                        "inputName", "audio.record",
-                        "outputName", "audio.record",
-                        "hasInput", hasInput,
-                        "hasOutput", hasOutput,
-                        "commands", outputDef != null ? safeList(new ArrayList<>(outputDef.commands().keySet())) : List.of(),
-                        "events", events),
-                Map.of("builtInStt", true, "artifactId", "audio-record-latest")
-        );
-    }
-
-    private Optional<CapabilityNodeDefinition> buildRgbNode() {
-        CapabilityCatalog.CommandDef commandDef = catalog.getCommand("rgb.effect.set").orElse(null);
-        if (commandDef == null) {
-            return Optional.empty();
-        }
-        CapabilityCatalog.OutputDef outputDef = catalog.getOutput("rgb.effect").orElse(null);
-        List<Map<String, Object>> parameters = new ArrayList<>();
-        parameters.add(Map.of("name", "off", "type", "boolean", "required", false,
-                "default", false, "label", "关闭"));
-        parameters.addAll(params(commandDef));
-        // Artifacts: use catalog definition if present, else fallback to command result
-        List<CapabilityNodeArtifactSchema> artifacts = catalogArtifacts(
-                outputDef != null ? outputDef.artifacts() : List.of());
-        if (artifacts.isEmpty()) {
-            artifacts = List.of(
-                    new CapabilityNodeArtifactSchema("cmdId", "string", "命令 ID", false, Map.of()),
-                    new CapabilityNodeArtifactSchema("ackStatus", "string", "ACK 状态", false, Map.of()));
-        }
-        return Optional.of(new CapabilityNodeDefinition(
-                "rgb.effect",
-                "rgb.effect",
-                "rgb-effect",
-                "RGB 灯光",
-                "设备 RGB LED 灯光效果控制",
-                CapabilityNodeRuntimeMode.ACTION,
-                List.of(new CapabilityNodePort("params", "input", "object",
-                        "灯光参数", true, Map.of("fields", parameters))),
-                List.of(new CapabilityNodePort("command", "output", "command_result",
-                        "命令结果", false, Map.of())),
-                parameters,
-                artifacts,
-                Map.of("kind", "device_command", "outputName", "rgb.effect",
-                        "commands", List.of("rgb.effect.set", "rgb.off")),
-                Map.of()
-        ));
-    }
-
-    private CapabilityNodeDefinition audioPlayNode() {
-        CapabilityCatalog.CommandDef tts = catalog.getCommand("audio.tts.speak").orElse(null);
-        CapabilityCatalog.CommandDef prompt = catalog.getCommand("audio.prompt.play").orElse(null);
-        List<Map<String, Object>> parameters = new ArrayList<>();
-        parameters.add(Map.of("name", "text", "type", "string", "required", false, "description", "TTS 文本"));
-        parameters.add(Map.of("name", "preset", "type", "enum", "required", false,
-                "values", List.of("notification", "success", "error", "warning", "click", "beep"),
-                "description", "预设提示音"));
-        parameters.add(Map.of("name", "artifact_id", "type", "string", "required", false,
-                "description", "音频产物 ID，v1 暂返回 unsupported"));
-        parameters.add(Map.of("name", "audio_file", "type", "audio_file", "required", false,
-                "description", "音频文件引用，v1 暂返回 unsupported"));
-
-        return new CapabilityNodeDefinition(
-                "audio.play",
-                "audio.stream",
-                "audio-play",
-                "音频播放",
-                "播放提示音或 TTS 文本",
-                CapabilityNodeRuntimeMode.ACTION,
-                List.of(new CapabilityNodePort("source", "input", "object",
-                        "播放内容", true, Map.of("fields", parameters))),
-                List.of(new CapabilityNodePort("command", "output", "command_result",
-                        "播放结果", false, Map.of())),
-                parameters,
-                List.of(new CapabilityNodeArtifactSchema("cmdId", "string", "命令 ID", false, Map.of()),
-                        new CapabilityNodeArtifactSchema("sent", "boolean", "是否已发送", false, Map.of())),
-                Map.of("kind", "device_audio_output",
-                        "outputName", "audio.stream",
-                        "commands", List.of(
-                                tts != null ? "audio.tts.speak" : "",
-                                prompt != null ? "audio.prompt.play" : ""
-                        ).stream().filter(s -> !s.isBlank()).toList()),
-                Map.of("artifactPlayback", "unsupported_in_v1")
-        );
-    }
-
-    private CapabilityNodeDefinition uiUpdateNode(CapabilitySchema.DisplayInfo display) {
-        return new CapabilityNodeDefinition(
-                "ui.update",
-                "display",
-                "ui-update",
-                "UI 更新",
-                "修改终端 UI 上下文，由平台转换为 Section 更新",
-                CapabilityNodeRuntimeMode.UI_PATCH,
-                List.of(new CapabilityNodePort("update", "input", "object", "UI 更新", true,
-                        Map.of("fields", List.of(
-                                Map.of("name", "sectionId", "type", "string", "required", true),
-                                Map.of("name", "field", "type", "string", "required", true),
-                                Map.of("name", "value", "type", "any", "required", true)
-                        )))),
-                List.of(new CapabilityNodePort("patch", "output", "ui_patch", "UI Patch", false, Map.of())),
-                List.of(),
-                List.of(),
-                Map.of("kind", "device_ui", "transport", display.transport(), "layouts", safeList(display.layouts())),
-                Map.of("sectionTypes", safeList(display.sectionTypes()))
-        );
-    }
-
-    private CapabilityNodeDefinition displaySectionNode(CapabilitySchema.DisplayInfo display) {
-        return new CapabilityNodeDefinition(
-                "display.section",
-                "display",
-                "display-section",
-                "Section 显示",
-                "创建或替换终端 Section 视图",
-                CapabilityNodeRuntimeMode.UI_PATCH,
-                List.of(new CapabilityNodePort("scene", "input", "object", "Section 场景", true,
-                        Map.of("sectionTypes", safeList(display.sectionTypes())))),
-                List.of(new CapabilityNodePort("scene", "output", "ui_scene", "UI Scene", false, Map.of())),
-                List.of(),
-                List.of(),
-                Map.of("kind", "device_ui_section", "transport", display.transport()),
-                Map.of("sectionTypes", safeList(display.sectionTypes()), "layouts", safeList(display.layouts()))
-        );
-    }
-
-    private List<Map<String, Object>> unresolvedFromContract(CapabilityContract contract) {
         List<Map<String, Object>> unresolved = new ArrayList<>();
-        for (CapabilityContract.UnresolvedCapability item : contract.unresolved()) {
-            unresolved.add(Map.of(
-                    "domain", item.domain(),
-                    "id", item.id(),
-                    "reason", item.reason()
-            ));
+
+        if (schema == null) {
+            unresolved.add(unresolved("device", deviceId, "设备能力 Schema 未同步，无法列出节点"));
+            return new CapabilityNodeCatalog(deviceId, capabilities.online(deviceId), status, nodes, unresolved);
         }
-        return unresolved;
+
+        appendTriggerNodes(schema, nodes, unresolved);
+        appendOutputNodes(schema, nodes, unresolved);
+
+        return new CapabilityNodeCatalog(deviceId, capabilities.online(deviceId), status, nodes, unresolved);
     }
 
-    private List<Map<String, Object>> params(CapabilityCatalog.CommandDef commandDef) {
-        if (commandDef == null || commandDef.params() == null) {
-            return List.of();
-        }
-        List<Map<String, Object>> fields = new ArrayList<>();
-        for (var entry : commandDef.params().entrySet()) {
-            CapabilityCatalog.FieldSchema field = entry.getValue();
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("name", entry.getKey());
-            map.put("type", field.type());
-            map.put("required", field.required());
-            if (field.defaultValue() != null) {
-                map.put("default", field.defaultValue());
-            }
-            if (field.values() != null && !field.values().isEmpty()) {
-                map.put("values", field.values());
-            }
-            if (field.label() != null) {
-                map.put("label", field.label());
-            }
-            if (field.description() != null) {
-                map.put("description", field.description());
-            }
-            Map<String, Object> constraints = new LinkedHashMap<>();
-            if (field.min() != null) constraints.put("min", field.min());
-            if (field.max() != null) constraints.put("max", field.max());
-            if (!constraints.isEmpty()) map.put("constraints", constraints);
-            fields.add(map);
-        }
-        return fields;
-    }
-
-    private List<Map<String, Object>> payloadFields(List<CapabilityCatalog.PayloadField> fields) {
-        if (fields == null || fields.isEmpty()) return List.of();
-        return fields.stream()
-                .map(field -> {
-                    Map<String, Object> map = new LinkedHashMap<>();
-                    map.put("name", field.name());
-                    map.put("type", field.type());
-                    map.put("required", field.required());
-                    if (field.description() != null) map.put("description", field.description());
-                    return map;
-                })
-                .toList();
-    }
-
-    private String normalizeInputEventId(String inputName, String eventName) {
-        if (eventName == null || eventName.isBlank() || eventName.contains(":")) {
-            return eventName;
-        }
-        if (inputName != null && inputName.startsWith("buttons.")) {
-            return "input:" + inputName + "." + eventName;
-        }
-        if ("motion".equals(inputName)) {
-            return "input:motion." + eventName;
-        }
-        if (inputName != null && inputName.startsWith("audio.") && eventName.startsWith("audio.")) {
-            return "input:" + inputName + "." + eventName;
-        }
-        return eventName;
-    }
-
-    private <T> List<T> safeList(Collection<T> values) {
-        if (values == null) {
-            return List.of();
-        }
-        return new ArrayList<>(values);
-    }
+    // ── 触发节点 ───────────────────────────────────────────────────────────
 
     /**
-     * Convert catalog artifact definitions (YAML) to CapabilityNodeArtifactSchema list.
-     * Each YAML entry: {@code {name, type, displayName, description?}}
+     * 触发节点按<b>来源族</b>分组：同一族共用一种节点类型，具体触发 id 进入 {@code eventId} 的取值域。
+     * 这样节点类型数量保持稳定，新增触发源不必新增节点类型。
      */
-    private List<CapabilityNodeArtifactSchema> catalogArtifacts(List<Map<String, Object>> raw) {
-        if (raw == null || raw.isEmpty()) return List.of();
-        List<CapabilityNodeArtifactSchema> result = new ArrayList<>();
-        for (Map<String, Object> entry : raw) {
-            result.add(new CapabilityNodeArtifactSchema(
-                    string(entry.get("name")),
-                    string(entry.get("type")),
-                    string(entry.get("displayName")),
-                    entry.get("required") instanceof Boolean b ? b : false,
-                    Map.of()));
+    private void appendTriggerNodes(CapabilitySchemaV2 schema,
+                                    List<CapabilityNodeDefinition> nodes,
+                                    List<Map<String, Object>> unresolved) {
+        if (schema.triggers() == null) {
+            return;
         }
-        return result;
+        Map<String, List<CapabilitySchemaV2.TriggerSpec>> byFamily = new LinkedHashMap<>();
+        for (CapabilitySchemaV2.TriggerSpec trigger : schema.triggers()) {
+            if (!trigger.configurable()) {
+                unresolved.add(unresolved("trigger", trigger.id(),
+                        "触发源未声明 configurable，平台不能在绑定表中使用"));
+                continue;
+            }
+            byFamily.computeIfAbsent(triggerNodeType(trigger.id()), key -> new ArrayList<>()).add(trigger);
+        }
+
+        for (Map.Entry<String, List<CapabilitySchemaV2.TriggerSpec>> entry : byFamily.entrySet()) {
+            List<Map<String, Object>> values = new ArrayList<>();
+            for (CapabilitySchemaV2.TriggerSpec trigger : entry.getValue()) {
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("eventId", trigger.id());
+                value.put("eventName", trigger.id());
+                value.put("source", trigger.source());
+                value.put("maxResponses", trigger.maxResponses());
+                values.add(value);
+            }
+            Map<String, Object> eventIdParam = new LinkedHashMap<>();
+            eventIdParam.put("name", "eventId");
+            eventIdParam.put("type", "enum");
+            eventIdParam.put("required", true);
+            eventIdParam.put("label", "触发源");
+            eventIdParam.put("values", values);
+
+            nodes.add(new CapabilityNodeDefinition(
+                    entry.getKey(),
+                    entry.getKey(),
+                    entry.getKey(),
+                    "触发",
+                    "终端本地产生的交互入口，绑定后由平台按 token 续接",
+                    CapabilityNodeRuntimeMode.TRIGGER,
+                    List.of(),
+                    List.of(new CapabilityNodePort("event", "output", "event", "触发事件", true, Map.of())),
+                    List.of(eventIdParam),
+                    List.of(new CapabilityNodeArtifactSchema("event", "object", "触发负载", true, Map.of())),
+                    Map.of("kind", "terminal_trigger", "triggers", values),
+                    Map.of("triggerOnly", true)));
+        }
     }
 
-    private String string(Object value) {
-        return value == null ? "" : String.valueOf(value);
+    /** 触发源 id → 节点类型。来源族之外的触发源回落到通用类型。 */
+    private static String triggerNodeType(String triggerId) {
+        if (triggerId == null || triggerId.isBlank()) {
+            return GENERIC_TRIGGER_TYPE;
+        }
+        if (triggerId.startsWith("button.")) {
+            return "button.trigger";
+        }
+        if (triggerId.startsWith("platform.trigger")) {
+            return "platform.trigger";
+        }
+        int dot = triggerId.indexOf('.');
+        return dot > 0 ? triggerId.substring(0, dot) + ".trigger" : GENERIC_TRIGGER_TYPE;
+    }
+
+    // ── 输出节点 ───────────────────────────────────────────────────────────
+
+    /**
+     * 输出节点。没有终端动作的类型（如 {@code ui.update}）仍然可用——平台自己完成渲染与下发，
+     * 只是不会进入终端的本地响应序列。
+     */
+    private void appendOutputNodes(CapabilitySchemaV2 schema,
+                                   List<CapabilityNodeDefinition> nodes,
+                                   List<Map<String, Object>> unresolved) {
+        Set<String> outputTypes = new LinkedHashSet<>(nodeTypes.nodeTypes());
+        outputTypes.removeIf(type -> type.endsWith(".trigger"));
+
+        for (String nodeType : outputTypes) {
+            Presentation presentation = PRESENTATIONS.get(nodeType);
+            if (presentation == null) {
+                unresolved.add(unresolved("node", nodeType, "节点类型已登记但缺少展示定义，未列入目录"));
+                continue;
+            }
+            List<String> candidates = nodeTypes.targetActions(nodeType);
+            CapabilitySchemaV2.ActionSpec declared = firstDeclared(schema, candidates);
+            if (!candidates.isEmpty() && declared == null) {
+                unresolved.add(unresolved("node", nodeType,
+                        "终端能力 Schema 未声明动作 " + String.join(" / ", candidates)));
+                continue;
+            }
+
+            List<Map<String, Object>> parameters = new ArrayList<>();
+            for (NodeTypeRegistry.ParamDef param : nodeTypes.getParams(nodeType)) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", param.name());
+                entry.put("type", param.type());
+                entry.put("required", param.required());
+                entry.put("label", param.displayName());
+                entry.put("values", valuesOf(declared, param.name()));
+                parameters.add(entry);
+            }
+
+            Map<String, Object> source = new LinkedHashMap<>();
+            source.put("kind", "platform_node");
+            source.put("targetActions", candidates);
+            source.put("declaredAction", declared == null ? null : declared.name());
+            source.put("sinkable", declared != null && declared.usableInBinding());
+
+            nodes.add(new CapabilityNodeDefinition(
+                    nodeType,
+                    nodeType,
+                    nodeType,
+                    presentation.displayName(),
+                    presentation.description(),
+                    presentation.mode(),
+                    List.of(new CapabilityNodePort("params", "input", "object", "参数", true,
+                            Map.of("fields", parameters))),
+                    List.of(new CapabilityNodePort("result", "output", "object", "执行结果", false, Map.of())),
+                    parameters,
+                    List.of(),
+                    source,
+                    Map.of("requiresPlatform", candidates.isEmpty())));
+        }
+    }
+
+    /** 该节点类型的候选动作中，设备实际声明了的第一个。 */
+    private static CapabilitySchemaV2.ActionSpec firstDeclared(CapabilitySchemaV2 schema,
+                                                              List<String> candidates) {
+        for (String candidate : candidates) {
+            CapabilitySchemaV2.ActionSpec spec = schema.action(candidate);
+            if (spec != null) {
+                return spec;
+            }
+        }
+        return null;
+    }
+
+    /** 参数取值域以设备声明为准；设备未声明时返回空表，表示"无枚举约束"。 */
+    private static List<String> valuesOf(CapabilitySchemaV2.ActionSpec action, String paramName) {
+        if (action == null) {
+            return List.of();
+        }
+        CapabilitySchemaV2.ParamSpec param = action.param(paramName);
+        if (param == null || param.values() == null) {
+            return List.of();
+        }
+        return param.values();
+    }
+
+    private static Map<String, Object> unresolved(String kind, String id, String reason) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("kind", kind);
+        entry.put("id", id);
+        entry.put("reason", reason);
+        return entry;
     }
 }

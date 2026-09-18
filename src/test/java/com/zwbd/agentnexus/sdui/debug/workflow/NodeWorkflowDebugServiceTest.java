@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.debug.workflow;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeDefinition;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 class NodeWorkflowDebugServiceTest {
 
     private EventInputHandler eventInputHandler;
-    private DeviceSessionManager sessionManager;
+    private DeviceConnectionRegistry connections;
     private CapabilityNodeCatalogService nodeCatalogService;
     private CapabilityNodeTestService nodeTestService;
     private EventInputHandler.PayloadEventListener listener;
@@ -31,10 +31,10 @@ class NodeWorkflowDebugServiceTest {
     @BeforeEach
     void setUp() {
         eventInputHandler = mock(EventInputHandler.class);
-        sessionManager = mock(DeviceSessionManager.class);
+        connections = mock(DeviceConnectionRegistry.class);
         nodeCatalogService = mock(CapabilityNodeCatalogService.class);
         nodeTestService = mock(CapabilityNodeTestService.class);
-        service = new NodeWorkflowDebugService(eventInputHandler, sessionManager, nodeCatalogService, nodeTestService);
+        service = new NodeWorkflowDebugService(eventInputHandler, connections, nodeCatalogService, nodeTestService);
 
         ArgumentCaptor<EventInputHandler.PayloadEventListener> captor =
                 ArgumentCaptor.forClass(EventInputHandler.PayloadEventListener.class);
@@ -60,7 +60,7 @@ class NodeWorkflowDebugServiceTest {
     @Test
     void deployRejectsMissingNodeCapability() {
         String workflowId = createWorkflow();
-        when(sessionManager.isDeviceOnline(anyString())).thenReturn(true);
+        when(connections.isOnline(anyString())).thenReturn(true);
         when(nodeCatalogService.buildForDevice("dev-a")).thenReturn(catalog("dev-a", "button.trigger"));
         when(nodeCatalogService.buildForDevice("dev-b")).thenReturn(catalog("dev-b"));
 
@@ -226,7 +226,7 @@ class NodeWorkflowDebugServiceTest {
     }
 
     private String deploy(String workflowId, String sourceDevice, String targetDevice) {
-        when(sessionManager.isDeviceOnline(anyString())).thenReturn(true);
+        when(connections.isOnline(anyString())).thenReturn(true);
         when(nodeCatalogService.buildForDevice(sourceDevice)).thenReturn(catalog(sourceDevice, "button.trigger"));
         when(nodeCatalogService.buildForDevice(targetDevice)).thenReturn(catalog(targetDevice, "rgb.effect"));
         Map<String, Object> deployed = deployResult(workflowId, sourceDevice, targetDevice);
@@ -234,7 +234,7 @@ class NodeWorkflowDebugServiceTest {
     }
 
     private Map<String, Object> deployResult(String workflowId, String sourceDevice, String targetDevice) {
-        when(sessionManager.isDeviceOnline(anyString())).thenReturn(true);
+        when(connections.isOnline(anyString())).thenReturn(true);
         when(nodeCatalogService.buildForDevice(sourceDevice)).thenReturn(catalog(sourceDevice, "button.trigger"));
         when(nodeCatalogService.buildForDevice(targetDevice)).thenReturn(catalog(targetDevice, "rgb.effect"));
         return service.deploy(workflowId, Map.of("slotBindings", Map.of(

@@ -107,6 +107,23 @@ public class DeviceConnectionRegistry {
     }
 
     /**
+     * 主动断开设备连接。
+     *
+     * <p>用于设备注销等平台侧强制场景。关闭底层会话即可——后续的断开事件会自然走到
+     * {@link #detach}，不需要在这里重复做注销。</p>
+     *
+     * @return 是否存在过连接
+     */
+    public boolean disconnect(String deviceId) {
+        return find(deviceId).map(connection -> {
+            connection.close();
+            log.info("平台主动断开设备连接: device={}, generation={}",
+                    deviceId, connection.getGeneration());
+            return true;
+        }).orElse(false);
+    }
+
+    /**
      * 上行报文代次校验。旧连接的报文 generation 会小于当前值，据此忽略。
      */
     public boolean isCurrent(String deviceId, long generation) {

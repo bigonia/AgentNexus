@@ -128,4 +128,14 @@ class DeviceConnectionRegistryTest {
         assertEquals(1L, events.get(1).previousGeneration());
         assertEquals(2L, events.get(1).currentGeneration());
     }
+
+    @Test
+    @DisplayName("平台主动断开后设备变为离线")
+    void disconnectClosesSession() {
+        registry.attach("dev-1", V2TestSupport.openSession("s-1"), V2TestSupport.handshake("dev-1", "h"));
+
+        assertTrue(registry.disconnect("dev-1"));
+        assertFalse(registry.isOnline("dev-1"));
+        assertFalse(registry.disconnect("dev-unknown"), "没有连接时返回 false，不抛错");
+    }
 }

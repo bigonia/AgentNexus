@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.workflow;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
 import com.zwbd.agentnexus.sdui.v2.business.BusinessConfigService;
 import com.zwbd.agentnexus.sdui.v2.capability.CapabilityRegistryV2;
@@ -33,7 +33,7 @@ class NodeWorkflowManagementServiceTest {
     private NodeWorkflowDeploymentRepository deploymentRepository;
     private NodeWorkflowRunRepository runRepository;
     private DevicePrimaryUiRepository primaryUiRepository;
-    private DeviceSessionManager sessionManager;
+    private DeviceConnectionRegistry connections;
     private NodeWorkflowManagementService service;
 
     @BeforeEach
@@ -42,12 +42,12 @@ class NodeWorkflowManagementServiceTest {
         deploymentRepository = mock(NodeWorkflowDeploymentRepository.class);
         runRepository = mock(NodeWorkflowRunRepository.class);
         primaryUiRepository = mock(DevicePrimaryUiRepository.class);
-        sessionManager = mock(DeviceSessionManager.class);
+        connections = mock(DeviceConnectionRegistry.class);
         NodeWorkflowDefinitionRepository workflowRepository = mock(NodeWorkflowDefinitionRepository.class);
         NodeWorkflowDeploymentService deploymentService = new NodeWorkflowDeploymentService(
                 workflowService,
                 deploymentRepository,
-                sessionManager,
+                connections,
                 mock(CapabilityNodeCatalogService.class),
                 mock(WorkflowUiContextService.class),
                 mock(WorkflowBusinessConfigAssembler.class),
@@ -60,7 +60,7 @@ class NodeWorkflowManagementServiceTest {
                 workflowRepository,
                 deploymentRepository,
                 runRepository,
-                sessionManager,
+                connections,
                 primaryUiRepository
         );
     }
@@ -90,8 +90,8 @@ class NodeWorkflowManagementServiceTest {
         when(workflowService.requireEntity("wf-1")).thenReturn(workflowEntity("wf-1", "button workflow"));
         when(runRepository.findByDeploymentIdOrderByStartedAtDesc("dep-1")).thenReturn(List.of(failed, passed));
         when(primaryUiRepository.findByDeploymentId("dep-1")).thenReturn(List.of(primaryUi("dep-1", "dev-b", "target", "main_view")));
-        when(sessionManager.isDeviceOnline("dev-a")).thenReturn(true);
-        when(sessionManager.isDeviceOnline("dev-b")).thenReturn(true);
+        when(connections.isOnline("dev-a")).thenReturn(true);
+        when(connections.isOnline("dev-b")).thenReturn(true);
 
         List<Map<String, Object>> deployments = service.deployments("active");
 

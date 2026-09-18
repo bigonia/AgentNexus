@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.workflow;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDefinitionEntity;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDeploymentEntity;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowRunEntity;
@@ -24,7 +24,7 @@ public class NodeWorkflowManagementService {
     private final NodeWorkflowDefinitionRepository workflowRepository;
     private final NodeWorkflowDeploymentRepository deploymentRepository;
     private final NodeWorkflowRunRepository runRepository;
-    private final DeviceSessionManager sessionManager;
+    private final DeviceConnectionRegistry connections;
     private final DevicePrimaryUiRepository primaryUiRepository;
 
     public NodeWorkflowManagementService(NodeWorkflowService workflowService,
@@ -32,14 +32,14 @@ public class NodeWorkflowManagementService {
                                          NodeWorkflowDefinitionRepository workflowRepository,
                                          NodeWorkflowDeploymentRepository deploymentRepository,
                                          NodeWorkflowRunRepository runRepository,
-                                         DeviceSessionManager sessionManager,
+                                         DeviceConnectionRegistry connections,
                                          DevicePrimaryUiRepository primaryUiRepository) {
         this.workflowService = workflowService;
         this.deploymentService = deploymentService;
         this.workflowRepository = workflowRepository;
         this.deploymentRepository = deploymentRepository;
         this.runRepository = runRepository;
-        this.sessionManager = sessionManager;
+        this.connections = connections;
         this.primaryUiRepository = primaryUiRepository;
     }
 
@@ -187,7 +187,7 @@ public class NodeWorkflowManagementService {
             DevicePrimaryUiEntity primary = primaryByDevice.get(deviceId);
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("deviceId", deviceId);
-            item.put("online", sessionManager.isDeviceOnline(deviceId));
+            item.put("online", connections.isOnline(deviceId));
             item.put("hasUi", devicesWithUi.contains(deviceId) || primary != null);
             item.put("primaryUi", primary != null);
             if (primary != null) {
@@ -255,7 +255,7 @@ public class NodeWorkflowManagementService {
         NodeWorkflowSupport.stringMap(deployment.getSlotBindings()).forEach((slotId, deviceId) -> result.put(slotId, Map.of(
                 "slotId", slotId,
                 "deviceId", deviceId,
-                "online", sessionManager.isDeviceOnline(deviceId)
+                "online", connections.isOnline(deviceId)
         )));
         return result;
     }

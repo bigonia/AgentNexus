@@ -5,7 +5,14 @@
 判定规则（从"假设全删"向下收敛到最大可删集）：
   f 可删 <=> f 的所有引用者也都可删         （引用者留在主代码就编译不过）
         且 f 没有实现"删除集外的工程内契约" （否则该契约会失去实现）
+        且 f 不是接线 / 配置根             （否则被它注册的东西会静默消失）
 保留方 -> 可删集 的类型依赖 = P5c 必须逐条处理的改造点。
+
+接线根的必要性（2026-09-18 修正）：
+  `WebSocketConfig` 被 `@Configuration` 装配后自身零显式引用者，但它**注册了 `/ws/sdui/v2`**。
+  只按前两条判定会把它归入 A 类，照着删就会把 v2 接入端点点掉——而且编译、测试都不会报错。
+  框架回调（`WebSocketConfigurer` 等）与 `@Configuration` 类必须当作根：它们的作用是"把别人接上"，
+  删除它们的后果不体现在引用图上。
 """
 import os
 import re
@@ -19,6 +26,15 @@ BASE = 'com.zwbd.agentnexus'
 IMPORT_RE = re.compile(r'^\s*import\s+(?:static\s+)?([\w\.]+(?:\.\*)?)\s*;', re.M)
 PKG_RE = re.compile(r'^\s*package\s+([\w\.]+)\s*;', re.M)
 DECL_RE = re.compile(r'\b(?:implements|extends)\s+([^\{;]+)')
+
+# 接线/配置根：由框架在启动期回调，用于"把别人接上"。删除后果不体现在引用图上。
+CONFIG_ANNOTATION = '@Configuration'
+FRAMEWORK_CALLBACKS = {
+    'WebSocketConfigurer', 'WebMvcConfigurer', 'WebMvcRegistrations',
+    'SchedulingConfigurer', 'WebServerFactoryCustomizer', 'ServletContextInitializer',
+    'ApplicationContextInitializer', 'ApplicationListener', 'CommandLineRunner',
+    'ApplicationRunner', 'BeanPostProcessor', 'BeanFactoryPostProcessor', 'Filter',
+}
 
 
 def scan(root):
@@ -98,6 +114,25 @@ def supertypes(fqcn):
     return out
 
 
+def extern_supertypes(fqcn):
+    """类声明里 implements/extends 的**工程外**类型名（如 Spring 的 WebSocketConfigurer）。"""
+    out = set()
+    for m in DECL_RE.finditer(info[fqcn]['body']):
+        for part in re.split(r'[,\s]+', m.group(1).strip()):
+            part = re.sub(r'<.*', '', part).strip()
+            outer = part.split('.')[0]
+            if outer and outer not in simple_to_fqcn:
+                out.add(outer)
+    return out
+
+
+def is_wiring_root(fqcn):
+    """接线 / 配置根：删除后果不体现在引用图上，不可作为可删候选。"""
+    if CONFIG_ANNOTATION in info[fqcn]['body']:
+        return True
+    return bool(extern_supertypes(fqcn) & FRAMEWORK_CALLBACKS)
+
+
 refs = {f: refs_of(f) for f in info}
 rev = defaultdict(set)
 for f, ts in refs.items():
@@ -120,7 +155,13 @@ def in_keep(f):
     return any(f == p or f.startswith(p + '.') for p in KEEP_PKG)
 
 
+# 接线 / 配置根：不参与可删判定，但要作为改造点报告（删前需先裁剪其注册行）
+WIRING = {f for f in non_v2 if not in_keep(f) and is_wiring_root(f)}
+
+
 def kind(f):
+    if f in WIRING:
+        return 'wire'
     if any(f == p or f.startswith(p + '.') for p in
            (V2, SDUI + '.ui', SDUI + '.workflow', SDUI + '.artifact',
             SDUI + '.repo', SDUI + '.model', SDUI + '.dto', SDUI + '.resources')):
@@ -132,8 +173,8 @@ def kind(f):
     return 'pool'
 
 
-KEEP = {f for f in main_path if in_keep(f) or f in outside}
-POOL = {f for f in non_v2 if not in_keep(f)}
+KEEP = {f for f in main_path if in_keep(f) or f in outside} | WIRING
+POOL = {f for f in non_v2 if not in_keep(f) and f not in WIRING}
 sup_cache = {f: supertypes(f) for f in non_v2}
 
 
@@ -157,8 +198,9 @@ def converge(pool, keep):
 DEL = converge(POOL, KEEP)
 
 print('=== 规模 ===')
-print(f'  非 v2 主代码: {len(non_v2)}   v2: {len(v2)}   保留包: {len(KEEP & non_v2)}   sdui 外: {len(outside)}')
-print(f'  候选池: {len(POOL)}')
+print(f'  非 v2 主代码: {len(non_v2)}   v2: {len(v2)}   '
+      f'保留包: {len({f for f in KEEP & non_v2 if f not in WIRING})}   sdui 外: {len(outside)}')
+print(f'  接线根: {len(WIRING)}   候选池: {len(POOL)}')
 print(f'  ★ A 类 可整文件删: {len(DEL)}')
 print(f'  ★ C 类 留池不可删: {len(POOL - DEL)}')
 
@@ -226,10 +268,19 @@ stuck = POOL - DEL
 releasers = defaultdict(set)
 for t in stuck:
     for b in rev[t]:
-        if kind(b) in ('ctrl', 'dbg'):
+        if kind(b) in ('ctrl', 'dbg', 'wire'):
             releasers[b].add(t)
 for b in sorted(releasers, key=lambda x: -len(releasers[x])):
     print(f'  [{kind(b)}] {b.replace(SDUI + ".", ""):42s} 阻塞 {len(releasers[b]):2d} 个')
+
+if WIRING:
+    print(f'\n=== 接线 / 配置根（不可整文件删，只能裁剪其注册行）（{len(WIRING)}）===')
+    for f in sorted(WIRING):
+        why = CONFIG_ANNOTATION if CONFIG_ANNOTATION in info[f]['body'] else \
+            '/'.join(sorted(extern_supertypes(f) & FRAMEWORK_CALLBACKS))
+        blocked = sorted(t.rsplit('.', 1)[1] for t in refs[f] if t in POOL)
+        print(f'  {f.replace(SDUI + ".", ""):42s} 依据 {why:24s} '
+              f'引用 {len(blocked)} 个池内类: {", ".join(blocked)[:44]}')
 
 print(f'\n=== 被 ui / workflow / v2 阻塞的类（这些是真依赖，不能删）===')
 for t in sorted(stuck):
@@ -250,7 +301,8 @@ POOL2 = non_v2 - KEEP2
 DEL2 = converge(POOL2, KEEP2)
 print(f'\n=== 推演：控制层（controller / debug）裁剪完成后 ===')
 print(f'  可整文件删: {len(DEL2)}（当前 {len(DEL)}，增加 {len(DEL2) - len(DEL)}）')
-print('  注意：其中含被 HTTP 暴露的管理端点，删除前需业务确认（脚本无法判断端点是否在用）')
+print('  注意：推演把 controller / debug 整体视为已移除，但 P5c 实际是"改写为读 v2"而非删除；')
+print('        端点是否仍被前端调用由 scripts/sdui-front-paths.py 判定（引用图判断不了）。')
 extra = sorted(DEL2 - DEL)
 by_pkg2 = defaultdict(list)
 for t in extra:

@@ -27,19 +27,33 @@
 - **不做灰度，v2 是唯一协议**：不要为新旧协议并存设计按设备分流的开关或双写路径。设备协议归属不由平台配置决定，旧协议的存废只取决于终端固件切换进度。
 - 旧协议栈通过 `List<TopicHandler>` / `List<BinaryFrameHandler>` 由 Spring 收集装配，是整块存活的，没有可以单独删除的孤立死枝；用"零引用"判断 SDUI 的 Controller / Handler 是否死代码会误判。
 - 判断某模块的旧代码是否可删，先看它是否仍被同协议的运行时依赖；"其他模块也有同样问题"通常是错的，要靠引用图验证而不是靠印象。
-  可删判据两条，缺一不可：①它的**所有引用者**也都可删；②它没有实现"删除集之外的工程内契约"。第②条必需 —— Spring 按类型注入的实现类天然零显式引用者。
+  可删判据三条，缺一不可：①它的**所有引用者**也都可删；②它没有实现"删除集之外的工程内契约"；③它**不是接线根**（`@Configuration` 或实现框架回调接口的类）。第②条必需 —— Spring 按类型注入的实现类天然零显式引用者。第③条必需 —— 接线根（如注册 `/ws/sdui/v2` 的 `WebSocketConfig`）删除后果**不体现在引用图上**，照删会让端点在编译与测试全绿的情况下消失。
   工具：`scripts/sdui-refgraph/refgraph.py`。改代码后重跑即可得到当刻清单；解析时注意 `import a.b.*;` 的通配形式，正则漏了会让整批引用丢失。
+
+## 对外接口集
+
+- 契约文档 `docs/sdui/front/CLIENT_API.md` 是前端/管理端 HTTP 面的权威定义，按闭环组织：上线 → 能力核验 → 编排 → 部署 → 终端本地执行 → 交互上报 → 平台续接 → 观测。接口取舍判据只有一条：**它在闭环某一步上是否承担不可替代的职责**。
+- 四条单一来源约束（改接口时必须守住）：在线态 = `DeviceConnectionRegistry`；能力 = v2 `CapabilitySchemaV2`（经 `CapabilityQueryService`）；校验器 = `BusinessConfigValidator`；出站路径 = `PlatformRequestService`（经 `PlatformRequestDispatcher` 供调试域）。出现第二份来源即视为回归。
+- 路径一律用 v2 词汇（`actions` / `triggers` / `view` / `requests` / `bindings`），**不复用旧协议词**（`commands` / `sections`）。路径里出现旧词，就一定有人往回接旧模型。
+- 能力的 `usableIn` 是前端必须尊重的分界线：只声明 `binding` 的动作平台发不出请求，接口如实返回 `unsupported`，不伪造下行。
+- "端点是否仍被前端使用"不要靠印象：跑 `scripts/sdui-front-paths.py` 扫 `static/*.html` 得到调用面。曾据此推翻一处错误的 `@Deprecated "前端未使用"` 注释。
+- 节点目录真值在 `NodeTypeRegistry`（编辑器与运行时共用），新增节点类型必须同时更新 `WorkflowActionMapper` 的映射并跑登记表一致性用例。
+- 已知遗留（Q10）：`/board-types/{board}/section-triggers` 仍读旧 Section 目录，待 P5c 改由 v2 Schema 的 `surface.ui` 派生。响应形状不变，前端无需调整。
 
 ## 构建
 
-- 本机 Maven 需绕过 Git Bash 的 `MAVEN_HOME` 反斜杠问题，且每次编译前删 `target/maven-status`。
+- 本机 Maven 需绕过 Git Bash 的 `MAVEN_HOME` 反斜杠问题，且每次编译前清掉 `target/maven-status`。
+  注意：该目录文件数会触发批量删除保护，`rm` 被拒后 `&&` 链会短路成"构建 1 秒结束"的假象，用 `mv` 改名代替。
   详见用户级 skill `agentnexus-build-verify`。
-- 全量测试基线：323 项通过。
+- 全量测试基线：350 项通过（0.14.0）。
 
 ## 待办主线
 
+- **0.14.0 已完成**：闭环接口集（契约 + 全部控制器改写 + `CapabilityQueryService` / `PlatformRequestDispatcher` / `DebugStreamHub`）、在线态单一来源落地、引用图接线根判据。
 - LCD_085 平台侧升级 **P5c**（准入=终端固件全量切换）：按 `12_DESIGN_NOTES.md` §7 清单删除旧协议路径。分流开关已删除（0.12.0），**回滚不能按设备进行**，只能一次性完成。
-  引用图实测（0.13.0）：`sdui` 主代码 217 = v2 51 + 非 v2 166；v2 对非 v2 的硬依赖只有 6 个类；`sdui` 外无引用；无需改造即可删的仅 6 类，另有 87 类**必须先裁控制层端点**（`DebugController` 14 / `DeviceController` 12 / `BoardTypeController` 10 / `CapabilityController` 9）。
+  引用图实测（0.14.0）：`sdui` 主代码 = v2 54 + 非 v2 165，保留包 71，接线根 1，候选池 93 = **A 类可整文件删 12** + C 类 81。
+  v2 对非 v2 的硬依赖 **7 个类**（新增 `model.SduiDevice`，由 `CapabilityQueryService` 引入）；`sdui` 外零引用。
+  阻塞源（新接口集已使其从 ~59 降到 18）：`CapabilityNodeTestService` 5、`NodeWorkflowDebugService` 4、`BoardTypeController` 4（只剩 `/section-triggers`）、`CapabilityNodeController` 2、`DeviceController` 2、`EventCatalogController` 1、`WebSocketConfig` 1。
   执行顺序：**先裁控制层暴露 → 再删旧模型**，不是反过来。清单见 §7，复核脚本 `scripts/sdui-refgraph/refgraph.py`（每次裁剪后重跑）。
 - P5b 遗留未闭环项：`rgb.effect` / `audio.record` 类平台步骤（能力 Schema 只声明 `usableIn=binding`）返回 `terminal_action_required`，能否闭环取决于终端确认 T15（平台可否为动态节点签发专用绑定 / 新 token）。
 - 新协议对接前需要与终端确认的高风险项：二进制帧头布局（T3）、`capability_hash` 算法（T2）、业务配置 JSON 结构（T4）、调色板与索引矩阵位序（T7/T12）、本地响应动作名与参数集合（T13）、下行音频容器（T16）。

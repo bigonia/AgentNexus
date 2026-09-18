@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,8 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 节点 → 终端静态动作的映射与下沉判定。
  *
  * <p>这里固定的是"响应动作必须全静态"这一条约定（用户 2026-09-18 明确）：任何依赖运行时取值或
- * 平台产物的节点都不下沉。测试用例里刻意放了几个反面例子（{@code audio.record} 的 toggle、
- * 带 {@code $ref} 的参数、需要 TTS 的 audio.play），防止以后有人为了"少绕一圈"把它们放进去。</p>
+ * 平台产物的节点都不下沉。测试用例里刻意放了几个反面例子（带 {@code $ref} 的参数、需要 TTS 的
+ * audio.play、需要平台渲染的 display.section 场景），防止以后有人为了"少绕一圈"把它们放进去。</p>
+ *
+ * <p>注意 {@code audio.record} 的 {@code toggle} <b>不在</b>反面例子之列：01§5 把它定义为终端侧的
+ * 便利动作，动作名与参数都是静态的，"当前是否在录音"由终端自己解释。它下不下沉取决于终端有没有
+ * 声明 {@code audio.record.toggle} 这个动作，不取决于平台猜测运行态。</p>
  */
 class WorkflowActionMapperTest {
 
@@ -82,11 +87,26 @@ class WorkflowActionMapperTest {
     }
 
     @Test
-    @DisplayName("audio.record 的 toggle 依赖运行时状态，不下沉")
-    void audioRecordToggleIsHeld() {
+    @DisplayName("audio.record 的 toggle 是终端侧便利动作，参数静态，可下沉")
+    void audioRecordToggleIsSinkable() {
         WorkflowActionMapper.Mapped mapped = mapper.map(node("audio.record", params("control", "toggle")), schema);
+        assertTrue(mapped.sinkable());
+        assertEquals("audio.record.toggle", mapped.action());
+    }
+
+    @Test
+    @DisplayName("终端未声明便利动作 audio.record.toggle 时不下沉")
+    void audioRecordToggleRequiresTerminalSupport() {
+        CapabilitySchemaV2 withoutToggle = new CapabilitySchemaV2("2", "1", "NO-TOGGLE",
+                List.of(new CapabilitySchemaV2.TriggerSpec("button.ok", "physical", true, 4)),
+                List.of(new CapabilitySchemaV2.ActionSpec("audio.record.start", List.of(), List.of("binding"))),
+                null);
+
+        WorkflowActionMapper.Mapped mapped =
+                mapper.map(node("audio.record", params("control", "toggle")), withoutToggle);
+
         assertFalse(mapped.sinkable());
-        assertTrue(mapped.reason().contains("toggle"));
+        assertTrue(mapped.reason().contains("audio.record.toggle"));
     }
 
     @Test
@@ -191,6 +211,43 @@ class WorkflowActionMapperTest {
         WorkflowActionMapper.Mapped mapped = mapper.map(node("magic.effect", Map.of()), schema);
         assertFalse(mapped.sinkable());
         assertTrue(mapped.reason().contains("magic.effect"));
+    }
+
+    // ── 登记表一致性 ────────────────────────────────────────────────────────
+
+    /**
+     * 编辑器列出节点用的是 {@code NodeTypeRegistry}，执行节点用的是本映射器。两者若漂移，就会出现
+     * "编辑器能拖进来、运行时执行不了"。这条用例把那个方向堵死：登记表里的每个输出节点类型，
+     * 映射器都必须认识。
+     */
+    @Test
+    @DisplayName("登记表里的每个输出节点类型都被映射器识别")
+    void everyRegisteredOutputNodeTypeIsHandled() {
+        NodeTypeRegistry registry = new NodeTypeRegistry();
+
+        for (String nodeType : registry.nodeTypes()) {
+            if (nodeType.endsWith(".trigger")) {
+                continue;
+            }
+            WorkflowActionMapper.Mapped mapped = mapper.map(node(nodeType, params()), schema);
+            String reason = mapped.reason() == null ? "" : mapped.reason();
+            assertFalse(reason.contains("未登记的输出节点类型"),
+                    nodeType + " 已在登记表中但映射器不识别");
+        }
+    }
+
+    /** 反向：映射器有分支的节点类型都必须在登记表里，否则编辑器根本列不出它。 */
+    @Test
+    @DisplayName("输出节点类型集合与登记表一致")
+    void outputNodeTypesAreExactlyTheRegisteredOnes() {
+        NodeTypeRegistry registry = new NodeTypeRegistry();
+
+        var outputs = registry.nodeTypes().stream()
+                .filter(type -> !type.endsWith(".trigger"))
+                .collect(java.util.stream.Collectors.toSet());
+
+        assertEquals(java.util.Set.of("rgb.effect", "audio.record", "audio.play",
+                "display.section", "ui.update"), outputs);
     }
 
     /** 一个声明了 Trigger 但没有任何动作的最小 Schema。 */

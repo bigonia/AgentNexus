@@ -1,131 +1,77 @@
 package com.zwbd.agentnexus.sdui.controller;
 
 import com.zwbd.agentnexus.common.web.ApiResponse;
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContractService;
-import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
-import com.zwbd.agentnexus.sdui.capability.CapabilityValidator;
-import com.zwbd.agentnexus.sdui.capability.PlatformCapabilityRegistry;
-import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
-import com.zwbd.agentnexus.sdui.section.SectionEditorService;
-import com.zwbd.agentnexus.sdui.service.SduiCapabilityService;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilitySchemaV2;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.util.*;
+import java.util.Map;
+import java.util.Optional;
 
 /**
- * Unified capability and event API.
- * Provides global catalog, per-device capabilities, event trees, and section type info.
- * All data is multi-level (category → capability → event/command) for consistency
- * with the workflow editor and debug tools.
+ * 能力查询 API。
+ *
+ * <p>回答"这台设备现在能做什么"。全部内容来自设备通过 v2 握手声明、并经 {@code capability_hash}
+ * 校验的能力 Schema——不存在第二份能力快照，也不做任何平台侧的能力推断。</p>
+ *
+ * <p>动作的 {@code usableIn} 是前端必须尊重的分界线：只声明 {@code binding} 的动作平台发不出请求，
+ * 只能出现在工作流的本地响应序列里。</p>
+ *
+ * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.2。</p>
  */
 @RestController
 @RequestMapping("/api/v1/sdui/capabilities")
 @RequiredArgsConstructor
 public class CapabilityController {
 
-    private final CapabilityRegistry registry;
-    private final CapabilityValidator validator;
-    private final DeviceSessionManager sessionManager;
-    private final SduiCapabilityService capabilityService;
-    private final CapabilityContractService contractService;
-    private final SectionEditorService sectionEditorService;
-    private final DeviceCapabilityProjection capabilityProjection;
+    private final CapabilityQueryService capabilities;
 
-    // ── Global catalog ──
-
+    /** 全平台能力概览：设备数、在线数、已完成能力同步的设备数、板型分布。 */
     @GetMapping("/catalog")
     public ApiResponse<Map<String, Object>> catalog() {
-        Map<String, Object> stats = registry.stats();
-        Map<String, Object> catalog = new LinkedHashMap<>();
-        catalog.put("stats", stats);
-        catalog.put("protocol", capabilityProjection.protocol(""));
-
-        return ApiResponse.ok(catalog);
+        return ApiResponse.ok(capabilities.overview());
     }
 
-    // ── Per-device capabilities ──
-
+    /** 单设备能力摘要。不返回完整 Schema，避免详情接口随 Schema 体积膨胀。 */
     @GetMapping("/{deviceId}")
-    public ApiResponse<Map<String, Object>> deviceCapabilities(@PathVariable String deviceId) {
-        CapabilityContract contract = contractService.buildContract(deviceId);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("deviceId", deviceId);
-        result.put("online", sessionManager.isDeviceOnline(deviceId));
-        result.put("status", contract.status());
-        result.put("contract", contract);
-        result.put("unsupportedCapabilities", extractUnsupportedCapabilities(deviceId));
-        return ApiResponse.ok(result);
+    public ApiResponse<Map<String, Object>> summary(@PathVariable String deviceId) {
+        return ApiResponse.ok(capabilities.summary(deviceId));
     }
 
-    @GetMapping("/{deviceId}/tree")
-    public ApiResponse<Map<String, Object>> deviceCapabilityTree(@PathVariable String deviceId) {
-        CapabilityContract contract = contractService.buildContract(deviceId);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("deviceId", deviceId);
-        result.put("status", contract.status());
-        result.put("contract", contract);
-        result.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(result);
+    /** 完整能力 Schema。 */
+    @GetMapping("/{deviceId}/schema")
+    public ApiResponse<CapabilitySchemaV2> schema(@PathVariable String deviceId) {
+        Optional<CapabilitySchemaV2> schema = capabilities.schemaOf(deviceId);
+        return schema.map(ApiResponse::ok)
+                .orElseGet(() -> ApiResponse.error(40400,
+                        "capability schema not synced for device: " + deviceId));
     }
 
-    @GetMapping("/{deviceId}/metadata")
-    public ApiResponse<Map<String, Object>> deviceCapabilityMetadata(@PathVariable String deviceId) {
-        Map<String, Object> result = capabilityService.buildCapabilityMetadata(deviceId);
-        result.put("view", "debug");
-        result.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(result);
-    }
-
-    // ── Device events (terminal events, multi-level) ──
-
-    @GetMapping("/{deviceId}/events")
-    public ApiResponse<Map<String, Object>> deviceEvents(@PathVariable String deviceId) {
+    /** 动作目录，含 {@code usableIn} 与参数约束。 */
+    @GetMapping("/{deviceId}/actions")
+    public ApiResponse<Map<String, Object>> actions(@PathVariable String deviceId) {
         return ApiResponse.ok(Map.of(
                 "deviceId", deviceId,
-                "online", sessionManager.isDeviceOnline(deviceId),
-                "events", capabilityProjection.events(deviceId).stream().map(event -> event.toMap()).toList()
-        ));
+                "online", capabilities.online(deviceId),
+                "actions", capabilities.actions(deviceId)));
     }
 
-    // ── Device section types ──
-
-    @GetMapping("/{deviceId}/sections")
-    public ApiResponse<Map<String, Object>> deviceSections(@PathVariable String deviceId) {
+    /** 可配置触发源目录。 */
+    @GetMapping("/{deviceId}/triggers")
+    public ApiResponse<Map<String, Object>> triggers(@PathVariable String deviceId) {
         return ApiResponse.ok(Map.of(
                 "deviceId", deviceId,
-                "online", sessionManager.isDeviceOnline(deviceId),
-                "layouts", sectionEditorService.buildSectionEditor(deviceId).get("layouts"),
-                "sections", capabilityProjection.sections(deviceId).stream().map(section -> section.toMap()).toList()
-        ));
+                "online", capabilities.online(deviceId),
+                "triggers", capabilities.triggers(deviceId)));
     }
 
-    @GetMapping("/{deviceId}/commands")
-    public ApiResponse<Map<String, Object>> deviceCommands(@PathVariable String deviceId) {
-        return ApiResponse.ok(Map.of(
-                "deviceId", deviceId,
-                "online", sessionManager.isDeviceOnline(deviceId),
-                "commands", capabilityProjection.commands(deviceId).stream().map(command -> command.toMap()).toList()
-        ));
-    }
-
-    @GetMapping("/{deviceId}/protocol")
-    public ApiResponse<Map<String, Object>> deviceProtocol(@PathVariable String deviceId) {
-        Map<String, Object> protocol = new LinkedHashMap<>(capabilityProjection.protocol(deviceId));
-        protocol.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(protocol);
-    }
-
-    private Map<String, Object> extractUnsupportedCapabilities(String deviceId) {
-        Map<String, Object> summary = validator.buildDeviceCapabilitySummary(deviceId);
-        Object unsupported = summary.get("unsupportedCapabilities");
-        if (unsupported instanceof Map<?, ?> unsupportedMap) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> typed = (Map<String, Object>) unsupportedMap;
-            return typed;
-        }
-        return Map.of();
+    /** 能力同步进度：定位"为什么这台设备还不能接业务"。 */
+    @GetMapping("/{deviceId}/sync")
+    public ApiResponse<Map<String, Object>> sync(@PathVariable String deviceId) {
+        return ApiResponse.ok(capabilities.sync(deviceId));
     }
 }

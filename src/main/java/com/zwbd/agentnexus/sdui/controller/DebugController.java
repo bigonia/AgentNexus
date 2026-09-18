@@ -1,27 +1,17 @@
 package com.zwbd.agentnexus.sdui.controller;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.common.web.ApiResponse;
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
-import com.zwbd.agentnexus.sdui.capability.CapabilityInvocationValidator;
-import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
-import com.zwbd.agentnexus.sdui.model.SduiDeviceCommand;
-
-import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
-import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
-import com.zwbd.agentnexus.sdui.protocol.catalog.FieldSpec;
-import com.zwbd.agentnexus.sdui.repo.SduiDeviceCommandRepository;
-import com.zwbd.agentnexus.sdui.section.*;
-import com.zwbd.agentnexus.sdui.service.*;
 import com.zwbd.agentnexus.sdui.debug.DebugArtifactStore;
 import com.zwbd.agentnexus.sdui.debug.DebugSessionHandle;
 import com.zwbd.agentnexus.sdui.debug.DebugSessionService;
 import com.zwbd.agentnexus.sdui.debug.node.CapabilityNodeTestService;
-import com.zwbd.agentnexus.sdui.service.audio.AudioRecordSessionManager;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
+import com.zwbd.agentnexus.sdui.v2.debug.DebugStreamHub;
+import com.zwbd.agentnexus.sdui.v2.debug.PlatformRequestDispatcher;
+import com.zwbd.agentnexus.sdui.v2.display.DisplayCommandService;
+import com.zwbd.agentnexus.sdui.v2.display.DisplaySessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,11 +19,21 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
- * Unified device debugging API.
- * Command execution, section debugging, input event monitoring, and command statistics.
+ * 调试域 API。
+ *
+ * <p>绕过工作流，直接对设备下达 v2 请求。它<b>不是第二条业务通道</b>：请求经同一个
+ * {@link PlatformRequestDispatcher} 走同一条出站路径与同一套状态机，因此调试的结论对业务成立。</p>
+ *
+ * <p>这里不会出现"平台自己处理"的动作分支。终端只在能力 Schema 里声明 {@code binding} 的动作，
+ * 平台发不出请求，接口会如实返回 {@code unsupported}，而不是伪造一条下行。</p>
+ *
+ * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.8。</p>
  */
 @Slf4j
 @RestController
@@ -41,202 +41,116 @@ import java.util.*;
 @RequiredArgsConstructor
 public class DebugController {
 
-    private final CommandService commandService;
-    private final CommandSchemaRegistry schemaRegistry;
-    private final SduiCapabilityService capabilityService;
-    private final DeviceCapabilityProjection capabilityProjection;
-    private final CapabilityInvocationValidator invocationValidator;
-    private final PlatformCapabilityRuntimeService platformRuntimeService;
-    private final DeviceSessionManager sessionManager;
-    private final SectionOrchestrationService sectionService;
-    private final DebugSectionWorkspaceService debugSectionWorkspaceService;
-    private final EventStreamService eventStreamService;
-    private final CommandResultStreamService commandResultStreamService;
-    private final SduiDeviceCommandRepository commandRepository;
+    private final PlatformRequestDispatcher dispatcher;
+    private final CapabilityQueryService capabilities;
+    private final DisplaySessionService displaySessions;
+    private final DisplayCommandService displayCommands;
+    private final DebugStreamHub streamHub;
     private final DebugSessionService sessionService;
     private final DebugArtifactStore artifactStore;
     private final CapabilityNodeTestService nodeTestService;
-    private final ObjectMapper objectMapper;
-    private final AudioRecordSessionManager audioRecordSessionManager;
 
-    // ── Command execution ──
+    // ── 请求下发 ──
 
-    @PostMapping("/{deviceId}/command")
-    public ApiResponse<Map<String, Object>> executeCommand(@PathVariable String deviceId,
-                                                            @RequestBody Map<String, Object> body) {
-        String command = (String) body.getOrDefault("command", "");
-        if (command.isBlank()) {
-            return ApiResponse.error(40000, "command is required");
-        }
-
-        if (!sessionManager.isDeviceOnline(deviceId)) {
-            if (isDeferredAudioRecordStop(deviceId, command)) {
-                return ApiResponse.ok(deferAudioRecordStop(deviceId, command, "debug_command_offline"));
-            }
-            return ApiResponse.error(40000, "device is offline");
-        }
-
+    /** 下达一次 v2 请求：{@code {name, params}}。 */
+    @PostMapping("/{deviceId}/request")
+    public ApiResponse<PlatformRequestDispatcher.Result> request(@PathVariable String deviceId,
+                                                               @RequestBody Map<String, Object> body) {
+        String name = body.get("name") instanceof String s ? s : null;
         @SuppressWarnings("unchecked")
-        Map<String, Object> params = (Map<String, Object>) body.get("params");
-
-        CapabilityInvocationValidator.ValidationResult validation =
-                invocationValidator.validateDebugInvocation(deviceId, command, params);
-        if (!validation.valid()) {
-            Map<String, Object> errorResponse = new LinkedHashMap<>();
-            errorResponse.put("sent", false);
-            errorResponse.put("deviceId", deviceId);
-            errorResponse.put("command", command);
-            errorResponse.put("status", "VALIDATION_FAILED");
-            errorResponse.put("validationErrors", validation.errors());
-            return ApiResponse.ok(errorResponse);
-        }
-
-        if (platformRuntimeService.supports(command)) {
-            Map<String, Object> result = platformRuntimeService.execute(deviceId, command, validation.normalizedParams());
-            if ("ERROR".equals(result.get("status"))) {
-                return ApiResponse.error(40000, String.valueOf(result.getOrDefault("error", "platform capability error")));
-            }
-            return ApiResponse.ok(result);
-        }
-
-        SduiControlDispatchResult dispResult =
-                commandService.dispatchCommand(deviceId, command, validation.normalizedParams());
-
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("sent", dispResult.sent());
-        response.put("deviceId", deviceId);
-        response.put("command", command);
-        response.put("cmdId", dispResult.cmdId());
-        response.put("dispatchStatus", dispResult.sent() ? "sent" : "send_failed");
-        response.put("ackStatus", dispResult.status());
-        return ApiResponse.ok(response);
+        Map<String, Object> params = body.get("params") instanceof Map<?, ?> map
+                ? (Map<String, Object>) map : Map.of();
+        return ApiResponse.ok(dispatcher.dispatch(deviceId, name, params));
     }
 
-    private boolean isDeferredAudioRecordStop(String deviceId, String command) {
-        return "audio.record.stop".equals(command) && audioRecordSessionManager.isRecording(deviceId);
+    /** 下发主视图：{@code {mode: section|image|canvas, ...}}。v2 只有完整替换，没有增量 Patch。 */
+    @PostMapping("/{deviceId}/view")
+    public ApiResponse<PlatformRequestDispatcher.Result> publishView(@PathVariable String deviceId,
+                                                                    @RequestBody Map<String, Object> body) {
+        return ApiResponse.ok(dispatcher.publishView(deviceId, body));
     }
 
-    private Map<String, Object> deferAudioRecordStop(String deviceId, String command, String reason) {
-        audioRecordSessionManager.requestStopOnReconnect(deviceId, reason);
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("sent", false);
-        response.put("deviceId", deviceId);
-        response.put("command", command);
-        response.put("dispatchStatus", "pending_reconnect");
-        response.put("ackStatus", "PENDING_RECONNECT");
-        response.put("recording", true);
-        response.put("pendingStop", true);
-        return response;
+    /** 当前显示会话状态：模式、已收字节、拒帧数。 */
+    @GetMapping("/{deviceId}/view/state")
+    public ApiResponse<Map<String, Object>> viewState(@PathVariable String deviceId) {
+        DisplaySessionService.DeviceDisplayState state = displaySessions.snapshot(deviceId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("online", capabilities.online(deviceId));
+        result.put("mode", state.mode() == null ? null : state.mode().name().toLowerCase());
+        result.put("imageBytesReceived", state.imageBytesReceived());
+        result.put("canvasFramesReceived", state.canvasFramesReceived());
+        result.put("canvasFramesRejected", state.canvasFramesRejected());
+        displaySessions.imageSpec(deviceId).ifPresent(spec -> result.put("imageSpec", Map.of(
+                "width", spec.width(), "height", spec.height(),
+                "paletteSize", spec.paletteSize(), "expectedBytes", spec.expectedBytes())));
+        displaySessions.canvasSpec(deviceId).ifPresent(spec -> result.put("canvasSpec", Map.of(
+                "width", spec.width(), "height", spec.height(),
+                "paletteSize", spec.paletteSize(), "maxFps", spec.maxFps() == null ? 0 : spec.maxFps())));
+        return ApiResponse.ok(result);
     }
 
-    // ── Command schemas ──
-
-    @GetMapping("/{deviceId}/commands")
-    public ApiResponse<Map<String, Object>> commandSchemas(@PathVariable String deviceId) {
-        List<Map<String, Object>> deviceCommands = new ArrayList<>();
-        for (CommandSpec command : capabilityProjection.commands(deviceId)) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("command", command.id());
-            entry.put("params", command.params().stream().map(this::fieldToMap).toList());
-            deviceCommands.add(entry);
-        }
-
-        if (deviceCommands.isEmpty()) {
-            boolean hasCaps = capabilityService.getCapabilities(deviceId).isPresent();
-            log.info("No commands available for device {} (online={}, hasCapabilitySnapshot={})",
-                    deviceId, sessionManager.isDeviceOnline(deviceId), hasCaps);
-        }
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("deviceId", deviceId);
-        data.put("online", sessionManager.isDeviceOnline(deviceId));
-        data.put("deviceCommands", deviceCommands);
-        return ApiResponse.ok(data);
+    /** 清空显示会话，不向设备下发任何东西。 */
+    @DeleteMapping("/{deviceId}/view/state")
+    public ApiResponse<Map<String, Object>> clearViewState(@PathVariable String deviceId) {
+        displayCommands.clear(deviceId);
+        return viewState(deviceId);
     }
 
-    @GetMapping("/{deviceId}/commands/{cmdId}")
-    public ApiResponse<Map<String, Object>> commandDetail(@PathVariable String deviceId,
-                                                          @PathVariable String cmdId) {
-        return commandRepository.findFirstByDeviceIdAndCmdIdOrderByCreatedAtDesc(deviceId, cmdId)
-                .map(cmd -> ApiResponse.ok(toCommandDetail(cmd)))
-                .orElse(ApiResponse.error(40400, "command not found"));
-    }
+    // ── 请求目录与历史 ──
 
-    @GetMapping("/{deviceId}/commands/history")
-    public ApiResponse<Map<String, Object>> commandHistory(@PathVariable String deviceId,
-                                                           @RequestParam(defaultValue = "20") int limit) {
-        int sanitizedLimit = Math.max(1, Math.min(limit, 100));
-        List<Map<String, Object>> items = commandRepository.findHistoryByDeviceId(
-                        deviceId, PageRequest.of(0, sanitizedLimit))
-                .stream()
-                .map(this::toCommandDetail)
+    /** 可下达的请求目录：设备 Schema 中声明了 {@code usableIn=request} 的动作。 */
+    @GetMapping("/{deviceId}/requests")
+    public ApiResponse<Map<String, Object>> availableRequests(@PathVariable String deviceId) {
+        List<Map<String, Object>> requestable = capabilities.actions(deviceId).stream()
+                .filter(action -> Boolean.TRUE.equals(action.get("usableInRequest")))
                 .toList();
+        List<Map<String, Object>> bindingOnly = capabilities.actions(deviceId).stream()
+                .filter(action -> Boolean.TRUE.equals(action.get("usableInBinding")))
+                .filter(action -> !Boolean.TRUE.equals(action.get("usableInRequest")))
+                .map(action -> Map.<String, Object>of(
+                        "name", action.get("name"),
+                        "reason", "只声明可用于本地响应序列，平台发不出请求"))
+                .toList();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("online", capabilities.online(deviceId));
+        result.put("requests", requestable);
+        result.put("bindingOnly", bindingOnly);
+        return ApiResponse.ok(result);
+    }
+
+    /** 调试下达的请求历史（内存环形缓冲，最新在前）。 */
+    @GetMapping("/{deviceId}/requests/history")
+    public ApiResponse<Map<String, Object>> requestHistory(@PathVariable String deviceId,
+                                                          @RequestParam(defaultValue = "20") int limit) {
         return ApiResponse.ok(Map.of(
                 "deviceId", deviceId,
-                "history", items
-        ));
+                "history", streamHub.journal(deviceId, limit)));
     }
 
-    @GetMapping(value = "/{deviceId}/commands/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter commandStream(@PathVariable String deviceId) {
-        return commandResultStreamService.subscribe(deviceId);
+    /** 单条请求详情。 */
+    @GetMapping("/{deviceId}/requests/{requestId}")
+    public ApiResponse<Map<String, Object>> requestDetail(@PathVariable String deviceId,
+                                                          @PathVariable String requestId) {
+        return streamHub.entry(deviceId, requestId)
+                .map(ApiResponse::ok)
+                .orElseGet(() -> ApiResponse.error(40400, "request not found: " + requestId));
     }
 
-    // ── Section push ──
-
-    @PostMapping("/{deviceId}/section")
-    public ApiResponse<Map<String, Object>> pushSection(@PathVariable String deviceId,
-                                                         @RequestBody Map<String, Object> body) {
-        if (!sessionManager.isDeviceOnline(deviceId)) {
-            return ApiResponse.error(40000, "device is offline");
-        }
-        try {
-            Map<String, Object> result = debugSectionWorkspaceService.push(deviceId, body);
-            eventStreamService.pushEventCatalog(deviceId);
-            return ApiResponse.ok(result);
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(40000, e.getMessage());
-        }
+    /** 请求结果 SSE。 */
+    @GetMapping(value = "/{deviceId}/requests/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter requestStream(@PathVariable String deviceId) {
+        return streamHub.subscribeRequests(deviceId);
     }
 
-    @PostMapping("/{deviceId}/section/patch")
-    public ApiResponse<Map<String, Object>> patchSection(@PathVariable String deviceId,
-                                                         @RequestBody Map<String, Object> body) {
-        if (!sessionManager.isDeviceOnline(deviceId)) {
-            return ApiResponse.error(40000, "device is offline");
-        }
-        try {
-            Map<String, Object> result = debugSectionWorkspaceService.patch(deviceId, body);
-            eventStreamService.pushEventCatalog(deviceId);
-            return ApiResponse.ok(result);
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(40000, e.getMessage());
-        }
-    }
-
-    @GetMapping("/{deviceId}/section/state")
-    public ApiResponse<Map<String, Object>> sectionState(@PathVariable String deviceId) {
-        Map<String, Object> state = new LinkedHashMap<>(debugSectionWorkspaceService.getState(deviceId));
-        state.put("online", sessionManager.isDeviceOnline(deviceId));
-        return ApiResponse.ok(state);
-    }
-
-    @DeleteMapping("/{deviceId}/section/state")
-    public ApiResponse<Map<String, Object>> clearSectionState(@PathVariable String deviceId) {
-        Map<String, Object> state = new LinkedHashMap<>(debugSectionWorkspaceService.clear(deviceId));
-        state.put("online", sessionManager.isDeviceOnline(deviceId));
-        eventStreamService.pushEventCatalog(deviceId);
-        return ApiResponse.ok(state);
-    }
-
-    // ── SSE event stream ──
-
+    /** 终端事件 SSE：交互上报、业务清理、连接接管。 */
     @GetMapping(value = "/{deviceId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter eventStream(@PathVariable String deviceId) {
-        return eventStreamService.subscribe(deviceId);
+        return streamHub.subscribeEvents(deviceId);
     }
 
-    // ── Capability node validation ──
+    // ── 节点测试 ──
 
     @PostMapping("/{deviceId}/node-tests/input")
     public ApiResponse<Map<String, Object>> createInputNodeTest(@PathVariable String deviceId,
@@ -266,11 +180,8 @@ public class DebugController {
         }
     }
 
-    // ── Generic debug sessions ──
+    // ── 调试会话 ──
 
-    /**
-     * List all active debug sessions for a device.
-     */
     @GetMapping("/{deviceId}/sessions")
     public ApiResponse<Map<String, Object>> listSessions(@PathVariable String deviceId) {
         List<Map<String, Object>> items = sessionService.listSessions(deviceId).stream()
@@ -278,14 +189,10 @@ public class DebugController {
                 .toList();
         return ApiResponse.ok(Map.of(
                 "deviceId", deviceId,
-                "online", sessionManager.isDeviceOnline(deviceId),
-                "sessions", items
-        ));
+                "online", capabilities.online(deviceId),
+                "sessions", items));
     }
 
-    /**
-     * Get a specific debug session by id (e.g. "audio-record").
-     */
     @GetMapping("/{deviceId}/sessions/{sessionId}")
     public ApiResponse<Map<String, Object>> getSession(@PathVariable String deviceId,
                                                        @PathVariable String sessionId) {
@@ -294,12 +201,8 @@ public class DebugController {
                 .orElse(ApiResponse.error(40400, "session not found: " + sessionId));
     }
 
-    // ── Generic debug artifacts ──
+    // ── 调试产物 ──
 
-    /**
-     * Get artifact metadata (sttText, durationMs, etc.) without the binary blob.
-     * For the binary blob, use the .../blob endpoint.
-     */
     @GetMapping("/{deviceId}/artifacts/{artifactId}")
     public ApiResponse<Map<String, Object>> getArtifact(@PathVariable String deviceId,
                                                         @PathVariable String artifactId) {
@@ -319,10 +222,6 @@ public class DebugController {
         return ApiResponse.ok(data);
     }
 
-    /**
-     * Download the binary blob for an artifact.
-     * For audio recordings this returns the WAV file (Content-Type: audio/wav).
-     */
     @GetMapping("/{deviceId}/artifacts/{artifactId}/blob")
     public ResponseEntity<byte[]> getArtifactBlob(@PathVariable String deviceId,
                                                    @PathVariable String artifactId) {
@@ -338,6 +237,8 @@ public class DebugController {
         return ResponseEntity.ok().headers(headers).body(a.blob());
     }
 
+    // ── 内部 ──
+
     private Map<String, Object> sessionToMap(DebugSessionHandle s) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("sessionId", s.sessionId());
@@ -350,38 +251,4 @@ public class DebugController {
         data.putAll(s.metrics());
         return data;
     }
-
-    private Map<String, Object> toCommandDetail(SduiDeviceCommand cmd) {
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("cmdId", cmd.getCmdId());
-        detail.put("deviceId", cmd.getDeviceId());
-        detail.put("command", cmd.getCommand());
-        detail.put("action", cmd.getAction());
-        detail.put("params", parsePayload(cmd.getPayload()));
-        detail.put("dispatchStatus", "FAILED".equalsIgnoreCase(cmd.getStatus()) ? "send_failed" : "sent");
-        detail.put("ackStatus", cmd.getStatus());
-        detail.put("reason", cmd.getReason());
-        detail.put("createdAt", cmd.getCreatedAt() != null ? cmd.getCreatedAt().toString() : null);
-        detail.put("ackAt", cmd.getAckTs() != null
-                ? java.time.Instant.ofEpochMilli(cmd.getAckTs()).atOffset(java.time.ZoneOffset.UTC).toString()
-                : null);
-        return detail;
-    }
-
-    private Object parsePayload(String payload) {
-        if (payload == null || payload.isBlank()) {
-            return Map.of();
-        }
-        try {
-            return objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
-        } catch (Exception ignored) {
-            return payload;
-        }
-    }
-
-
-    private Map<String, Object> fieldToMap(FieldSpec field) {
-        return field.toMap();
-    }
-
 }

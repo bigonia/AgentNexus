@@ -70,6 +70,11 @@ public class CapabilityRegistryV2 {
         }
     }
 
+    /** 设备在握手中声明的 `capability_hash`；未声明或已失效时为空。供管理面展示同步进度。 */
+    public Optional<String> claimedHashOf(String deviceId) {
+        return Optional.ofNullable(hashByDevice.get(deviceId));
+    }
+
     /** 平台是否需要请求该设备的完整 Schema。 */
     public boolean needsSchemaUpload(String deviceId) {
         return syncStateOf(deviceId) == SyncState.PENDING;

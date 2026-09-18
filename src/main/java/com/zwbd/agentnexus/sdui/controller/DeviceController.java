@@ -1,23 +1,20 @@
 package com.zwbd.agentnexus.sdui.controller;
 
 import com.zwbd.agentnexus.common.web.ApiResponse;
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
-import com.zwbd.agentnexus.sdui.capability.CapabilityContractService;
-import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
-import com.zwbd.agentnexus.sdui.capability.PlatformCapabilityRegistry;
 import com.zwbd.agentnexus.sdui.dto.SduiClaimDeviceRequest;
 import com.zwbd.agentnexus.sdui.dto.SduiDeviceDetailResponse;
 import com.zwbd.agentnexus.sdui.model.DeviceConnectionLog;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
 import com.zwbd.agentnexus.sdui.model.SduiDeviceTelemetry;
-import com.zwbd.agentnexus.sdui.protocol.CapabilitySchema;
-import com.zwbd.agentnexus.sdui.protocol.SduiRuntimeHandlers;
 import com.zwbd.agentnexus.sdui.repo.DeviceConnectionLogRepository;
-import com.zwbd.agentnexus.sdui.repo.SduiDeviceCommandRepository;
 import com.zwbd.agentnexus.sdui.repo.SduiDeviceTelemetryRepository;
-import com.zwbd.agentnexus.sdui.section.SectionRenderMode;
-import com.zwbd.agentnexus.sdui.service.*;
+import com.zwbd.agentnexus.sdui.service.SduiDeviceService;
+import com.zwbd.agentnexus.sdui.service.TelemetryTrendService;
+import com.zwbd.agentnexus.sdui.v2.business.BusinessConfig;
+import com.zwbd.agentnexus.sdui.v2.business.BusinessConfigService;
+import com.zwbd.agentnexus.sdui.v2.business.ResponseStep;
+import com.zwbd.agentnexus.sdui.v2.business.TriggerBinding;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,8 +26,14 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 /**
- * Unified device management and snapshot API.
- * Merges device CRUD, telemetry trends, connection logs, and command discovery.
+ * 设备台账 API。
+ *
+ * <p>只承载设备本身：身份、在线态、认领、遥测、连接历史、当前生效的业务绑定。能力细节由能力域
+ * 承担，命令/请求细节由调试域承担——本控制器不再做任何命令派发。</p>
+ *
+ * <p>在线态与能力都只有一个来源：v2 连接注册表与设备声明的能力 Schema。</p>
+ *
+ * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.1。</p>
  */
 @Slf4j
 @RestController
@@ -39,18 +42,13 @@ import java.util.*;
 public class DeviceController {
 
     private final SduiDeviceService deviceService;
-    private final SduiCapabilityService capabilityService;
-    private final CommandSchemaRegistry schemaRegistry;
-    private final DeviceSessionManager sessionManager;
+    private final CapabilityQueryService capabilities;
+    private final BusinessConfigService businessConfigService;
     private final TelemetryTrendService trendService;
-    private final CapabilityContractService contractService;
-    private final PlatformCapabilityRegistry platformCapabilityRegistry;
-    private final SduiDeviceCommandRepository commandRepository;
     private final SduiDeviceTelemetryRepository telemetryRepository;
     private final DeviceConnectionLogRepository connectionLogRepository;
-    private final CapabilityRegistry capabilityRegistry;
 
-    // ── Device list ──
+    // ── 设备列表 ──
 
     @GetMapping
     public ApiResponse<Map<String, Object>> listDevices(
@@ -82,39 +80,30 @@ public class DeviceController {
 
         List<Map<String, Object>> items = new ArrayList<>();
         for (SduiDevice d : allDevices) {
-            boolean online = sessionManager.isDeviceOnline(d.getDeviceId());
-            SduiDeviceTelemetry latestTel = telemetryRepository.findFirstByDeviceIdOrderByCreatedAtDesc(d.getDeviceId());
-            Optional<CapabilitySchema.CapabilitySnapshot> capsOpt = capabilityService.getCapabilities(d.getDeviceId());
-
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("deviceId", d.getDeviceId());
             item.put("name", d.getName());
-            item.put("status", online ? "ONLINE" : "OFFLINE");
+            item.put("status", capabilities.online(d.getDeviceId()) ? "ONLINE" : "OFFLINE");
             item.put("registrationStatus", d.getRegistrationStatus());
-            item.put("board", capsOpt.map(CapabilitySchema.CapabilitySnapshot::board).orElse(null));
-            item.put("screenShape", capsOpt.map(c -> c.screen().shape()).orElse(null));
-            item.put("inputMode", capsOpt.map(CapabilitySchema.CapabilitySnapshot::inputMode).orElse(null));
-            item.put("sizeClass", capsOpt.map(c -> c.display().effectiveSizeClass()).orElse(null));
-
-            if (latestTel != null) {
-                item.put("lastTelemetry", buildTelemetrySummary(latestTel));
-            }
+            item.put("board", capabilities.boardOf(d.getDeviceId()).orElse(null));
+            item.put("capabilitySyncState", capabilities.sync(d.getDeviceId()).get("state"));
             item.put("currentAppId", d.getCurrentAppId());
             item.put("lastSeenAt", d.getLastSeenAt() != null ? d.getLastSeenAt().toString() : null);
             item.put("connectedAt", d.getConnectedAt() != null ? d.getConnectedAt().toString() : null);
             item.put("connectionCount", d.getConnectionCount());
             item.put("claimedAt", d.getClaimedAt() != null ? d.getClaimedAt().toString() : null);
             item.put("createdAt", d.getCreatedAt() != null ? d.getCreatedAt().toString() : null);
+            SduiDeviceTelemetry latest = telemetryRepository.findFirstByDeviceIdOrderByCreatedAtDesc(d.getDeviceId());
+            if (latest != null) {
+                item.put("lastTelemetry", buildTelemetrySummary(latest));
+            }
             items.add(item);
         }
 
-        // Board filter
         if (board != null && !board.isBlank()) {
-            items = items.stream()
-                    .filter(i -> board.equals(i.get("board"))).toList();
+            items = items.stream().filter(i -> board.equals(i.get("board"))).toList();
         }
 
-        // Sort
         Comparator<Map<String, Object>> comparator = switch (sortBy != null ? sortBy : "lastSeenAt") {
             case "name" -> Comparator.comparing(m -> (String) m.get("name"), Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER));
             case "status" -> Comparator.comparing(m -> (String) m.get("status"));
@@ -123,12 +112,10 @@ public class DeviceController {
         if ("asc".equalsIgnoreCase(sortDir)) comparator = comparator.reversed();
         items.sort(comparator);
 
-        // Paginate
         int totalCount = items.size();
-        int start = page * size;
-        int end = Math.min(start + size, totalCount);
+        int start = Math.max(page, 0) * Math.max(size, 1);
+        int end = Math.min(start + Math.max(size, 1), totalCount);
         List<Map<String, Object>> paged = (start < totalCount) ? items.subList(start, end) : List.of();
-
         long onlineCount = items.stream().filter(i -> "ONLINE".equals(i.get("status"))).count();
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -146,7 +133,7 @@ public class DeviceController {
         return ApiResponse.ok(deviceService.listUnclaimedDevices());
     }
 
-    // ── Device detail ──
+    // ── 设备详情 ──
 
     @GetMapping("/{deviceId}")
     public ApiResponse<SduiDeviceDetailResponse> deviceDetail(@PathVariable String deviceId) {
@@ -155,57 +142,29 @@ public class DeviceController {
             return ApiResponse.error(40400, "device not found");
         }
         SduiDevice d = deviceOpt.get();
-        boolean online = sessionManager.isDeviceOnline(deviceId);
-        Optional<CapabilitySchema.CapabilitySnapshot> capsOpt = capabilityService.getCapabilities(deviceId);
-        CapabilitySchema.ScreenInfo screen = capsOpt.map(CapabilitySchema.CapabilitySnapshot::screen).orElse(null);
-        String board = capsOpt.map(CapabilitySchema.CapabilitySnapshot::board).orElse(null);
-        String inputMode = capsOpt.map(CapabilitySchema.CapabilitySnapshot::inputMode).orElse(null);
-        String sizeClass = capsOpt.map(c -> c.display().effectiveSizeClass()).orElse(null);
-        CapabilityContract contract = contractService.buildContract(deviceId);
+        Map<String, Object> summary = capabilities.summary(deviceId);
+        Map<String, Object> sync = capabilities.sync(deviceId);
 
-        SduiDeviceTelemetry latestTel = telemetryRepository.findFirstByDeviceIdOrderByCreatedAtDesc(deviceId);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> surface = (Map<String, Object>) summary.get("surface");
 
-        List<SduiDeviceDetailResponse.RecentCommand> recentCommands =
-                commandRepository.findTop10ByDeviceIdOrderByCreatedAtDesc(deviceId)
-                        .stream().map(c -> SduiDeviceDetailResponse.RecentCommand.builder()
-                                .cmdId(c.getCmdId())
-                                .action(c.getAction())
-                                .status(c.getStatus())
-                                .reason(c.getReason())
-                                .createdAt(c.getCreatedAt())
-                                .build())
-                        .toList();
+        SduiDeviceTelemetry latestTelemetry =
+                telemetryRepository.findFirstByDeviceIdOrderByCreatedAtDesc(deviceId);
 
-        // Build capabilities summary inline so frontend doesn't need extra request
-        Map<String, Object> capsSummary = new LinkedHashMap<>();
-        capsSummary.put("board", board);
-        capsSummary.put("screen", screen != null ? Map.of(
-                "w", screen.w(), "h", screen.h(), "shape", screen.shape()) : null);
-        capsSummary.put("inputMode", inputMode);
-        capsSummary.put("sizeClass", sizeClass);
-        capsSummary.put("renderMode", capsOpt
-                .map(c -> SectionRenderMode.fromSizeClass(c.display().effectiveSizeClass()).name().toLowerCase())
-                .orElse("rich"));
-
-        SduiDeviceDetailResponse detail = SduiDeviceDetailResponse.builder()
+        return ApiResponse.ok(SduiDeviceDetailResponse.builder()
                 .deviceId(d.getDeviceId())
                 .name(d.getName())
                 .notes(d.getNotes())
-                .status(online ? "ONLINE" : "OFFLINE")
+                .status(capabilities.online(deviceId) ? "ONLINE" : "OFFLINE")
                 .registrationStatus(d.getRegistrationStatus())
-                .board(board)
-                .screenShape(screen != null ? screen.shape() : null)
-                .screenWidth(screen != null ? screen.w() : 0)
-                .screenHeight(screen != null ? screen.h() : 0)
-                .inputMode(inputMode)
-                .sizeClass(sizeClass)
-                .availableCommands(capabilityService.getAvailableCommands(deviceId))
-                .recentCommands(recentCommands)
-                .capabilitiesSnapshot(d.getCapabilitiesSnapshot())
-                .capabilitiesSummary(capsSummary)
-                .capabilityContract(contract)
-                .capabilityDebugMetadata(capabilityService.buildCapabilityDebugView(deviceId))
-                .lastTelemetry(latestTel != null ? buildTelemetrySummary(latestTel) : null)
+                .board((String) summary.get("board"))
+                .protocolVersion((String) summary.get("protocolVersion"))
+                .schemaVersion((String) summary.get("schemaVersion"))
+                .capabilityHash((String) summary.get("capabilityHash"))
+                .capabilitySyncState(String.valueOf(sync.get("state")))
+                .businessAllowed(Boolean.TRUE.equals(sync.get("businessAllowed")))
+                .capabilitySummary(summary)
+                .surface(surface)
                 .connectedAt(d.getConnectedAt())
                 .sessionId(d.getSessionId())
                 .connectionCount(d.getConnectionCount())
@@ -213,8 +172,8 @@ public class DeviceController {
                 .lastSeenAt(d.getLastSeenAt())
                 .claimedAt(d.getClaimedAt())
                 .createdAt(d.getCreatedAt())
-                .build();
-        return ApiResponse.ok(detail);
+                .lastTelemetry(latestTelemetry != null ? buildTelemetrySummary(latestTelemetry) : null)
+                .build());
     }
 
     @PostMapping("/{deviceId}/claim")
@@ -240,7 +199,58 @@ public class DeviceController {
         return ApiResponse.ok(deviceService.updateDevice(deviceId, name, notes));
     }
 
-    // ── Telemetry ──
+    // ── 当前生效的业务绑定 ──
+
+    /**
+     * 设备上此刻挂着什么：触发绑定、云端 Trigger token 是否存在、平台侧上下文引用、本地响应序列。
+     *
+     * <p>这是闭环第⑤⑥步的唯一可观测出口——排查"按钮按了没反应"时，先看这里有没有那条绑定。
+     * token 只以"存在与否"的形式暴露，前端不感知其取值。</p>
+     */
+    @GetMapping("/{deviceId}/bindings")
+    public ApiResponse<Map<String, Object>> bindings(@PathVariable String deviceId) {
+        Optional<BusinessConfigService.ActiveBusinessState> active = businessConfigService.activeState(deviceId);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("online", capabilities.online(deviceId));
+        result.put("active", active.isPresent());
+        result.put("maxBindingsPerConfig", businessConfigService.maxBindingsPerConfig());
+
+        if (active.isEmpty()) {
+            result.put("appliedAt", null);
+            result.put("configVersion", null);
+            result.put("bindings", List.of());
+            return ApiResponse.ok(result);
+        }
+
+        BusinessConfig config = active.get().config();
+        result.put("appliedAt", active.get().appliedAt() != null
+                ? active.get().appliedAt().toString() : null);
+        result.put("configVersion", config.configVersion());
+
+        List<Map<String, Object>> bindings = new ArrayList<>();
+        for (TriggerBinding binding : config.triggers()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("triggerId", binding.triggerId());
+            entry.put("source", binding.source() != null ? binding.source().wire() : null);
+            entry.put("hasToken", binding.token() != null && !binding.token().isBlank());
+            entry.put("contextRef", binding.contextRef());
+            List<Map<String, Object>> responses = new ArrayList<>();
+            for (ResponseStep step : binding.responses()) {
+                Map<String, Object> stepEntry = new LinkedHashMap<>();
+                stepEntry.put("action", step.action());
+                stepEntry.put("params", step.params());
+                responses.add(stepEntry);
+            }
+            entry.put("responses", responses);
+            bindings.add(entry);
+        }
+        result.put("bindings", bindings);
+        return ApiResponse.ok(result);
+    }
+
+    // ── 遥测 ──
 
     @GetMapping("/{deviceId}/telemetry")
     public ApiResponse<Map<String, Object>> telemetry(
@@ -275,7 +285,7 @@ public class DeviceController {
         return ApiResponse.ok(trendService.buildTrends(deviceId, range, bucketSec, metrics));
     }
 
-    // ── Connection log ──
+    // ── 连接历史 ──
 
     @GetMapping("/{deviceId}/connection-log")
     public ApiResponse<Map<String, Object>> connectionLog(
@@ -290,7 +300,7 @@ public class DeviceController {
             SduiDevice device = deviceOpt.get();
             currentSession.put("connectedAt", device.getConnectedAt() != null ? device.getConnectedAt().toString() : null);
             currentSession.put("sessionId", device.getSessionId());
-            if (device.getConnectedAt() != null && sessionManager.isDeviceOnline(deviceId)) {
+            if (device.getConnectedAt() != null && capabilities.online(deviceId)) {
                 currentSession.put("durationS", Duration.between(device.getConnectedAt(), LocalDateTime.now()).getSeconds());
             }
         }
@@ -305,9 +315,9 @@ public class DeviceController {
         }
 
         List<Map<String, Object>> events = new ArrayList<>();
-        int startIdx = page * size;
-        int endIdx = Math.min(startIdx + size, logs.size());
-        for (int i = startIdx; i < endIdx; i++) {
+        int startIdx = Math.max(page, 0) * Math.max(size, 1);
+        int endIdx = Math.min(startIdx + Math.max(size, 1), logs.size());
+        for (int i = startIdx; i < endIdx && i < logs.size(); i++) {
             DeviceConnectionLog log = logs.get(i);
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("eventType", log.getEventType());
@@ -332,59 +342,7 @@ public class DeviceController {
         return ApiResponse.ok(result);
     }
 
-    // ── Commands ──
-
-    @GetMapping("/{deviceId}/commands")
-    public ApiResponse<Map<String, Object>> deviceCommands(@PathVariable String deviceId) {
-        Set<String> availableCommands = capabilityService.getAvailableCommands(deviceId);
-        Map<String, CommandSchemaRegistry.CommandSchema> schemas = schemaRegistry.getAllSchemas(deviceId);
-
-        List<Map<String, Object>> commands = new ArrayList<>();
-        for (String cmd : availableCommands) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("command", cmd);
-            entry.put("displayName", capabilityService.getCommandDisplayName(cmd));
-            CommandSchemaRegistry.CommandSchema schema = schemas.get(cmd);
-            if (schema != null) {
-                entry.put("description", schema.description());
-                List<Map<String, Object>> paramList = new ArrayList<>();
-                for (var fieldEntry : schema.fields().entrySet()) {
-                    CommandSchemaRegistry.FieldDef f = fieldEntry.getValue();
-                    Map<String, Object> param = new LinkedHashMap<>();
-                    param.put("name", fieldEntry.getKey());
-                    param.put("type", f.type());
-                    param.put("label", f.label() != null ? f.label() : fieldEntry.getKey());
-                    paramList.add(param);
-                }
-                entry.put("params", paramList);
-                entry.put("source", "device");
-                entry.put("runtimeHandler", SduiRuntimeHandlers.DEVICE_COMMAND);
-            }
-            commands.add(entry);
-        }
-
-        for (var platformCapability : platformCapabilityRegistry.listCapabilities()) {
-            if (!platformCapability.available()) {
-                continue;
-            }
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("command", platformCapability.debugRouteId());
-            entry.put("displayName", platformCapability.displayName());
-            entry.put("description", platformCapability.description());
-            entry.put("params", platformCapability.schema().getOrDefault("params", List.of()));
-            entry.put("source", "platform");
-            entry.put("runtimeHandler", platformCapability.runtimeHandler());
-            commands.add(entry);
-        }
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("deviceId", deviceId);
-        data.put("online", sessionManager.isDeviceOnline(deviceId));
-        data.put("commands", commands);
-        return ApiResponse.ok(data);
-    }
-
-    // ── Helpers ──
+    // ── 辅助 ──
 
     private Map<String, Object> buildTelemetrySummary(SduiDeviceTelemetry t) {
         Map<String, Object> telem = new LinkedHashMap<>();

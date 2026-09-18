@@ -3,7 +3,7 @@ package com.zwbd.agentnexus.sdui.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zwbd.agentnexus.common.web.GlobalContext;
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
 import com.zwbd.agentnexus.sdui.dto.SduiDeviceControlRequest;
 import com.zwbd.agentnexus.sdui.model.SduiDevice;
@@ -35,7 +35,7 @@ public class SduiDeviceService {
     private final ClaimService claimService;
     private final SduiCapabilityService capabilityService;
     private final SectionOrchestrationService orchestrationService;
-    private final DeviceSessionManager sessionManager;
+    private final DeviceConnectionRegistry connections;
     private final SduiDeviceRepository deviceRepository;
     private final SduiDeviceTelemetryRepository telemetryRepository;
     private final SduiDeviceCommandRepository commandRepository;
@@ -167,7 +167,7 @@ public class SduiDeviceService {
         device.setCurrentAppId(null);
         device.setStatus("OFFLINE");
 
-        sessionManager.disconnectDevice(deviceId);
+        connections.disconnect(deviceId);
 
         log.info("Device {} deleted from user {}, reset to unclaimed", deviceId, currentUserId());
     }

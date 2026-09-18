@@ -181,6 +181,22 @@ public class NodeWorkflowController {
         }
     }
 
+    /**
+     * 部署时固化的业务配置：每台设备的 {@code triggers} 与平台侧 {@code platformSteps}。
+     *
+     * <p>回答"这台设备当时收到的是什么"。与部署详情分开，避免把这份体量较大的配置
+     * 塞进列表与常规详情响应里。</p>
+     */
+    @GetMapping("/{workflowId}/deployments/{deploymentId}/config")
+    public ApiResponse<Map<String, Object>> deploymentConfig(@PathVariable String workflowId,
+                                                             @PathVariable String deploymentId) {
+        try {
+            return ApiResponse.ok(deploymentService.config(workflowId, deploymentId));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(40400, e.getMessage());
+        }
+    }
+
     @DeleteMapping("/{workflowId}/deployments/{deploymentId}")
     public ApiResponse<Map<String, Object>> stopDeployment(@PathVariable String workflowId,
                                                            @PathVariable String deploymentId) {

@@ -25,7 +25,15 @@ import java.util.Map;
  */
 public final class SimulatedLcd085Device {
 
-    /** 一个典型 LCD_085 固件的能力 Schema。 */
+    /**
+     * 一个典型 LCD_085 固件的能力 Schema。
+     *
+     * <p>两侧动作都要声明：{@code binding} 侧是终端能在本地响应序列里就地执行的动作，
+     * {@code request} 侧是平台可以主动下发的动作。二者命名空间不同（例如本地绑定是
+     * {@code display.section.show}，平台请求是 {@code display.section}），且方向不可互换——
+     * 只声明一侧就必须在另一侧不可达。早先的桩只声明了 {@code binding} 侧，导致"平台可达性"
+     * 这条判定在测试里无从验证。</p>
+     */
     public static final CapabilitySchemaV2 SCHEMA = new CapabilitySchemaV2(
             "2",
             "1",
@@ -37,8 +45,10 @@ public final class SimulatedLcd085Device {
                     new CapabilitySchemaV2.TriggerSpec("platform.trigger", "platform", true, 4)
             ),
             List.of(
+                    // ── 本地绑定额 ──
                     new CapabilitySchemaV2.ActionSpec("audio.record.start", List.of(), List.of("binding")),
                     new CapabilitySchemaV2.ActionSpec("audio.record.stop", List.of(), List.of("binding")),
+                    new CapabilitySchemaV2.ActionSpec("audio.record.toggle", List.of(), List.of("binding")),
                     new CapabilitySchemaV2.ActionSpec("rgb.effect.set", List.of(
                             new CapabilitySchemaV2.ParamSpec("r", "int", true, 0, 255, null),
                             new CapabilitySchemaV2.ParamSpec("g", "int", true, 0, 255, null),
@@ -50,7 +60,33 @@ public final class SimulatedLcd085Device {
                     new CapabilitySchemaV2.ActionSpec("prompt.play", List.of(
                             new CapabilitySchemaV2.ParamSpec("preset", "enum", true, null, null,
                                     List.of("start", "stop", "error"))
-                    ), List.of("binding"))
+                    ), List.of("binding")),
+
+                    // ── 平台请求侧 ──
+                    new CapabilitySchemaV2.ActionSpec("capability.get", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("display.section", List.of(
+                            new CapabilitySchemaV2.ParamSpec("section", "object", true, null, null, null)
+                    ), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("display.image.begin", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("display.image.end", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("display.canvas.open", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("display.canvas.close", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("audio.start", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("audio.stop", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("audio.abort", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("system.volume.set", List.of(
+                            new CapabilitySchemaV2.ParamSpec("value", "int", true, 0, 100, null)
+                    ), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("system.brightness.set", List.of(
+                            new CapabilitySchemaV2.ParamSpec("value", "int", true, 0, 100, null)
+                    ), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("system.reboot", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("system.provisioning.start", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("business.update", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("business.reset", List.of(), List.of("request")),
+                    new CapabilitySchemaV2.ActionSpec("business.trigger", List.of(
+                            new CapabilitySchemaV2.ParamSpec("token", "string", true, null, null, null)
+                    ), List.of("request"))
             ),
             new CapabilitySchemaV2.Surface(
                     new CapabilitySchemaV2.ScreenSpec(128, 128, false),

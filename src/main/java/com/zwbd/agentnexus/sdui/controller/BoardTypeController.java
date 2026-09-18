@@ -1,164 +1,87 @@
 package com.zwbd.agentnexus.sdui.controller;
 
 import com.zwbd.agentnexus.common.web.ApiResponse;
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
-import com.zwbd.agentnexus.sdui.capability.CapabilityRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
-import com.zwbd.agentnexus.sdui.event.EventRegistry;
-import com.zwbd.agentnexus.sdui.protocol.catalog.CommandSpec;
-import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
-import com.zwbd.agentnexus.sdui.section.SectionEditorService;
 import com.zwbd.agentnexus.sdui.section.SectionTriggerCatalog;
 import com.zwbd.agentnexus.sdui.section.SectionTriggerCatalogService;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
- * Board-level capability query API.
+ * 板型域 API。
  *
- * Resolves a board identifier (e.g., "ESP32-S3-LCD-0.85") to an example
- * online device of that board, then delegates to the same capability projection
- * used by the debug endpoints.  This closes the loop for the state-machine
- * editor: when a user selects a board, the editor can fetch all available
- * commands, sections, and events *before* binding a specific device.
+ * <p>尚未绑定具体设备时，前端仍需要回答与能力域相同的问题。实现方式是解析出一个该板型的
+ * <b>代表设备</b>（优先在线），再复用同一套能力查询——板型不是独立的数据源，它只是设备的聚合视图。
+ * 因此这里的每个答案都与设备级接口同源，不会出现"板型说能做、设备说不能做"。</p>
+ *
+ * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.3。</p>
  */
-@Slf4j
 @RestController
 @RequestMapping("/api/v1/sdui/board-types")
 @RequiredArgsConstructor
 public class BoardTypeController {
 
-    private final CapabilityRegistry capabilityRegistry;
-    private final DeviceCapabilityProjection capabilityProjection;
-    private final SectionEditorService sectionEditorService;
-    private final EventRegistry eventRegistry;
-    private final DeviceSessionManager sessionManager;
+    private final CapabilityQueryService capabilities;
     private final CapabilityNodeCatalogService nodeCatalogService;
     private final SectionTriggerCatalogService sectionTriggerCatalogService;
 
-    // ── List all boards ──
-
+    /** 板型列表。未完成能力同步的设备无法归类，单独计入一个空板型条目。 */
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> listBoards() {
-        return ApiResponse.ok(capabilityRegistry.getBoardTypesAsList());
+        return ApiResponse.ok(capabilities.boards());
     }
 
+    /** 板型详情。 */
     @GetMapping("/{board}")
     public ApiResponse<Map<String, Object>> getBoard(@PathVariable String board) {
-        return capabilityRegistry.getBoardType(board)
-                .map(info -> {
-                    Map<String, Object> map = new LinkedHashMap<>();
-                    map.put("board", info.board());
-                    map.put("label", info.label());
-                    map.put("inputEvents", new ArrayList<>(info.inputEvents()));
-                    map.put("outputCommands", new ArrayList<>(info.outputCommands()));
-                    map.put("sectionTypes", new ArrayList<>(info.sectionTypes()));
-                    map.put("deviceCount", info.deviceCount());
-                    map.put("onlineCount", info.onlineCount());
-                    map.put("exampleDeviceIds", info.exampleDeviceIds());
-                    map.put("lastSeen", info.lastSeen().toString());
-                    return ApiResponse.ok(map);
-                })
-                .orElse(ApiResponse.error(40400, "board not found: " + board));
+        Optional<Map<String, Object>> detail = capabilities.board(board);
+        return detail.map(ApiResponse::ok)
+                .orElseGet(() -> ApiResponse.error(40400, "board not found: " + board));
     }
 
-    // ── Commands by board ──
-
-    @GetMapping("/{board}/commands")
-    public ApiResponse<Map<String, Object>> commandsByBoard(@PathVariable String board) {
-        return resolveExampleDevice(board, (deviceId) -> {
-            List<Map<String, Object>> deviceCommands = new ArrayList<>();
-            for (CommandSpec command : capabilityProjection.commands(deviceId)) {
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("command", command.id());
-                entry.put("params", command.params().stream()
-                        .map(f -> Map.of("name", f.name(), "type", (Object) f.type()))
-                        .toList());
-                deviceCommands.add(entry);
-            }
-
-            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("board", board);
-            data.put("label", boardInfo != null ? boardInfo.label() : null);
-            data.put("exampleDeviceId", deviceId);
-            data.put("online", sessionManager.isDeviceOnline(deviceId));
-            data.put("deviceCommands", deviceCommands);
-            return ApiResponse.ok(data);
-        });
+    /** 板型动作目录（= 代表设备的动作目录）。 */
+    @GetMapping("/{board}/actions")
+    public ApiResponse<Map<String, Object>> actions(@PathVariable String board) {
+        return withRepresentativeDevice(board, deviceId -> ApiResponse.ok(Map.of(
+                "board", board,
+                "exampleDeviceId", deviceId,
+                "online", capabilities.online(deviceId),
+                "actions", capabilities.actions(deviceId))));
     }
 
-    // ── Sections / section-editor by board ──
-
-    @GetMapping("/{board}/sections")
-    public ApiResponse<Map<String, Object>> sectionsByBoard(@PathVariable String board) {
-        return resolveExampleDevice(board, (deviceId) -> {
-            Map<String, Object> editor = new LinkedHashMap<>(sectionEditorService.buildSectionEditor(deviceId));
-
-            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-
-            editor.put("board", board);
-            editor.put("label", boardInfo != null ? boardInfo.label() : null);
-            editor.put("exampleDeviceId", deviceId);
-            editor.put("online", sessionManager.isDeviceOnline(deviceId));
-            return ApiResponse.ok(editor);
-        });
+    /** 板型可配置触发源目录。 */
+    @GetMapping("/{board}/triggers")
+    public ApiResponse<Map<String, Object>> triggers(@PathVariable String board) {
+        return withRepresentativeDevice(board, deviceId -> ApiResponse.ok(Map.of(
+                "board", board,
+                "exampleDeviceId", deviceId,
+                "online", capabilities.online(deviceId),
+                "triggers", capabilities.triggers(deviceId))));
     }
 
-    // ── Events by board ──
-
-    @GetMapping("/{board}/events")
-    public ApiResponse<Map<String, Object>> eventsByBoard(
-            @PathVariable String board,
-            @RequestParam(required = false) List<String> sectionTypes) {
-        return resolveExampleDevice(board, (deviceId) -> {
-            // Build unified event catalog via CapabilityRegistry (single source of truth)
-            Set<String> filter = sectionTypes != null && !sectionTypes.isEmpty()
-                    ? new LinkedHashSet<>(sectionTypes) : Set.of();
-            Map<String, Object> catalog2 = capabilityRegistry.buildEventCatalog(deviceId, filter);
-
-            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("board", board);
-            data.put("label", boardInfo != null ? boardInfo.label() : null);
-            data.put("exampleDeviceId", deviceId);
-            data.put("online", sessionManager.isDeviceOnline(deviceId));
-
-            // Backward-compatible keys
-            data.put("deviceEvents", catalog2.get("sectionEvents"));
-            data.put("physicalInputs", catalog2.get("physicalInputs"));
-            data.put("mediaCapabilities", catalog2.get("mediaCapabilities"));
-            data.put("eventOptions", eventRegistry.getFlatEventOptions());
-            data.put("eventTree", eventRegistry.getPublicInboundEventTree());
-            data.put("availableTriggers", catalog2.get("availableTriggers"));
-
-            return ApiResponse.ok(data);
-        });
-    }
-
+    /**
+     * 工作流编辑器的节点目录：这台板型上可以往工作流里放哪些节点。
+     * 不可用的节点会在 {@code unresolvedNodes} 里给出原因。
+     */
     @GetMapping("/{board}/capability-nodes")
-    public ApiResponse<Map<String, Object>> capabilityNodesByBoard(
-            @PathVariable String board,
-            @RequestParam(required = false) String pageId,
-            @RequestParam(required = false) String pageJson) {
-        return resolveExampleDevice(board, (deviceId) -> {
-            CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-            CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId, pageId, pageJson);
+    public ApiResponse<Map<String, Object>> capabilityNodes(@PathVariable String board) {
+        return withRepresentativeDevice(board, deviceId -> {
+            CapabilityNodeCatalog catalog = nodeCatalogService.buildForDevice(deviceId);
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("board", board);
-            data.put("label", boardInfo != null ? boardInfo.label() : null);
             data.put("exampleDeviceId", deviceId);
-            data.put("online", sessionManager.isDeviceOnline(deviceId));
+            data.put("online", catalog.online());
             data.put("status", catalog.status());
             data.put("nodes", catalog.nodes());
             data.put("unresolvedNodes", catalog.unresolvedNodes());
@@ -167,40 +90,30 @@ public class BoardTypeController {
     }
 
     /**
-     * Section Trigger Catalog — a three-level tree for configuring section.trigger
-     * workflow nodes.  Returns all interactive sections on a page with their
-     * child interactive elements (buttons, toggles, list items, nav tabs) and
-     * the events each element can fire.
+     * Section 触发树：Section → 可交互元素 → 该元素可触发的事件。
      *
-     * <p>Unlike {@code /capability-nodes} (which returns flat workflow-graph nodes),
-     * this endpoint provides the configuration-panel data: which Section → which
-     * element → which event the user wants to trigger on.
+     * <p>与 {@code /capability-nodes} 的分工：后者给出工作流图的可用节点，本接口给出
+     * {@code section.trigger} 节点的配置面板数据。</p>
+     *
+     * <p>// TODO(lcd085-refactor): 这是接口集里最后一处仍读旧 Section 模型（{@link SectionTriggerCatalog}
+     * 及其 Service）的端点。触发树应从 v2 能力 Schema 的 {@code surface.ui} 派生。
+     * 登记于 12_DESIGN_NOTES.md §7.2，随 P5c 一并处理——终端固件未切换前，旧 Section 模型仍是活的，
+     * 现在改写会让触发面板没有数据源。</p>
      */
     @GetMapping("/{board}/section-triggers")
-    public ApiResponse<SectionTriggerCatalog> sectionTriggersByBoard(
+    public ApiResponse<SectionTriggerCatalog> sectionTriggers(
             @PathVariable String board,
             @RequestParam(required = false) String pageId,
             @RequestParam(required = false) String pageJson) {
 
-        CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-        if (boardInfo == null) {
-            return ApiResponse.error(40400, "board not found: " + board);
-        }
-
-        // Prefer an online device, fall back to any example device
-        String deviceId = boardInfo.exampleDeviceIds().stream()
-                .filter(sessionManager::isDeviceOnline)
-                .findFirst()
-                .orElseGet(() -> boardInfo.exampleDeviceIds().isEmpty()
-                        ? null : boardInfo.exampleDeviceIds().get(0));
-
-        if (deviceId == null) {
+        Optional<String> device = capabilities.representativeDevice(board);
+        if (device.isEmpty()) {
             return ApiResponse.error(40400,
-                    "no example device available for board: " + board
-                    + ". Wait for a device of this board to connect.");
+                    "no device available for board: " + board + "。等待该板型设备完成能力同步。");
         }
+        String deviceId = device.get();
+        boolean online = capabilities.online(deviceId);
 
-        boolean online = sessionManager.isDeviceOnline(deviceId);
         SectionTriggerCatalog catalog;
         if (pageId != null && !pageId.isBlank()) {
             catalog = sectionTriggerCatalogService.buildForPage(deviceId, board, online, pageId);
@@ -212,42 +125,19 @@ public class BoardTypeController {
         return ApiResponse.ok(catalog);
     }
 
-    // ── Internal ──
+    // ── 内部 ───────────────────────────────────────────────────────────────
 
-    /**
-     * Resolve a board identifier to an example online device and execute the callback.
-     * Falls back to any device of that board if no online device is available.
-     */
-    private ApiResponse<Map<String, Object>> resolveExampleDevice(
+    /** 解析板型的代表设备并执行回调；没有可用设备时给出可区分的原因。 */
+    private ApiResponse<Map<String, Object>> withRepresentativeDevice(
             String board,
             java.util.function.Function<String, ApiResponse<Map<String, Object>>> callback) {
 
-        CapabilityRegistry.BoardInfo boardInfo = capabilityRegistry.getBoardType(board).orElse(null);
-        if (boardInfo == null) {
+        if (capabilities.board(board).isEmpty()) {
             return ApiResponse.error(40400, "board not found: " + board);
         }
-
-        // Prefer an online device
-        String deviceId = boardInfo.exampleDeviceIds().stream()
-                .filter(sessionManager::isDeviceOnline)
-                .findFirst()
-                .orElse(null);
-
-        // Fall back to any example device
-        if (deviceId == null && !boardInfo.exampleDeviceIds().isEmpty()) {
-            deviceId = boardInfo.exampleDeviceIds().get(0);
-        }
-
-        if (deviceId == null) {
-            return ApiResponse.error(40400,
-                    "no example device available for board: " + board
-                    + ". Wait for a device of this board to connect.");
-        }
-
-        return callback.apply(deviceId);
-    }
-
-    private String string(Object value) {
-        return value == null ? "" : String.valueOf(value);
+        return capabilities.representativeDevice(board)
+                .map(callback)
+                .orElseGet(() -> ApiResponse.error(40400,
+                        "no device available for board: " + board + "。等待该板型设备完成能力同步。"));
     }
 }

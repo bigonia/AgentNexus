@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.debug.workflow;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
 import com.zwbd.agentnexus.sdui.debug.node.CapabilityNodeTestService;
@@ -22,7 +22,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
     private static boolean isTriggerNode(String nodeType) { return nodeType != null && nodeType.endsWith(".trigger"); }
     private static final Set<String> OUTPUT_NODE_TYPES = Set.of("rgb.effect", "audio.play", "audio.record", "ui.update", "display.section");
 
-    private final DeviceSessionManager sessionManager;
+    private final DeviceConnectionRegistry connections;
     private final CapabilityNodeCatalogService nodeCatalogService;
     private final CapabilityNodeTestService nodeTestService;
     private final Map<String, NodeWorkflowDefinition> workflows = new ConcurrentHashMap<>();
@@ -30,10 +30,10 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
     private final Map<String, Deque<NodeWorkflowRun>> runsByDeployment = new ConcurrentHashMap<>();
 
     public NodeWorkflowDebugService(EventInputHandler eventInputHandler,
-                                    DeviceSessionManager sessionManager,
+                                    DeviceConnectionRegistry connections,
                                     CapabilityNodeCatalogService nodeCatalogService,
                                     CapabilityNodeTestService nodeTestService) {
-        this.sessionManager = sessionManager;
+        this.connections = connections;
         this.nodeCatalogService = nodeCatalogService;
         this.nodeTestService = nodeTestService;
         eventInputHandler.addPayloadListener(this);
@@ -299,7 +299,7 @@ public class NodeWorkflowDebugService implements EventInputHandler.PayloadEventL
             if (deviceId == null || deviceId.isBlank()) {
                 throw new IllegalArgumentException("slot binding is required: " + slotId);
             }
-            if (!sessionManager.isDeviceOnline(deviceId)) {
+            if (!connections.isOnline(deviceId)) {
                 throw new IllegalArgumentException("device is offline for slot " + slotId + ": " + deviceId);
             }
         }

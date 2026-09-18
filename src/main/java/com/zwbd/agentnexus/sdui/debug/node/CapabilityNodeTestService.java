@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.debug.node;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.debug.DebugArtifactStore;
 import com.zwbd.agentnexus.sdui.dto.SduiControlDispatchResult;
 import com.zwbd.agentnexus.sdui.event.EventPayload;
@@ -22,7 +22,7 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
     private static final long MAX_TIMEOUT_MS = 300_000L;
     private static final String AUDIO_RECORD_ARTIFACT_ID = "audio-record-latest";
 
-    private final DeviceSessionManager sessionManager;
+    private final DeviceConnectionRegistry connections;
     private final CommandService commandService;
     private final AudioService audioService;
     private final AudioRecordSessionManager audioRecordSessionManager;
@@ -31,13 +31,13 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
     private final Map<String, NodeTestHandle> tests = new ConcurrentHashMap<>();
 
     public CapabilityNodeTestService(EventInputHandler eventInputHandler,
-                                     DeviceSessionManager sessionManager,
+                                     DeviceConnectionRegistry connections,
                                      CommandService commandService,
                                      AudioService audioService,
                                      AudioRecordSessionManager audioRecordSessionManager,
                                      DebugArtifactStore artifactStore,
                                      WorkflowPlatformStepExecutor platformStepExecutor) {
-        this.sessionManager = sessionManager;
+        this.connections = connections;
         this.commandService = commandService;
         this.audioService = audioService;
         this.audioRecordSessionManager = audioRecordSessionManager;
@@ -47,7 +47,7 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
     }
 
     public Map<String, Object> createInputTest(String deviceId, Map<String, Object> body) {
-        if (!sessionManager.isDeviceOnline(deviceId)) {
+        if (!connections.isOnline(deviceId)) {
             throw new IllegalArgumentException("device is offline");
         }
         String eventId = string(body.get("eventId"));
@@ -197,7 +197,7 @@ public class CapabilityNodeTestService implements EventInputHandler.PayloadEvent
             default -> throw new IllegalArgumentException("invalid audio.record control: " + control);
         };
 
-        if ("audio.record.stop".equals(command) && !sessionManager.isDeviceOnline(deviceId)) {
+        if ("audio.record.stop".equals(command) && !connections.isOnline(deviceId)) {
             audioRecordSessionManager.requestStopOnReconnect(deviceId, "node_test_offline");
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("deviceId", deviceId);

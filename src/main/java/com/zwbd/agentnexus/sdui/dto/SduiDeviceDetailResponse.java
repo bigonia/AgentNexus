@@ -1,55 +1,46 @@
 package com.zwbd.agentnexus.sdui.dto;
 
-import com.zwbd.agentnexus.sdui.capability.CapabilityContract;
 import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
+/**
+ * 设备详情。
+ *
+ * <p>只承载设备台账、在线态与能力同步进度。命令/请求历史不在详情里重复暴露——那由调试域的
+ * {@code /debug/{deviceId}/requests/history} 承担；完整能力 Schema 由能力域的 {@code /schema} 承担。</p>
+ */
 @Data
 @Builder
 public class SduiDeviceDetailResponse {
+
     private String deviceId;
     private String name;
     private String notes;
     private String status;
     private String registrationStatus;
+
+    // ── 能力同步（v2）──
     private String board;
-    private String screenShape;
-    private int screenWidth;
-    private int screenHeight;
-    private String inputMode;
-    private String sizeClass;
-    private Set<String> availableCommands;
-    private String capabilitiesSnapshot;
-    private Map<String, Object> capabilitiesSummary;
-    private CapabilityContract capabilityContract;
-    private Map<String, Object> capabilityDebugMetadata;
-    private List<RecentCommand> recentCommands;
+    private String protocolVersion;
+    private String schemaVersion;
+    private String capabilityHash;
+    private String capabilitySyncState;
+    private boolean businessAllowed;
+    private Map<String, Object> capabilitySummary;
+    private Map<String, Object> surface;
 
-    // ── Latest telemetry summary ──
-    private Map<String, Object> lastTelemetry;
-
-    // ── Connection tracking ──
+    // ── 连接 ──
     private LocalDateTime connectedAt;
     private String sessionId;
     private Integer connectionCount;
     private Long totalUptimeS;
-
     private LocalDateTime lastSeenAt;
     private LocalDateTime claimedAt;
     private LocalDateTime createdAt;
 
-    @Data
-    @Builder
-    public static class RecentCommand {
-        private String cmdId;
-        private String action;
-        private String status;
-        private String reason;
-        private LocalDateTime createdAt;
-    }
+    // ── 最新遥测 ──
+    private Map<String, Object> lastTelemetry;
 }

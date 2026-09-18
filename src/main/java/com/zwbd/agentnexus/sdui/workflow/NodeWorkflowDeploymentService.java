@@ -1,6 +1,6 @@
 package com.zwbd.agentnexus.sdui.workflow;
 
-import com.zwbd.agentnexus.sdui.DeviceSessionManager;
+import com.zwbd.agentnexus.sdui.v2.session.DeviceConnectionRegistry;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
 import com.zwbd.agentnexus.sdui.ui.WorkflowUiContextService;
@@ -26,7 +26,7 @@ public class NodeWorkflowDeploymentService {
 
     private final NodeWorkflowService workflowService;
     private final NodeWorkflowDeploymentRepository deploymentRepository;
-    private final DeviceSessionManager sessionManager;
+    private final DeviceConnectionRegistry connections;
     private final CapabilityNodeCatalogService nodeCatalogService;
     private final WorkflowUiContextService uiContextService;
     private final WorkflowBusinessConfigAssembler configAssembler;
@@ -35,7 +35,7 @@ public class NodeWorkflowDeploymentService {
 
     public NodeWorkflowDeploymentService(NodeWorkflowService workflowService,
                                          NodeWorkflowDeploymentRepository deploymentRepository,
-                                         DeviceSessionManager sessionManager,
+                                         DeviceConnectionRegistry connections,
                                          CapabilityNodeCatalogService nodeCatalogService,
                                          WorkflowUiContextService uiContextService,
                                          WorkflowBusinessConfigAssembler configAssembler,
@@ -43,7 +43,7 @@ public class NodeWorkflowDeploymentService {
                                          BusinessConfigService businessConfigService) {
         this.workflowService = workflowService;
         this.deploymentRepository = deploymentRepository;
-        this.sessionManager = sessionManager;
+        this.connections = connections;
         this.nodeCatalogService = nodeCatalogService;
         this.uiContextService = uiContextService;
         this.configAssembler = configAssembler;
@@ -107,6 +107,29 @@ public class NodeWorkflowDeploymentService {
 
     public Map<String, Object> get(String workflowId, String deploymentId) {
         return toMap(requireDeployment(workflowId, deploymentId));
+    }
+
+    /**
+     * 部署时固化的业务配置：每台设备当时收到的 {@code triggers} 与平台侧 {@code platformSteps}。
+     *
+     * <p>与 {@link #get} 的分工：{@code get} 回答"这次部署的状态如何"（谁、何时、slot 绑了什么、UI 上下文），
+     * 本方法回答"设备当时收到的是什么配置"。两者刻意分开，因为配置体量大——列表与详情接口不该
+     * 每次都把它拖出来，而排查"平台算出的步骤和设备实际执行的对不上"时又必须能精确取到那一份。</p>
+     *
+     * <p>读的是部署记录里固化的 JSON 列，不是按当前 Schema 重新组装。原因见
+     * {@code NodeWorkflowDeploymentEntity#businessConfigs}：重新组装会漂移。</p>
+     */
+    public Map<String, Object> config(String workflowId, String deploymentId) {
+        NodeWorkflowDeploymentEntity deployment = requireDeployment(workflowId, deploymentId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("deploymentId", deployment.getId());
+        data.put("workflowId", deployment.getWorkflowId());
+        data.put("workflowVersion", deployment.getWorkflowVersion());
+        data.put("status", deployment.getStatus());
+        data.put("deployedAt", deployment.getDeployedAt() != null ? deployment.getDeployedAt().toString() : null);
+        data.put("slotBindings", deployment.getSlotBindings());
+        data.put("businessConfigs", deployment.getBusinessConfigs());
+        return data;
     }
 
     @Transactional
@@ -270,7 +293,7 @@ public class NodeWorkflowDeploymentService {
                 errors.add("slot binding is required: " + slotId);
                 continue;
             }
-            if (!sessionManager.isDeviceOnline(deviceId)) {
+            if (!connections.isOnline(deviceId)) {
                 errors.add("device is offline for slot " + slotId + ": " + deviceId);
             }
         }

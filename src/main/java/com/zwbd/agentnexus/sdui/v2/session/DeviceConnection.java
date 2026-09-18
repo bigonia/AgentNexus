@@ -1,8 +1,11 @@
 package com.zwbd.agentnexus.sdui.v2.session;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
+import java.io.IOException;
 import java.time.Instant;
 
 /**
@@ -12,6 +15,7 @@ import java.time.Instant;
  * {@code generation} 与当前值一致时才被处理，用于实现 04_PROTOCOL_MODEL.md §2
  * "旧连接后续消息全部忽略"。</p>
  */
+@Slf4j
 @Getter
 public class DeviceConnection {
 
@@ -52,6 +56,18 @@ public class DeviceConnection {
 
     public boolean isOpen() {
         return session != null && session.isOpen();
+    }
+
+    /** 关闭底层会话。平台侧强制断开的唯一手段。 */
+    public void close() {
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        try {
+            session.close(CloseStatus.NORMAL.withReason("disconnected by platform"));
+        } catch (IOException e) {
+            log.debug("关闭设备会话失败: device={}", deviceId, e);
+        }
     }
 
     public String sessionId() {

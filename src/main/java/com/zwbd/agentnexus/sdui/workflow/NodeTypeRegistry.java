@@ -87,6 +87,33 @@ public class NodeTypeRegistry {
             )
     );
 
+    // ── Target action mapping ───────────────────────────────────────
+
+    /**
+     * 每个输出节点类型可能落到哪些终端动作。
+     *
+     * <p>与 {@code WorkflowActionMapper} 的分支一一对应，是"编辑器列出节点"与"运行时执行节点"
+     * 之间的唯一桥梁。空列表表示该节点没有终端动作——只能由平台自己完成（如 {@code ui.update}
+     * 需要平台按模板渲染 Section 后下发）。</p>
+     */
+    private static final Map<String, List<String>> TARGET_ACTIONS = Map.of(
+            "rgb.effect", List.of("rgb.effect.set"),
+            "audio.record", List.of("audio.record.start", "audio.record.stop", "audio.record.toggle"),
+            "audio.play", List.of("prompt.play"),
+            "display.section", List.of("display.section.show"),
+            "ui.update", List.of()
+    );
+
+    /** 全部已登记的节点类型。 */
+    public Set<String> nodeTypes() {
+        return paramsByType.keySet();
+    }
+
+    /** 该节点类型可能的终端动作；无终端动作时返回空列表。 */
+    public List<String> targetActions(String nodeType) {
+        return TARGET_ACTIONS.getOrDefault(nodeType, List.of());
+    }
+
     private final Map<String, List<OutputDef>> outputsByType;
     private final Map<String, List<ParamDef>> paramsByType;
     private final Map<String, Map<String, ParamDef>> paramsByTypeAndName;
