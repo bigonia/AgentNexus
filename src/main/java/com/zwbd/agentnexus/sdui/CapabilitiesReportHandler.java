@@ -8,6 +8,11 @@ import org.springframework.web.socket.WebSocketSession;
 
 @Slf4j
 @Component
+// LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
+// Replaced by: v2 能力 Schema + capability_hash (sdui.v2.capability)
+// Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
+// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
+@Deprecated(since = "0.10.0")
 public class CapabilitiesReportHandler implements TopicHandler {
 
     private final SduiDeviceService deviceService;

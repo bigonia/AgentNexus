@@ -11,6 +11,11 @@ import org.springframework.web.socket.WebSocketSession;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+// LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
+// Replaced by: v2 统一 request/result 信封 (sdui.v2.transport.SduiV2MessageRouter)
+// Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
+// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
+@Deprecated(since = "0.10.0")
 public class SduiControlAckHandler implements TopicHandler {
 
     private final SduiDeviceService deviceService;

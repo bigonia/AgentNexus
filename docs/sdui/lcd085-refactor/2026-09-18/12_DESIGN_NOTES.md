@@ -141,15 +141,59 @@ rm -rf target/maven-status
 
 **平台侧处理**：约定终端在上行流开始时发送 `audio.start` 事件，body 可带 `direction`（缺省按 `uplink` 解释，因为下行由平台自己发起）。`AudioLifecycleEventSink` 同时注册 `audio.start`、`audio.stop`、`audio.abort` 三个名称。该项为缺口 G22 的扩展，待终端确认后收敛。
 
+### 4.8 P5 必须拆成三道闸门（2026-09-18）
+
+原计划把"工作流对接"与"旧协议路径删除"合成 P5 一步。动手前评估发现两件事的准入条件根本不同：
+
+- 工作流改造的准入条件是**代码就绪**；
+- 旧路径删除的准入条件是**终端固件全量切换**。
+
+绑在一起的结果只有两种："要么永远不删所以 P5 永远不完成"，或者"删了但线上设备失联"。同时工作流侧自身含"产出配置"与"消费事件"两个可以独立验收的方向。
+
+**平台侧处理**：拆成 P5a（产出配置 + 分流开关）、P5b（交互事件回流）、P5c（旧路径剪除）。P5c 的准入条件写进 [11_FEATURE_MATRIX.md](11_FEATURE_MATRIX.md) §5.3；在那之前旧路径一律只标 `@Deprecated` 不删除，见本文 §7。
+
+### 4.9 响应序列全静态，业务动态由 token 承载（2026-09-18）
+
+01§2 说 Response 序列"有限、有序、不可编程"，但没划定"不可编程"的边界：参数里能不能用 `$ref` 引用上游节点输出？能不能留一个"等平台算完再继续"的占位？
+
+**裁决（已与需求方确认）**：响应动作**全部静态**，不包含任何动态行为。业务上的动态差异由平台**为同一动作签发不同 token** 来表达。
+
+推论与实现：
+
+- `audio.record` 的 `control=toggle` 不能下沉——依赖终端运行时录音状态；
+- `audio.play` 带 `text` / `artifact_id` / `audio_file` 不能下沉——需要平台先产出音频；
+- 任何含 `$ref` 的节点不能下沉。
+
+`WorkflowActionMapper` 为每种节点类型显式给出"下沉或拒绝 + 拒绝理由"。这条规则的价值在于：配置里没有某个节点时，永远能查到它为什么不在，而不是一个静默的省略。
+
+### 4.10 静态前缀截断与跨 slot 不截断（2026-09-18）
+
+01§2 要求序列有序，但没说一条链中间夹着平台步骤时序列到哪为止。
+
+**平台侧处理**：
+
+- 同 slot 遇到首个不可下沉节点即**截断**，其后节点全部留平台——它们的输入依赖平台算出的结果，预先下发没有意义；
+- 跨 slot 节点**不截断**本 slot 的前缀——它属于另一台设备，不需要本设备提供输入，只是需要平台在收到上报后协调；
+- 只要产生了平台步骤，就在序列尾部追加一次 `platform.interaction.report`，让平台知道"本地部分做完了，继续云端流程"；没有平台步骤时不追加，避免让平台接收纯本地闭环的交互（02§4：平台不镜像终端微观状态）。
+
+### 4.11 组装成功不等于下发成功（2026-09-18，已修复）
+
+P5a 首版把"组装"和"校验"分在了两处：组装器只判断节点能否下沉，参数取值域等交给下发路径的 `BusinessConfigValidator`。结果是 `audio.play{preset:"ding"}` 这种配置——动作名合法、参数静态、下沉判定放行——会在部署接口返回成功、部署记录落库**之后**，才在 `business.update` 的校验里被拒绝。终端没收到配置，平台却已经认为这次部署生效了。
+
+根因不是某条校验缺失，而是**存在一个"部署成功但未生效"的窗口**。部署是用户可见的动作，它返回成功就必须意味着配置一定能被终端接受。
+
+**平台侧处理**：组装结束时用 `BusinessConfigService.validate` 对草稿配置做一次干跑，把校验错误转成部署 ERROR。选择干跑而不是把校验规则复制一份到组装器：复制会形成两处真值，将来规则改动必然漂移。干跑本身无持久副作用（§4.6 已修复 token 泄漏）。已补测试 `downstreamValidationFailureBecomesAssemblyError` 固定该不变量。
+
 ## 5. 未决问题
 
-| # | 问题 | 影响 | 拟解决时点 |
+| # | 问题 | 影响 | 状态 |
 | --- | --- | --- | --- |
-| Q1 | 终端侧确认 G2 / G10 / G13 / G20 四项高风险的临时假设 | 协议能否真正对接 | 终端协议实现完成时 |
-| Q2 | 平台侧业务配置与 token 需要持久化到什么程度 | 平台重启后的恢复能力 | P3 收尾 |
-| Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | P5 前 |
-| Q4 | Node Workflow 产出配置的粒度（整份配置 / 片段合并） | 工作流编排模型 | P5 设计时 |
+| Q1 | 终端侧确认 G2 / G10 / G13 / G20 四项高风险的临时假设 | 协议能否真正对接 | 待终端协议实现完成 |
+| Q2 | 平台侧业务配置与 token 需要持久化到什么程度 | 平台重启后的恢复能力 | 待定；首期内存实现（G17），可由业务层重新 update 恢复 |
+| Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | **已解决（P5a）**：`DeviceProtocolRouter` + `sdui.routing`，优先级 黑名单 > 白名单 > 缺省协议 |
+| Q4 | Node Workflow 产出配置的粒度（整份配置 / 片段合并） | 工作流编排模型 | **已解决（P5a）**：以 deployment 为粒度；节点产出片段，部署时按设备合并为全量配置 |
 | Q5 | 是否需要一个统一的设备侧操作审计视图 | 可观测性 | 待定 |
+| Q6 | 组装产出的 `platformSteps` 由谁持有（内存 / 随部署落库） | P5b 的交互回流能否跨平台重启 | P5b 设计时 |
 
 ## 6. 开发过程记录
 
@@ -162,5 +206,43 @@ rm -rf target/maven-status
 | 2026-09-18 | 交付 P3 业务配置域 | 绑定表模型、双域 token 注册表、`business.reset/update/trigger`、接管幂等重发、切换编排、跨域清理协调 |
 | 2026-09-18 | 交付 P4 业务面 | `display.section/image/canvas`、`audio.*`、`system.*` 统一走 request/result；主视图互斥与丢帧策略 |
 | 2026-09-18 | 验证 | `mvn test` 259 项通过（新增 134 项 v2 用例，无既有回归） |
+| 2026-09-18 | 交付 P5a 工作流产出配置 | `WorkflowActionMapper` 节点下沉判定、`WorkflowBusinessConfigAssembler` 按设备组装、部署下发与停止清理、`DeviceProtocolRouter` 设备分流开关；旧协议路径统一标注 `@Deprecated` |
+| 2026-09-18 | 修复组装与下发之间的静默失败窗口 | 组装结束增加下发校验干跑（§4.11），部署成功即等价于配置可被终端接受 |
+| 2026-09-18 | 验证 | `mvn test` 295 项通过（新增 36 项 P5a 用例，无回归） |
 
-后续进入 P5：工作流产出 `BusinessConfig`、`platform.interaction` 驱动工作流运行、旧协议路径剪除。
+后续进入 P5b：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。
+
+## 7. 待清除模块清单（P5c 用）
+
+P5a 阶段把所有将被删除的旧协议路径统一标注为 `@Deprecated(since = "0.10.0")`，并在注释里写明替代项。这样：
+
+- 现在删除会破坏在线设备，所以不删；
+- 将来删除时不需要重新梳理"哪些能动"，照本表执行即可；
+- 若需回滚到旧协议，只需撤销 `@Deprecated` 标注，代码始终可用。
+
+| 文件 | 被替代项 | 备注 |
+| --- | --- | --- |
+| `sdui/SduiControlAckHandler.java` | v2 统一 request/result 信封 | `cmd/control_ack` 入口 |
+| `sdui/service/CommandDispatcher.java` | v2 `business.*` / `display.*` / `audio.*` / `system.*` | `cmd/control` 派发 |
+| `sdui/protocol/SduiProtocolConstants.java` | `sdui.v2.protocol.V2Names` | 旧 topic 与协议常量 |
+| `sdui/handler/EventInputHandler.java` | v2 `platform.interaction` + token 反查 | TLV 输入（msgType 9） |
+| `sdui/protocol/BinaryProtocolCodec.java` | `sdui.v2.protocol.BinaryFrameCodecV2` | 旧 16 字节帧头 |
+| `sdui/protocol/CapabilitySnapshotParser.java` | `sdui.v2.capability.CapabilitySchemaV2` | 能力名称快照解析 |
+| `sdui/CapabilitiesReportHandler.java` | v2 能力 Schema + `capability_hash` | 能力名称上报 |
+| `sdui/section/SectionOrchestrationService.java` | `sdui.v2.display.DisplayCommandService` | Section 场景 / Patch 编排 |
+| `sdui/section/SectionPatch.java` | `display.section` 全量替换 | 增量 Patch 下发 |
+| `sdui/section/SectionTypeCatalog.java` | 03_UI_MODEL.md §2.1 的五类 | 14 类 Section 目录 |
+| `sdui/service/AudioService.java` | `sdui.v2.audio.AudioCommandService` + 二进制帧 | Base64 内联音频 |
+| `sdui/routing/DeviceProtocolRouter.java`<br>`sdui/routing/SduiRoutingProperties.java`<br>`application.yml` 的 `sdui.routing` | 无（过渡期专用） | P5a 新增，仅为并存期存在 |
+| `sdui/resources/static/sdui-node-test.html` 等三个调试页 | v2 调试页面 | 见 11_FEATURE_MATRIX 5.18 |
+
+> 上表只列"删除类"改动。P5b 对 `NodeWorkflowRuntimeService` 的改造属于改写而非删除，单列在 [11_FEATURE_MATRIX.md](11_FEATURE_MATRIX.md) §5.2。
+
+## 8. 已知限制
+
+| # | 限制 | 原因 | 回收条件 |
+| --- | --- | --- | --- |
+| L1 | 业务配置与 token 只在内存（G17） | 平台重启后由业务层重新 `business.update` 即可恢复，首期不值得引入持久化 | 需要跨重启保证时 |
+| L2 | `platformSteps` 目前只回传给部署接口，未持久化 | P5b 才有消费方；提前落库会固化尚未定型的结构 | P5b 设计定稿（Q6） |
+| L3 | 组装产出的配置版本号不回填到部署响应 | 下发是异步的，回填会让部署接口等待设备 ACK | 需要"部署即拿到版本"的交互时 |
+| L4 | 组装阶段的参数取值域校验依赖下发校验器的干跑 | 刻意不在组装器里复制一份参数校验规则——复制会形成两处真值，改动必然漂移（见 §4.11） | 无需回收，属于刻意的职责划分 |

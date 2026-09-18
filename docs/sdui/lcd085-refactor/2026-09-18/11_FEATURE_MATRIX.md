@@ -78,16 +78,51 @@
 
 ## 5. 工作流对接与收尾（P5）
 
+P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §4.8。
+
+### 5.1 P5a 工作流产出业务配置
+
 | # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 5.1 | 工作流部署产出 `BusinessConfig` | 02§2 | 是 | P5 | TODO | - | 文档未描述平台编排形态 |
-| 5.2 | `platform.interaction` 事件驱动工作流运行 | 01§4 | 是 | P5 | TODO | - | token 反查运行上下文 |
-| 5.3 | 交互结果作为工作流新输入 | 01§4 | 是 | P5 | TODO | - | - |
-| 5.4 | 删除旧 `cmd/control` 与 ACK 路径 | 02§4、04§5 | 否 | P5 | TODO | - | 见方案 §10 |
-| 5.5 | 删除 TLV 输入路径 | 04§1 | 否 | P5 | TODO | - | - |
-| 5.6 | 删除 Section Patch 与多 Section 拼接 | 03§2 | 否 | P5 | TODO | - | - |
-| 5.7 | 删除 Base64 音频路径 | 04§1 | 否 | P5 | TODO | - | - |
-| 5.8 | 前端调试页面对齐 v2 | - | 是 | P5 | TODO | - | 静态页需同步 |
+| 5.1 | 工作流部署产出 `BusinessConfig` | 02§2 | 是 | P5a | DONE | - | `WorkflowBusinessConfigAssembler` |
+| 5.1.1 | 输出节点 → 终端动作映射与下沉判定 | - | 是 | P5a | DONE | 需确认动作名（T13） | `WorkflowActionMapper`，见 S8 |
+| 5.1.2 | 静态前缀截断 / 跨 slot 不截断规则 | - | 是 | P5a | DONE | - | 见 S9 |
+| 5.1.3 | 序列尾部追加 `platform.interaction.report` | 01§4 | 是 | P5a | DONE | token 名称待确认 | token 由 `prepare` 注入 |
+| 5.1.4 | 响应动作全静态约束（禁 `$ref` / 平台产物） | 01§2 | 是 | P5a | DONE | - | 业务动态改由 token 区分 |
+| 5.1.5 | 组装结束跑下发校验干跑，消除静默失败 | 01§6.2 | 是 | P5a | DONE | - | 见 12_DESIGN_NOTES §4.11 |
+| 5.2 | 部署时下发配置、停止时 `business.reset` | 01§6 | 是 | P5a | DONE | - | `NodeWorkflowDeploymentService` |
+| 5.3 | 设备级新旧协议分流开关（关闭 Q3） | - | 是 | P5a | DONE | - | `DeviceProtocolRouter` + `sdui.routing` |
+| 5.4 | 组装问题分级（ERROR 阻断 / WARN 提示） | - | 是 | P5a | DONE | - | 部署前预检，不部分应用 |
+
+### 5.2 P5b 交互事件回流（未开始）
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5.5 | `platform.interaction` 事件驱动工作流运行 | 01§4 | 是 | P5b | TODO | - | token 反查运行上下文 |
+| 5.6 | 消费组装结果中的 `platformSteps` 并执行 | - | 是 | P5b | TODO | - | 组装器已产出该清单 |
+| 5.7 | 平台步骤执行后以新 token 驱动终端 | 01§3 | 是 | P5b | TODO | - | 同一动作不同 token |
+| 5.8 | 交互结果作为工作流新输入写入 run context | 01§4 | 是 | P5b | TODO | - | - |
+| 5.9 | 旧工作流运行时的设备命令直发路径下线 | 02§4 | 否 | P5b | TODO | - | `NodeWorkflowRuntimeService` 改由配置驱动 |
+
+### 5.3 P5c 旧协议路径剪除（DEFERRED）
+
+准入条件：**终端固件全量切换到 v2**，且 `sdui.routing` 中不再有 `legacy` 设备。
+以下各项当前已标注 `@Deprecated(since = "0.10.0")` 并保留可用，清单见
+[12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7。
+
+| # | 功能项 | 来源 | 自实现 | 阶段 | 状态 | 终端依赖 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5.10 | 删除旧 `cmd/control` 与 ACK 路径 | 02§4、04§5 | 否 | P5c | DEFERRED | 终端切换完成 | 见方案 §10，已 deprecated |
+| 5.11 | 删除 TLV 输入路径 | 04§1 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.12 | 删除 Section Patch 与多 Section 拼接 | 03§2 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.13 | 删除 Base64 音频路径 | 04§1 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.14 | 删除旧 16 字节二进制帧头 | 04§8 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.15 | Section 14 类目录收敛为 5 类 | 03§2.1 | 否 | P5c | DEFERRED | 需 T6 定稿 | 与 4.2 合并 |
+| 5.16 | 删除能力名称上报路径 | 04§4 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
+| 5.17 | 删除 `DeviceProtocolRouter` 与 `sdui.routing` | - | 是 | P5c | DEFERRED | 终端切换完成 | 过渡期专用组件 |
+| 5.18 | 前端调试页面对齐 v2 | - | 是 | P5c | TODO | - | `static/sdui-*.html` 三个页面 |
+
+> 5.18 不依赖终端切换，可随时提前做；当前排在 P5c 只是因为与调试链路一起验证成本更低。
 
 ## 6. 自实现补充功能汇总
 
@@ -123,6 +158,8 @@
 | S5 | 调色板随会话开始放入 JSON body | 03§3/§4 只要求"完整提供调色板"，未定义承载通道；首期色数上限下体积可忽略 |
 | S6 | 连接 attach 的幂等保护 | 避免重复建立连接对象或误自增代次，导致代次校验失效 |
 | S7 | 出站"在途消息"上限而非排队 | 旧实现无上限；文档只要求"队列有固定上限"，这里选择同步有界发送而非内存排队 |
+| S8 | 工作流节点 → 终端动作的显式映射表 | 两套命名空间不同（`rgb.effect` vs `rgb.effect.set`），文档未定义换算关系；且必须能逐条回答"为什么不下沉" |
+| S9 | 静态前缀截断与跨 slot 不截断 | 01§2 只要求序列"有限、有序、不可编程"，未定义当链条中间出现平台步骤或跨设备步骤时序列到哪里为止 |
 
 ## 7. 首版交付的代码资产
 
@@ -151,6 +188,15 @@
 | `v2/transport/sink` | `PlatformInteractionEventSink` / `AudioLifecycleEventSink` / `AudioUplinkBinarySink` / `CanvasFrameBinarySink` / `ImageChunkBinarySink` / `CapabilitySchemaBinarySink` | 上行事件与二进制接收器 |
 | `v2` | `V2ProtocolProperties` / `V2Config` / `OperationResult` | 可配置上限与装配 |
 
+P5a 追加的实现文件（工作流侧与过渡期组件）：
+
+| 包 | 类型 | 职责 |
+| --- | --- | --- |
+| `sdui/workflow` | `WorkflowActionMapper` | 输出节点 → 终端静态动作的映射与下沉判定 |
+| `sdui/workflow` | `WorkflowBusinessConfigAssembler` | 按设备组装 `BusinessConfig`，产出 `platformSteps` 与分级 `Issue` |
+| `sdui/workflow` | `NodeWorkflowDeploymentService`（改造） | 部署前组装预检、部署时下发、停止时 reset |
+| `sdui/routing` | `DeviceProtocolRouter` / `SduiRoutingProperties` | 设备级新旧协议分流（P5c 删除） |
+
 测试资产（`src/test/java/com/zwbd/agentnexus/sdui/v2/`）：
 
 | 类型 | 说明 |
@@ -158,7 +204,15 @@
 | `sim/SimulatedLcd085Device` | LCD_085 模拟终端测试桩：典型能力 Schema、握手、上下行报文构造与解析 |
 | 单元测试 14 个类 / 134 个用例 | 覆盖信封判定、帧编解码、hash 性质、配置校验、token 隔离、接管代次、请求超时、主视图互斥、位打包、音频互斥、路由分发、初始化编排 |
 
-验证命令与结果：`mvn test` → 259 项通过（含既有 125 项，无回归）。
+P5a 追加的测试资产：
+
+| 类型 | 说明 |
+| --- | --- |
+| `sdui/workflow/WorkflowActionMapperTest` | 17 项：各节点类型的下沉与拒绝理由，含 `$ref`、平台产物、能力门禁等反面用例 |
+| `sdui/workflow/WorkflowBusinessConfigAssemblerTest` | 13 项：静态前缀截断、跨 slot 不截断、上报动作追加、下发校验干跑、各类 ERROR/WARN 路径 |
+| `sdui/routing/DeviceProtocolRouterTest` | 6 项：分流优先级与边界 |
+
+验证命令与结果：`mvn test` → 295 项通过（P1–P4 基线 259 项 + P5a 新增 36 项，无回归）。
 
 ## 8. 待终端确认项汇总
 
@@ -176,3 +230,5 @@
 | T10 | 系统命令参数与错误语义 | 4.12 |
 | T11 | 上行音频流的开始宣告方式（平台侧暂约定为 `audio.start` 事件） | 4.9、4.11 |
 | T12 | 调色板与索引矩阵的承载通道及位序（平台侧暂假设随 begin 的 JSON 下发、字节内低位在前） | 4.3、4.5 |
+| T13 | 本地响应动作的名称与参数集合（决定工作流节点映射表能否定稿） | 5.1.1 |
+| T14 | 终端上报交互结果时携带的 token 字段名与位置 | 5.1.3、5.5 |
