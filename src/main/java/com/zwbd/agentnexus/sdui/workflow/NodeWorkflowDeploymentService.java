@@ -3,7 +3,6 @@ package com.zwbd.agentnexus.sdui.workflow;
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalog;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
-import com.zwbd.agentnexus.sdui.routing.DeviceProtocolRouter;
 import com.zwbd.agentnexus.sdui.ui.WorkflowUiContextService;
 import com.zwbd.agentnexus.sdui.v2.business.BusinessConfigService;
 import com.zwbd.agentnexus.sdui.v2.capability.CapabilityRegistryV2;
@@ -32,7 +31,6 @@ public class NodeWorkflowDeploymentService {
     private final WorkflowUiContextService uiContextService;
     private final WorkflowBusinessConfigAssembler configAssembler;
     private final CapabilityRegistryV2 capabilityRegistry;
-    private final DeviceProtocolRouter protocolRouter;
     private final BusinessConfigService businessConfigService;
 
     public NodeWorkflowDeploymentService(NodeWorkflowService workflowService,
@@ -42,7 +40,6 @@ public class NodeWorkflowDeploymentService {
                                          WorkflowUiContextService uiContextService,
                                          WorkflowBusinessConfigAssembler configAssembler,
                                          CapabilityRegistryV2 capabilityRegistry,
-                                         DeviceProtocolRouter protocolRouter,
                                          BusinessConfigService businessConfigService) {
         this.workflowService = workflowService;
         this.deploymentRepository = deploymentRepository;
@@ -51,7 +48,6 @@ public class NodeWorkflowDeploymentService {
         this.uiContextService = uiContextService;
         this.configAssembler = configAssembler;
         this.capabilityRegistry = capabilityRegistry;
-        this.protocolRouter = protocolRouter;
         this.businessConfigService = businessConfigService;
     }
 
@@ -129,27 +125,22 @@ public class NodeWorkflowDeploymentService {
     // ── 业务配置：组装与下发（P5a） ──────────────────────────────────────────
 
     /**
-     * 按分流配置为参与本次部署的每台设备组装业务配置。
+     * 为参与本次部署的每台设备组装业务配置。
      *
-     * <p>只对走 v2 协议的设备组装。旧协议设备仍由旧工作流运行时逐条下发命令，
-     * 暂不生成 {@code BusinessConfig}（见 {@code DeviceProtocolRouter}）。</p>
+     * <p>v2 是唯一协议，所有设备都组装。能力 Schema 尚未同步的设备不在这里过滤，
+     * 而是由组装器记 WARN、由组装结果决定是否阻断。</p>
      */
     private AssembleResult assemble(NodeWorkflowDefinition workflow, Map<String, String> bindings) {
         List<WorkflowBusinessConfigAssembler.Assembled> configs = new ArrayList<>();
-        List<String> legacyDevices = new ArrayList<>();
         for (String deviceId : WorkflowBusinessConfigAssembler.devicesOf(bindings)) {
-            if (!protocolRouter.isV2(deviceId)) {
-                legacyDevices.add(deviceId);
-                continue;
-            }
             CapabilitySchemaV2 schema = capabilityRegistry.schemaFor(deviceId).orElse(null);
             configs.add(configAssembler.assemble(workflow, bindings, deviceId, schema));
         }
-        return new AssembleResult(configs, legacyDevices);
+        return new AssembleResult(configs);
     }
 
     /**
-     * 对 v2 设备下发全量业务配置。
+     * 对每台参与设备下发全量业务配置。
      *
      * <p>下发是异步的，这里只发起请求并记录结果，不阻塞部署接口。配置版本号由
      * {@code BusinessConfigService} 在准备阶段自增，因此响应里不回填具体版本。</p>
@@ -169,17 +160,8 @@ public class NodeWorkflowDeploymentService {
                                 outcome.ok(), outcome.error());
                     });
             Map<String, Object> entry = new LinkedHashMap<>(assembled.toMap());
-            entry.put("protocol", "v2");
             entry.put("dispatch", "requested");
             byDevice.put(assembled.deviceId(), entry);
-        }
-        for (String deviceId : assembleResult.legacyDevices()) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("deviceId", deviceId);
-            entry.put("protocol", "legacy");
-            entry.put("dispatch", "skipped");
-            entry.put("reason", "设备按 sdui.routing 仍使用旧协议，未下发 v2 业务配置");
-            byDevice.put(deviceId, entry);
         }
         return byDevice;
     }
@@ -194,14 +176,6 @@ public class NodeWorkflowDeploymentService {
         Map<String, Object> byDevice = new LinkedHashMap<>();
         for (String deviceId : WorkflowBusinessConfigAssembler.devicesOf(
                 NodeWorkflowSupport.stringMap(deployment.getSlotBindings()))) {
-            if (!protocolRouter.isV2(deviceId)) {
-                Map<String, Object> skipped = new LinkedHashMap<>();
-                skipped.put("deviceId", deviceId);
-                skipped.put("protocol", "legacy");
-                skipped.put("dispatch", "skipped");
-                byDevice.put(deviceId, skipped);
-                continue;
-            }
             businessConfigService.reset(deviceId).whenComplete((outcome, error) -> {
                 if (error != null) {
                     log.warn("业务清理异常: device={}, error={}", deviceId, error.getMessage());
@@ -211,7 +185,6 @@ public class NodeWorkflowDeploymentService {
             });
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("deviceId", deviceId);
-            entry.put("protocol", "v2");
             entry.put("dispatch", "reset-requested");
             byDevice.put(deviceId, entry);
         }
@@ -221,11 +194,9 @@ public class NodeWorkflowDeploymentService {
     /**
      * 一次部署涉及的组装结果。
      *
-     * @param configs       v2 设备的组装结果
-     * @param legacyDevices 按分流仍走旧协议、未组装配置的设备
+     * @param configs 每台参与设备的组装结果
      */
-    private record AssembleResult(List<WorkflowBusinessConfigAssembler.Assembled> configs,
-                                  List<String> legacyDevices) {
+    private record AssembleResult(List<WorkflowBusinessConfigAssembler.Assembled> configs) {
 
         boolean hasErrors() {
             return configs.stream().anyMatch(WorkflowBusinessConfigAssembler.Assembled::hasErrors);
@@ -243,10 +214,9 @@ public class NodeWorkflowDeploymentService {
 
         Map<String, Object> toMap() {
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("v2Devices", configs.stream()
+            data.put("devices", configs.stream()
                     .map(WorkflowBusinessConfigAssembler.Assembled::toMap)
                     .toList());
-            data.put("legacyDevices", legacyDevices);
             return data;
         }
     }
@@ -317,7 +287,7 @@ public class NodeWorkflowDeploymentService {
         // 仅在绑定本身合法时预览业务配置，避免在无效输入上叠加二次报错。
         AssembleResult assembleResult = errors.isEmpty()
                 ? assemble(workflow, bindings)
-                : new AssembleResult(List.of(), List.of());
+                : new AssembleResult(List.of());
         errors.addAll(assembleResult.errorMessages());
         List<Map<String, Object>> warnings = new ArrayList<>();
         List<Map<String, Object>> conflicts = conflictingActiveDeployments(workflow, bindings, excludeDeploymentId);

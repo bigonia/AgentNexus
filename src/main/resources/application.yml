@@ -179,10 +179,3 @@ sdui:
     audio-receive-timeout-ms: 15000
     audio-timeout-scan-ms: 2000
     canvas-pending-frame-depth: 1
-  # 新旧协议并存期的设备分流（12_DESIGN_NOTES.md 未决问题 Q3 的落地）。
-  # 判定优先级：legacy-devices > v2-devices > default-protocol。
-  # 过渡期专用：旧协议路径删除时，本配置段与 DeviceProtocolRouter 一并删除。
-  routing:
-    default-protocol: legacy
-    v2-devices: []
-    legacy-devices: []

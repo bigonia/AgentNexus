@@ -264,21 +264,23 @@ BusinessConfig {
 | P2 | 能力域 | `CapabilitySchemaV2`、hash 缓存与协商、配置校验器 | P1 | 完成 |
 | P3 | 业务配置域 | 绑定表模型、token 服务、reset/update/trigger | P2 | 完成 |
 | P4 | 业务面迁移 | display.*（Section/图片/Canvas）、audio.*、system.* | P3 | 完成 |
-| P5a | 工作流产出业务配置 | 节点→动作映射与下沉判定、按设备组装 `BusinessConfig`、部署下发、设备级分流开关 | P4 | 完成 |
+| P5a | 工作流产出业务配置 | 节点→动作映射与下沉判定、按设备组装 `BusinessConfig`、部署下发 | P4 | 完成 |
 | P5b | 交互事件回流 | `platform.interaction` 驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端 | P5a | 未开始 |
-| P5c | 旧协议路径剪除 | 删除 §10 清单、删除过渡期分流开关、平台侧只剩一套协议 | P5b + 终端全量切换 | 未开始 |
+| P5c | 旧协议路径剪除 | 删除 §10 清单，平台侧只剩一套协议 | P5b + 终端全量切换 | 未开始 |
 
 **P5 为何拆成三阶段**：原计划把"工作流对接"与"旧路径删除"放在同一步。但旧路径删除的准入条件不是代码就绪，而是**终端固件全量切到 v2**——在那之前删除会让在线设备立刻失联。同时工作流侧本身包含"产出配置"与"消费事件"两个方向，可独立验收。因此按"产出 → 回流 → 剪除"三道闸门拆分，详见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §4.8。
 
-阶段准入原则：每阶段必须可编译、有针对性测试、并且不破坏上一阶段已验收行为。终端未就绪期间，`sdui/v2` 通过内置的**模拟终端**（测试用 stub）验证，不依赖真实设备。当前验证基线：`mvn test` 295 项通过。
+**0.12.0：不做灰度，v2 是唯一协议。** 原 P5a 里的设备级分流开关（`DeviceProtocolRouter` + `sdui.routing`）已删除。本项目不做"新旧协议并存期按设备分流"的渐进切换，所有设备的业务配置一律按 v2 组装下发。代价是旧路径删除不再有"把某台设备按回旧协议"的回退手段，见 12_DESIGN_NOTES.md §4.12。
+
+阶段准入原则：每阶段必须可编译、有针对性测试、并且不破坏上一阶段已验收行为。终端未就绪期间，`sdui/v2` 通过内置的**模拟终端**（测试用 stub）验证，不依赖真实设备。当前验证基线：`mvn test` 289 项通过。
 
 各阶段的具体功能项与逐条状态见 [功能清单与实现台账](11_FEATURE_MATRIX.md)。
 
 ## 10. 旧路径剪除清单（P5c 执行）
 
-**准入条件**：终端固件全量切换到 v2，且 `sdui.routing` 中不再存在 `legacy` 设备。在那之前删除任何一项都会让在线设备失联。
+**准入条件**：终端固件全量切换到 v2。分流开关已在 0.12.0 删除，因此**没有按设备回退的手段**——旧路径删除只能一次性完成，且必须在终端切换之后。在那之前删除任何一项都会让在线设备失联。
 
-**当前状态（P5a 结束时）**：清单内各类已统一加上 `@Deprecated(since = "0.10.0")` 与替代项说明，代码保持可用。逐文件清单与回滚方式见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7「待清除模块清单」。
+**当前状态**：清单内各类已统一加上 `@Deprecated(since = "0.10.0")` 与替代项说明，代码保持可用。逐文件清单与回滚方式见 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7「待清除模块清单」。
 
 | 旧入口 | 位置 | 处置 |
 | --- | --- | --- |
@@ -289,10 +291,12 @@ BusinessConfig {
 | Base64 音频 | `AudioService` 相关分支 | 删除 |
 | Section 14 类 | `sdui-event-catalog.yml`、`SectionTypeCatalog` | 收敛为 5 类 |
 | 能力名称上报 | `CapabilitiesReportHandler`、`CapabilitySnapshotParser` | 由 Schema + hash 替代 |
-| 过渡期设备分流 | `DeviceProtocolRouter`、`SduiRoutingProperties`、`sdui.routing` 配置段 | 删除（P5a 新增，仅为并存期存在） |
+| 旧 WS 端点 `/ws/sdui`、`/` | `WebSocketConfig`、`SduiWebSocketHandler`、`MessageRouter` | 删除，只留 `/ws/sdui/v2` |
+
+**规模（0.12.0 实测）**：以旧协议为根做传递闭包，`sdui` 非 v2 主代码 165 个文件中约 79 个（48%）在旧协议下游，另有约 23 个测试文件。这不是"删几个文件"，而是要把平台侧运行时的执行路径整体换到 v2——即 P5b 的产出物。
 
 ## 11. 待确认
 
 - 握手字段 `protocol_version` / `capability_hash` 的承载位置（连接参数或首条消息）；
 - 业务配置的准确 JSON 结构、上限值与错误码集合；
-- 终端尚未实现能力时的降级与灰度策略。
+- 终端尚未实现能力的降级策略（分流开关已删除，不再保留"按设备走旧协议"这一降级路径）。

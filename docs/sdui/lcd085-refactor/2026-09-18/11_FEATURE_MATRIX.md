@@ -91,7 +91,7 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 | 5.1.4 | 响应动作全静态约束（禁 `$ref` / 平台产物） | 01§2 | 是 | P5a | DONE | - | 业务动态改由 token 区分 |
 | 5.1.5 | 组装结束跑下发校验干跑，消除静默失败 | 01§6.2 | 是 | P5a | DONE | - | 见 12_DESIGN_NOTES §4.11 |
 | 5.2 | 部署时下发配置、停止时 `business.reset` | 01§6 | 是 | P5a | DONE | - | `NodeWorkflowDeploymentService` |
-| 5.3 | 设备级新旧协议分流开关（关闭 Q3） | - | 是 | P5a | DONE | - | `DeviceProtocolRouter` + `sdui.routing` |
+| 5.3 | ~~设备级新旧协议分流开关~~ | - | 是 | P5a | **已移除** | - | 0.12.0 删除：不做灰度，v2 为唯一协议 |
 | 5.4 | 组装问题分级（ERROR 阻断 / WARN 提示） | - | 是 | P5a | DONE | - | 部署前预检，不部分应用 |
 
 ### 5.2 P5b 交互事件回流（未开始）
@@ -104,9 +104,10 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 | 5.8 | 交互结果作为工作流新输入写入 run context | 01§4 | 是 | P5b | TODO | - | - |
 | 5.9 | 旧工作流运行时的设备命令直发路径下线 | 02§4 | 否 | P5b | TODO | - | `NodeWorkflowRuntimeService` 改由配置驱动 |
 
-### 5.3 P5c 旧协议路径剪除（DEFERRED）
+### 5.3 P5c 旧协议路径剪除（已开工）
 
-准入条件：**终端固件全量切换到 v2**，且 `sdui.routing` 中不再有 `legacy` 设备。
+准入条件：**终端固件全量切换到 v2**。分流开关已在 0.12.0 删除——本项目不做灰度，
+v2 是唯一协议，因此旧路径的删除不再有"把设备按回旧协议"的回退手段，只能等终端切换完成。
 以下各项当前已标注 `@Deprecated(since = "0.10.0")` 并保留可用，清单见
 [12_DESIGN_NOTES.md](12_DESIGN_NOTES.md) §7。
 
@@ -119,7 +120,7 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 | 5.14 | 删除旧 16 字节二进制帧头 | 04§8 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
 | 5.15 | Section 14 类目录收敛为 5 类 | 03§2.1 | 否 | P5c | DEFERRED | 需 T6 定稿 | 与 4.2 合并 |
 | 5.16 | 删除能力名称上报路径 | 04§4 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
-| 5.17 | 删除 `DeviceProtocolRouter` 与 `sdui.routing` | - | 是 | P5c | DEFERRED | 终端切换完成 | 过渡期专用组件 |
+| 5.17 | 删除 `DeviceProtocolRouter` 与 `sdui.routing` | - | 是 | P5a | **DONE** | - | 0.12.0 已删除 |
 | 5.18 | 前端调试页面对齐 v2 | - | 是 | P5c | TODO | - | `static/sdui-*.html` 三个页面 |
 
 > 5.18 不依赖终端切换，可随时提前做；当前排在 P5c 只是因为与调试链路一起验证成本更低。
@@ -188,14 +189,13 @@ P5 按三道闸门拆成三个子阶段，拆分理由见 [12_DESIGN_NOTES.md](1
 | `v2/transport/sink` | `PlatformInteractionEventSink` / `AudioLifecycleEventSink` / `AudioUplinkBinarySink` / `CanvasFrameBinarySink` / `ImageChunkBinarySink` / `CapabilitySchemaBinarySink` | 上行事件与二进制接收器 |
 | `v2` | `V2ProtocolProperties` / `V2Config` / `OperationResult` | 可配置上限与装配 |
 
-P5a 追加的实现文件（工作流侧与过渡期组件）：
+P5a 追加的实现文件（工作流侧）：
 
 | 包 | 类型 | 职责 |
 | --- | --- | --- |
 | `sdui/workflow` | `WorkflowActionMapper` | 输出节点 → 终端静态动作的映射与下沉判定 |
 | `sdui/workflow` | `WorkflowBusinessConfigAssembler` | 按设备组装 `BusinessConfig`，产出 `platformSteps` 与分级 `Issue` |
 | `sdui/workflow` | `NodeWorkflowDeploymentService`（改造） | 部署前组装预检、部署时下发、停止时 reset |
-| `sdui/routing` | `DeviceProtocolRouter` / `SduiRoutingProperties` | 设备级新旧协议分流（P5c 删除） |
 
 测试资产（`src/test/java/com/zwbd/agentnexus/sdui/v2/`）：
 
@@ -210,9 +210,8 @@ P5a 追加的测试资产：
 | --- | --- |
 | `sdui/workflow/WorkflowActionMapperTest` | 17 项：各节点类型的下沉与拒绝理由，含 `$ref`、平台产物、能力门禁等反面用例 |
 | `sdui/workflow/WorkflowBusinessConfigAssemblerTest` | 13 项：静态前缀截断、跨 slot 不截断、上报动作追加、下发校验干跑、各类 ERROR/WARN 路径 |
-| `sdui/routing/DeviceProtocolRouterTest` | 6 项：分流优先级与边界 |
 
-验证命令与结果：`mvn test` → 295 项通过（P1–P4 基线 259 项 + P5a 新增 36 项，无回归）。
+验证命令与结果：`mvn test` → 289 项通过（0.11.0 为 295 项，0.12.0 随分流开关移除 6 项，无回归）。
 
 ## 8. 待终端确认项汇总
 

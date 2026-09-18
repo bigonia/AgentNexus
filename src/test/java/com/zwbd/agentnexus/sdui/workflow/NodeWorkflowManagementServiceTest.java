@@ -2,7 +2,6 @@ package com.zwbd.agentnexus.sdui.workflow;
 
 import com.zwbd.agentnexus.sdui.DeviceSessionManager;
 import com.zwbd.agentnexus.sdui.capability.node.CapabilityNodeCatalogService;
-import com.zwbd.agentnexus.sdui.routing.DeviceProtocolRouter;
 import com.zwbd.agentnexus.sdui.v2.business.BusinessConfigService;
 import com.zwbd.agentnexus.sdui.v2.capability.CapabilityRegistryV2;
 import com.zwbd.agentnexus.sdui.workflow.entity.NodeWorkflowDefinitionEntity;
@@ -53,7 +52,6 @@ class NodeWorkflowManagementServiceTest {
                 mock(WorkflowUiContextService.class),
                 mock(WorkflowBusinessConfigAssembler.class),
                 mock(CapabilityRegistryV2.class),
-                mock(DeviceProtocolRouter.class),
                 mock(BusinessConfigService.class)
         );
         service = new NodeWorkflowManagementService(

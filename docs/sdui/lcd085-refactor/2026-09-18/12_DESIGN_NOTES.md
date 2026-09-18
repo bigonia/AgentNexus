@@ -150,7 +150,7 @@ rm -rf target/maven-status
 
 绑在一起的结果只有两种："要么永远不删所以 P5 永远不完成"，或者"删了但线上设备失联"。同时工作流侧自身含"产出配置"与"消费事件"两个可以独立验收的方向。
 
-**平台侧处理**：拆成 P5a（产出配置 + 分流开关）、P5b（交互事件回流）、P5c（旧路径剪除）。P5c 的准入条件写进 [11_FEATURE_MATRIX.md](11_FEATURE_MATRIX.md) §5.3；在那之前旧路径一律只标 `@Deprecated` 不删除，见本文 §7。
+**平台侧处理**：拆成 P5a（产出配置）、P5b（交互事件回流）、P5c（旧路径剪除）。P5c 的准入条件写进 [11_FEATURE_MATRIX.md](11_FEATURE_MATRIX.md) §5.3；在那之前旧路径一律只标 `@Deprecated` 不删除，见本文 §7。（P5a 曾包含一个设备级分流开关，已在 0.12.0 按 §4.12 撤销。）
 
 ### 4.9 响应序列全静态，业务动态由 token 承载（2026-09-18）
 
@@ -184,13 +184,38 @@ P5a 首版把"组装"和"校验"分在了两处：组装器只判断节点能否
 
 **平台侧处理**：组装结束时用 `BusinessConfigService.validate` 对草稿配置做一次干跑，把校验错误转成部署 ERROR。选择干跑而不是把校验规则复制一份到组装器：复制会形成两处真值，将来规则改动必然漂移。干跑本身无持久副作用（§4.6 已修复 token 泄漏）。已补测试 `downstreamValidationFailureBecomesAssemblyError` 固定该不变量。
 
+### 4.12 撤销设备级分流：不做灰度，v2 是唯一协议（2026-09-18）
+
+P5a 引入了 `DeviceProtocolRouter` + `sdui.routing`（优先级 黑名单 > 白名单 > 缺省协议），目的是支持"新旧协议并存期按设备分流"。需求方明确否决：这是个人项目，不需要渐进切换，全量切到 v2 即可，不必为此背复杂度。
+
+**裁决**：删除分流开关及其配置段。`NodeWorkflowDeploymentService` 对部署涉及的每台设备一律组装并下发 `BusinessConfig`；原先"旧协议设备跳过并记 `legacyDevices`"的分支消失。`AssembleResult` 从 `(configs, legacyDevices)` 收敛为 `(configs)`，部署结果里的 `protocol` 字段一并去掉——只剩一套协议时该字段没有信息量。
+
+**代价（必须记下来）**：分流开关同时是旧路径的**回退手段**——某台设备切到 v2 后出问题，把它加进 `legacy-devices` 就能立刻按回旧协议排查。删除之后这个手段没有了：P5c 的旧路径删除只能一次性完成，且不能再按设备回退。这是主动接受的取舍，不是遗漏。相应地，P5c 的准入条件从"终端切换完成且不再有 legacy 设备"收紧为"终端切换完成"。
+
+**顺带核查**：以旧协议为根做传递闭包，`sdui` 非 v2 的 165 个主代码文件中约 79 个（48%）仍在旧协议下游，另有约 23 个测试文件。旧协议栈是通过 `List<TopicHandler>` / `List<BinaryFrameHandler>` 由 Spring 收集装配的，**没有可以顺手删掉的孤立死枝**——它整块都是活的，只能等 P5b 把运行时换到 v2 之后再整块移除。
+
+### 4.13 清理其他模块的死代码（2026-09-18）
+
+按要求"其他模块也检查一下"，对非 `sdui` 包做了引用图扫描。以下三类完全无引用且配置已失效，属确定死代码，已删除：
+
+| 文件 | 判定依据 |
+| --- | --- |
+| `ai/config/DynamicAiProviderRegistrar.java` | `@Deprecated` 且 `@Configuration` 已被注释掉，非 Spring bean；全仓零引用 |
+| `ai/config/DynamicAiProvidersProperties.java` | 仅被上述 Registrar 引用，随其一起失效；任何 yml 中都无 `spring.ai.dynamic-providers` 配置 |
+| `ai/enums/ServiceType.java` | `@Deprecated`，全仓零引用（枚举值 `DATABASE_METADATA` 亦无使用） |
+
+其余扫描命中项**未改动**，理由记录如下，供后续判断：
+
+- `common/web/GlobalContextInterceptor` 的 `X-Space-Id` 兜底与 `common/config/SwaggerConfig` 的对应说明——这是与旧前端约定的身份传递兼容层，涉及鉴权语义，与本次协议重构无关，贸然移除可能影响登录链路。
+- `sdui/event/EventPayload`、`EventRegistry`、`service/audio/AudioRecordHandler` 内的 `backward compat` 分支——它们服务的是**同一协议内**的旧报文形态，属 P5c 剪除范围，已登记在 §7，本阶段不动。
+
 ## 5. 未决问题
 
 | # | 问题 | 影响 | 状态 |
 | --- | --- | --- | --- |
 | Q1 | 终端侧确认 G2 / G10 / G13 / G20 四项高风险的临时假设 | 协议能否真正对接 | 待终端协议实现完成 |
 | Q2 | 平台侧业务配置与 token 需要持久化到什么程度 | 平台重启后的恢复能力 | 待定；首期内存实现（G17），可由业务层重新 update 恢复 |
-| Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | **已解决（P5a）**：`DeviceProtocolRouter` + `sdui.routing`，优先级 黑名单 > 白名单 > 缺省协议 |
+| Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | **已关闭（0.12.0）**：不做灰度。分流开关已删除，v2 是唯一协议，见 §4.12 |
 | Q4 | Node Workflow 产出配置的粒度（整份配置 / 片段合并） | 工作流编排模型 | **已解决（P5a）**：以 deployment 为粒度；节点产出片段，部署时按设备合并为全量配置 |
 | Q5 | 是否需要一个统一的设备侧操作审计视图 | 可观测性 | 待定 |
 | Q6 | 组装产出的 `platformSteps` 由谁持有（内存 / 随部署落库） | P5b 的交互回流能否跨平台重启 | P5b 设计时 |
@@ -209,8 +234,10 @@ P5a 首版把"组装"和"校验"分在了两处：组装器只判断节点能否
 | 2026-09-18 | 交付 P5a 工作流产出配置 | `WorkflowActionMapper` 节点下沉判定、`WorkflowBusinessConfigAssembler` 按设备组装、部署下发与停止清理、`DeviceProtocolRouter` 设备分流开关；旧协议路径统一标注 `@Deprecated` |
 | 2026-09-18 | 修复组装与下发之间的静默失败窗口 | 组装结束增加下发校验干跑（§4.11），部署成功即等价于配置可被终端接受 |
 | 2026-09-18 | 验证 | `mvn test` 295 项通过（新增 36 项 P5a 用例，无回归） |
+| 2026-09-18 | 撤销设备级分流开关（0.12.0） | 删除 `DeviceProtocolRouter` / `SduiRoutingProperties` / `sdui.routing`，v2 成为唯一协议（§4.12）；顺带清理 `ai` 模块三处死代码（§4.13） |
+| 2026-09-18 | 验证 | `mvn test` 289 项通过（随分流开关移除 6 项，无回归） |
 
-后续进入 P5b：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。
+后续进入 P5b：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。P5b 完成后才具备"把运行时换到 v2、整块移除旧协议栈"的条件。
 
 ## 7. 待清除模块清单（P5c 用）
 
@@ -218,7 +245,11 @@ P5a 阶段把所有将被删除的旧协议路径统一标注为 `@Deprecated(si
 
 - 现在删除会破坏在线设备，所以不删；
 - 将来删除时不需要重新梳理"哪些能动"，照本表执行即可；
-- 若需回滚到旧协议，只需撤销 `@Deprecated` 标注，代码始终可用。
+- 代码层面若需回滚，撤销 `@Deprecated` 标注即可，代码始终可用。
+
+⚠️ **0.12.0 已删除设备级分流开关**（§4.12），因此**回滚不再能按设备进行**：撤销标注会让旧协议对所有设备同时恢复，无法只让某台设备回退排查。执行本表时请一次性完成，并确认终端已全量切换。
+
+**规模提示**：本表列的是入口文件，实际下游还有约 70 个 `sdui` 非 v2 主代码文件（旧协议簇传递闭包共约 79 个）与约 23 个测试文件。逐文件引用关系见 §4.12 的核查结论。
 
 | 文件 | 被替代项 | 备注 |
 | --- | --- | --- |
@@ -233,7 +264,7 @@ P5a 阶段把所有将被删除的旧协议路径统一标注为 `@Deprecated(si
 | `sdui/section/SectionPatch.java` | `display.section` 全量替换 | 增量 Patch 下发 |
 | `sdui/section/SectionTypeCatalog.java` | 03_UI_MODEL.md §2.1 的五类 | 14 类 Section 目录 |
 | `sdui/service/AudioService.java` | `sdui.v2.audio.AudioCommandService` + 二进制帧 | Base64 内联音频 |
-| `sdui/routing/DeviceProtocolRouter.java`<br>`sdui/routing/SduiRoutingProperties.java`<br>`application.yml` 的 `sdui.routing` | 无（过渡期专用） | P5a 新增，仅为并存期存在 |
+| `sdui/WebSocketConfig.java` 的 `/ws/sdui`、`/` 端点 | `/ws/sdui/v2` | 旧端点注册，连同 `SduiWebSocketHandler` / `MessageRouter` 一起移除 |
 | `sdui/resources/static/sdui-node-test.html` 等三个调试页 | v2 调试页面 | 见 11_FEATURE_MATRIX 5.18 |
 
 > 上表只列"删除类"改动。P5b 对 `NodeWorkflowRuntimeService` 的改造属于改写而非删除，单列在 [11_FEATURE_MATRIX.md](11_FEATURE_MATRIX.md) §5.2。
