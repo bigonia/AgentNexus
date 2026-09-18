@@ -15,14 +15,18 @@
 - 协议常量集中声明，不在业务代码里散落字符串字面量（参考 `sdui.v2.protocol.V2Names`、`ProtocolErrors`）。
 - 可配置上限与超时集中到 `@ConfigurationProperties`，并在 `application.yml` 写出默认值便于发现。
 - 平台侧不镜像终端微观执行状态：设备动作过程状态不进入平台持久模型，只保留业务态与连接态。
+- 终端本地响应序列的动作**必须全静态**（无 `$ref`、不依赖平台产物）。业务动态由平台为同一动作签发不同 token 表达，配置里不存在条件/分支/参数表达式。
+- 「部署成功」必须等价于「配置能被终端接受」：部署接口在落库前完成组装校验，且组装结束时跑一次下发校验器的干跑（`BusinessConfigService.validate`），不复制校验规则。
+- 待删除的旧实现统一标注 `@Deprecated(since = "0.10.0")` + 替代项注释，并在 `12_DESIGN_NOTES.md` §7「待清除模块清单」登记，便于按表删除与回滚。
 
 ## 构建
 
 - 本机 Maven 需绕过 Git Bash 的 `MAVEN_HOME` 反斜杠问题，且每次编译前删 `target/maven-status`。
   详见用户级 skill `agentnexus-build-verify`。
-- 全量测试基线：259 项通过。
+- 全量测试基线：295 项通过。
 
 ## 待办主线
 
-- LCD_085 平台侧升级 P5：工作流产出 `BusinessConfig`、`platform.interaction` 驱动工作流运行、删除旧协议路径。
-- 新协议对接前需要与终端确认的高风险项：二进制帧头布局、`capability_hash` 算法、业务配置 JSON 结构、调色板与索引矩阵位序。
+- LCD_085 平台侧升级 **P5b**：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。
+- **P5c**（准入=终端固件全量切换）：按 `12_DESIGN_NOTES.md` §7 清单删除旧协议路径与过渡期分流组件。
+- 新协议对接前需要与终端确认的高风险项：二进制帧头布局（T3）、`capability_hash` 算法（T2）、业务配置 JSON 结构（T4）、调色板与索引矩阵位序（T7/T12）、本地响应动作名与参数集合（T13）。
