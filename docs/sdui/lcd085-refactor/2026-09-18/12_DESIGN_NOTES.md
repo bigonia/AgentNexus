@@ -421,15 +421,17 @@ capabilityProjection.sections(deviceId).forEach(section -> supported.add(section
 
 ## 5. 未决问题
 
+> 终端相关的待确认项（T1–T16）不在本表逐条展开——它们已独立维护于 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md`，本表只保留与之相关的 Q 编号并指向该清单。
+
 | # | 问题 | 影响 | 状态 |
 | --- | --- | --- | --- |
-| Q1 | 终端侧确认 G2 / G10 / G13 / G20 四项高风险的临时假设 | 协议能否真正对接 | 待终端协议实现完成 |
+| Q1 | 终端侧确认 G2 / G10 / G13 / G20 四项高风险的临时假设 | 协议能否真正对接 | 待终端协议实现完成；逐项核对清单见 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md`（对应 T2 / T3 / T4 / T7 / T12） |
 | Q2 | 平台侧业务配置与 token 需要持久化到什么程度 | 平台重启后的恢复能力 | 待定；首期内存实现（G17），可由业务层重新 update 恢复 |
 | Q3 | 灰度策略：新旧协议并存期如何按设备分流 | 上线切换 | **已关闭（0.12.0）**：不做灰度。分流开关已删除，v2 是唯一协议，见 §4.12 |
 | Q4 | Node Workflow 产出配置的粒度（整份配置 / 片段合并） | 工作流编排模型 | **已解决（P5a）**：以 deployment 为粒度；节点产出片段，部署时按设备合并为全量配置 |
 | Q5 | 是否需要一个统一的设备侧操作审计视图 | 可观测性 | 待定 |
 | Q6 | 组装产出的 `platformSteps` 由谁持有（内存 / 随部署落库） | P5b 的交互回流能否跨平台重启 | **已解决（P5b）**：随部署固化进 `businessConfigs`，可跨重启，见 §4.14 |
-| Q7 | 平台能否为动态节点签发专用绑定 / 新 token | `rgb.effect` / `audio.record` 类平台步骤能否闭环 | 待终端确认（G25 / T15） |
+| Q7 | 平台能否为动态节点签发专用绑定 / 新 token | `rgb.effect` / `audio.record` 类平台步骤能否闭环 | 待终端确认（G25 / T15）。与 T13 同批确认，见 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md` |
 | Q8 | 平台步骤在连接线程上同步执行 | 一次含 TTS 与音频下行的工作流可能占用秒级消息线程时间 | 待定；移出线程需要一并传递租户上下文（`GlobalContext` 是 ThreadLocal），旧实现同样同步，无退化 |
 | Q9 | §7.2 的控制层端点哪些仍被前端使用 | P5c 能否删除对应的旧能力 / 事件模型 | **已关闭（0.14.0）**：扫描 `static/*.html` 得到前端实际调用面（§7.2）。调试域只有 `node-tests` 三个端点被调用；`static/*.html` 本身在 §7.3 待删清单里 |
 | Q10 | `/section-triggers` 的触发树数据源 | 原判"接口集里最后一处旧模式泄漏，阻塞 3 个待删类" | **已关闭（0.14.1）**：定性有误，已撤销。数据源是平台页面定义与类型目录（非旧协议），v2 Schema 的 `ui` 只有类型名名单、无法派生三级树，且 v2 已裁决门禁归 Schema 校验（§4.19）。不阻塞 P5c |
@@ -461,6 +463,7 @@ capabilityProjection.sections(deviceId).forEach(section -> supported.add(section
 | 2026-09-18 | 验证 | `mvn test` **350 项通过**（新增 `PlatformRequestDispatcher` / `DebugStreamHub` / `CapabilityQueryService` 等 29 项用例；删除重复控制器 `NodeWorkflowDebugController` 及其 2 项测试；无回归） |
 | 2026-09-20 | T17 结项：切两条边解耦 `ui` / `v2` 与旧能力·事件模型 | 保留闭包 **39 → 22**；`CapabilityQueryService` 新增 `sectionTypes(deviceId)` 读 v2 Schema 的 `surface.ui.sectionTypes`；`SectionTypeCatalog` 改由 `EventCatalogLoader` 取 YAML 类型条目（原经 `@Lazy EventRegistry`）；引用图新增"阻塞源归因"取代粗筛（§4.22 / §7.3.2）。**A 类仍 12**——出闭包 ≠ 立即可删 |
 | 2026-09-20 | 验证 | `mvn test` **356 项通过**（新增 `SectionTypeCatalogTest` 5 项、`CapabilityQueryServiceTest` 的 `sectionTypes` 1 项；无回归） |
+| 2026-09-20 | 待确认项独立成册 | T1–T16 从本文档 / `11_FEATURE_MATRIX.md §8` / `10_PLATFORM_UPGRADE.md §11` 的三份分散登记，收敛为 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md` 单一来源。新增内容：每项的平台侧**当前假设**（从代码取证，附类名）、假设不成立时的**改动代价分级**、**建议确认批次**（按耦合聚类，非按重要性）、**最小可联通集**与分阶段推进表。上述三处改为引用 |
 
 后续进入 P5b：`platform.interaction` 事件驱动工作流运行、消费组装产出的 `platformSteps`、以新 token 驱动终端。P5b 完成后才具备"把运行时换到 v2、整块移除旧协议栈"的条件。
 
@@ -655,10 +658,12 @@ ui.SduiUiTemplateService
 
 ### 7.5 删除前必须确认
 
+> 只列阻塞 P5c 的终端项；完整清单（含平台侧假设与改动代价）见 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md`。
+
 | # | 事项 | 不确认的后果 |
 | --- | --- | --- |
-| T11 | 上行音频的 v2 承载方式 | 旧链路是平台唯一的录音通路，删了就没有替代 |
-| T13 | 本地响应动作的名称与参数集合 | `WorkflowActionMapper` 的映射表无法定稿，直接影响"哪些节点该下沉" |
+| T11 | 上行音频的 v2 承载方式 | 旧链路是平台唯一的录音通路，删了就没有替代。平台侧暂按 `audio.start` 事件 + `direction` 字段接收，终端未核对 |
+| T13 | 本地响应动作的名称与参数集合 | `WorkflowActionMapper` 的映射表无法定稿，直接影响"哪些节点该下沉"。平台目前只知 `platform.interaction.report` 一个动作名 |
 | ~~—~~ | ~~§7.2 控制层端点的实际使用情况~~ | **已关闭（0.14.0）**：`scripts/sdui-front-paths.py` 给出前端实际调用面，见 §7.2。调试域只有 `node-tests` 三个端点在用 |
 | ~~Q10~~ | ~~`/section-triggers` 改由 v2 Schema 派生~~ | **已关闭（0.14.1）**：定性有误。数据源是平台页面定义与类型目录；v2 的 `UiSpec` 只有类型名名单，派生三级树不成立；v2 已裁决 Section 门禁归 Schema 校验。不阻塞 P5c（§4.19） |
 | ~~T17~~ | ~~`ui` 包如何从旧能力 / 事件模型解耦~~ | **已关闭（0.14.2）**：入口不是"三个 ui 服务"，而是**两条边**——`ui.SduiUiTemplateService → DeviceCapabilityProjection`、`section.SectionTypeCatalog → EventRegistry`。均已切断，保留闭包 39 → 22（§7.3.2）。`DevicePrimaryUiService` / `WorkflowUiContextService` 本就不涉及旧能力模型，无需改造 |
@@ -677,6 +682,6 @@ ui.SduiUiTemplateService
 | L2 | ~~`platformSteps` 未持久化~~ | **已回收（P5b）**：随部署固化进 `NodeWorkflowDeploymentEntity.businessConfigs`，可跨平台重启（§4.14） | — |
 | L3 | 组装产出的配置版本号不回填到部署响应 | 下发是异步的，回填会让部署接口等待设备 ACK | 需要"部署即拿到版本"的交互时 |
 | L4 | 组装阶段的参数取值域校验依赖下发校验器的干跑 | 刻意不在组装器里复制一份参数校验规则——复制会形成两处真值，改动必然漂移（见 §4.11） | 无需回收，属于刻意的职责划分 |
-| L5 | `rgb.effect` / `audio.record` 类平台步骤不闭环 | 能力 Schema 只声明 `usableIn=binding`，平台无请求可发，只能返回 `terminal_action_required`（G25） | 终端确认 T15 后 |
+| L5 | `rgb.effect` / `audio.record` 类平台步骤不闭环 | 能力 Schema 只声明 `usableIn=binding`，平台无请求可发，只能返回 `terminal_action_required`（G25） | 终端确认 T15 后（清单见 `docs/sdui/terminal/TERMINAL_CONFIRMATIONS.md`） |
 | L6 | 平台步骤在连接消息线程上同步执行 | TTS 合成与音频下行可能占用秒级时间；移出该线程需要一并传递租户上下文（`GlobalContext` 是 ThreadLocal） | 出现可观测的线程阻塞时（Q8） |
 | L7 | 主视图快照只在内存 | v2 无增量更新，Patch 需要快照合成；平台重启后首次 Patch 会回退为下发完整场景 | 需要跨重启保持增量能力时 |
