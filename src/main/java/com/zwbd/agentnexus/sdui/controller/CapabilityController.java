@@ -21,7 +21,7 @@ import java.util.Optional;
  * <p>动作的 {@code usableIn} 是前端必须尊重的分界线：只声明 {@code binding} 的动作平台发不出请求，
  * 只能出现在工作流的本地响应序列里。</p>
  *
- * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.2。</p>
+ * <p>管理面边界见 {@code docs/sdui/PLATFORM_REFACTOR.md} §3；端点明细以本控制器和 OpenAPI 为准。</p>
  */
 @RestController
 @RequestMapping("/api/v1/sdui/capabilities")

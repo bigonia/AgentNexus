@@ -199,12 +199,8 @@ MCP supports both STDIO and SSE transport types via `spring-ai-starter-mcp-clien
 
 The management console is a **separate project** (Vue3 + vue-flow) not in this repository. During development it typically runs on **port 8001** and proxies API requests to this backend on port 8080.
 
-Key frontend docs (for state machine editor UI and debug APIs):
-- `docs/sdui/front/STATE_MACHINE_UX_DESIGN.md` — node-edge state machine editor UI design
-- `docs/sdui/front/STATE_MACHINE_FRONTEND_INTEGRATION.md` — frontend-backend integration for state machines
-- `docs/sdui/front/DEBUG_API.md` — debug API reference
-- `docs/sdui/front/DEVICE_VIEW_API.md` — device view API
-- `docs/sdui/front/SECTION_FRONTEND_INTEGRATION.md` / `SECTION_RENDERING_GUIDE.md` — section rendering
+The current SDUI management and debug boundary is summarized in
+`docs/sdui/PLATFORM_REFACTOR.md`; endpoint details come from Swagger and the controllers.
 
 When debugging frontend-reported issues:
 - The frontend sends requests with `Origin: http://localhost:8001` and `X-Space-Id` header for multi-tenant isolation
@@ -216,14 +212,8 @@ When debugging frontend-reported issues:
 ## Documentation
 
 - `docs/PROJECT_OVERVIEW.md` — current project overview (SDUI Terminal Platform focus)
-- `docs/sdui/DRAWTHINGS_GRPC_INTEGRATION.md` — DrawThings integration guide
-- `docs/sdui/STATE_MACHINE_ARCHITECTURE.md` — state machine four-layer architecture design
-- `docs/sdui/STATE_MACHINE_E2E_FLOW.md` — end-to-end state machine flows
-- `docs/sdui/EVENT_API_ANALYSIS.md` — event API design analysis
-- `docs/sdui/terminal/PROTOCOL_AND_COMMANDS.md` — SDUI binary protocol, command API, input events, error codes
-- `docs/sdui/terminal/SECTION_SCHEMA.md` — 12 section type schemas, layout modes, patch mechanism, per-board rendering
-- `docs/sdui/terminal/CAPABILITY_REPORTING.md` — terminal capability reporting protocol (v2 format)
-- `docs/sdui/terminal/DEVICE_PROTOCOL_CATALOG_DESIGN.md` — device protocol catalog design
-- `docs/sdui/terminal/AUDIO_RECORD_PLATFORM_INTEGRATION.md` — audio record platform integration
-- `docs/sdui/front/` — frontend-focused docs (debug APIs, device view, section rendering, state machine UX)
+- `docs/sdui/README.md` — the only entry point for active SDUI documentation
+- `docs/sdui/PLATFORM_REFACTOR.md` — target architecture, boundaries, and migration order
+- `docs/sdui/TERMINAL_CONTRACT.md` — v2 wire contract and terminal confirmations T1–T16
+- `docs/sdui/DELIVERY_CHECKLIST.md` — implementation status, remaining work, and acceptance gates
 - `docs/api/` — API reference docs for ai, datasource, document, file, security/space modules

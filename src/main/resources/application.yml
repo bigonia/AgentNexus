@@ -166,8 +166,8 @@ sdui:
     whisper-model: base
     language: zh
   # LCD_085 重构后的 v2 协议上限与超时。
-  # 数值来源见 docs/sdui/lcd085-refactor/2026-09-18/12_DESIGN_NOTES.md 缺口 G4 / G6，
-  # 终端升级完成后需要按固件实际能力对齐。
+  # 当前值是平台保护性默认值，见 docs/sdui/TERMINAL_CONTRACT.md。
+  # 真实终端确认 T4/T5/T8/T9 后需要按固件能力对齐。
   v2:
     request-timeout-ms: 10000
     request-timeout-scan-ms: 1000

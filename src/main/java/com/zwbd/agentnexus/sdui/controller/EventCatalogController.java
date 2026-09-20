@@ -32,7 +32,7 @@ import java.util.Set;
  * <p>{@code /validate} 是部署前校验的独立入口，与部署接口走<b>同一个校验器</b>。不复制规则：
  * 两处真值必然漂移。</p>
  *
- * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.4。</p>
+ * <p>管理面边界见 {@code docs/sdui/PLATFORM_REFACTOR.md} §3；端点明细以本控制器和 OpenAPI 为准。</p>
  */
 @RestController
 @RequestMapping("/api/v1/sdui/events")

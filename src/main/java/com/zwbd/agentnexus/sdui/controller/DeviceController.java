@@ -33,7 +33,7 @@ import java.util.*;
  *
  * <p>在线态与能力都只有一个来源：v2 连接注册表与设备声明的能力 Schema。</p>
  *
- * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.1。</p>
+ * <p>管理面边界见 {@code docs/sdui/PLATFORM_REFACTOR.md} §3；端点明细以本控制器和 OpenAPI 为准。</p>
  */
 @Slf4j
 @RestController

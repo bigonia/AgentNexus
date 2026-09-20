@@ -25,7 +25,7 @@ import java.util.Optional;
  * <b>代表设备</b>（优先在线），再复用同一套能力查询——板型不是独立的数据源，它只是设备的聚合视图。
  * 因此这里的每个答案都与设备级接口同源，不会出现"板型说能做、设备说不能做"。</p>
  *
- * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.3。</p>
+ * <p>管理面边界见 {@code docs/sdui/PLATFORM_REFACTOR.md} §3；端点明细以本控制器和 OpenAPI 为准。</p>
  */
 @RestController
 @RequestMapping("/api/v1/sdui/board-types")

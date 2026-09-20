@@ -12,7 +12,7 @@ import java.util.UUID;
 // LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
 // Replaced by: v2 business.* / display.* / audio.* / system.* 请求
 // Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
-// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
+// See docs/sdui/DELIVERY_CHECKLIST.md section 3, P3.
 @Deprecated(since = "0.10.0")
 public class CommandDispatcher {
 

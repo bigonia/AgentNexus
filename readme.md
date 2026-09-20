@@ -20,19 +20,18 @@ macOS / Linux：
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=macos
 ```
 
-服务默认监听 `8080`。启动后可访问 Swagger UI：`http://localhost:8080/swagger-ui.html`；设备 WebSocket：`ws://localhost:8080/ws/sdui`。
+服务默认监听 `8080`。启动后可访问 Swagger UI：`http://localhost:8080/swagger-ui.html`；LCD_085 v2 设备 WebSocket：`ws://localhost:8080/ws/sdui/v2`。旧 `/ws/sdui` 仅在迁移期保留。
 
 ## 文档
 
 | 文档 | 作用 |
 | --- | --- |
 | [项目总览](docs/PROJECT_OVERVIEW.md) | 系统边界、模块和文档权威性约定。 |
-| [SDUI 架构](docs/sdui/ARCHITECTURE.md) | 设备接入、能力目录、Section 与核心服务。 |
-| [终端协议](docs/sdui/PROTOCOL.md) | WebSocket、JSON Topic、二进制帧和兼容原则。 |
-| [Node Workflow](docs/sdui/NODE_WORKFLOW_INTERACTION_FLOW.md) | 当前工作流模型、API 与运行闭环。 |
-| [Node Workflow 上下文](docs/sdui/NODE_WORKFLOW_CONTEXT_REFERENCE.md) | 节点运行上下文与参数解析参考。 |
+| [SDUI 文档入口](docs/sdui/README.md) | LCD_085 平台重构的四份权威文档与维护规则。 |
+| [平台重构指南](docs/sdui/PLATFORM_REFACTOR.md) | 目标架构、职责边界、工作流闭环与迁移顺序。 |
+| [端云契约](docs/sdui/TERMINAL_CONTRACT.md) | v2 协议基线与 T1–T16 终端确认项。 |
+| [交付台账](docs/sdui/DELIVERY_CHECKLIST.md) | 已实现、待实现、阻塞项与真机验收矩阵。 |
 | [HTTP API](docs/API_REFERENCE.md) | API 分组、版本策略及 Swagger 使用方法。 |
-| [LCD_085 重构设计](docs/sdui/lcd085-refactor/2026-09-18/README.md) | 设计提案；不代表当前实现。 |
 
 ## 文档权威性
 

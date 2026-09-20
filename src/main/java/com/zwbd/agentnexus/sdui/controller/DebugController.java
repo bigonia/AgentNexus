@@ -33,7 +33,7 @@ import java.util.Optional;
  * <p>这里不会出现"平台自己处理"的动作分支。终端只在能力 Schema 里声明 {@code binding} 的动作，
  * 平台发不出请求，接口会如实返回 {@code unsupported}，而不是伪造一条下行。</p>
  *
- * <p>接口集定义见 {@code docs/sdui/front/CLIENT_API.md} §2.8。</p>
+ * <p>管理面边界见 {@code docs/sdui/PLATFORM_REFACTOR.md} §3；端点明细以本控制器和 OpenAPI 为准。</p>
  */
 @Slf4j
 @RestController

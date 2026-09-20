@@ -19,7 +19,7 @@ import java.util.Map;
 // LCD_085 refactor (2026-09-18): legacy protocol path, scheduled for removal.
 // Replaced by: sdui.v2.audio.AudioCommandService + 二进制帧 dataType=1
 // Kept only so un-migrated devices keep working; delete once the terminal rolls over to v2.
-// See docs/sdui/lcd085-refactor/2026-09-18/10_PLATFORM_UPGRADE.md section 10.
+// See docs/sdui/DELIVERY_CHECKLIST.md section 3, P3.
 @Deprecated(since = "0.10.0")
 public class AudioService {
 

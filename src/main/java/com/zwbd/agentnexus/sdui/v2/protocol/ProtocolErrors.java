@@ -5,7 +5,7 @@ package com.zwbd.agentnexus.sdui.v2.protocol;
  *
  * <p>终端设计文档只要求"最小错误集合"（04_PROTOCOL_MODEL.md §10），未给出具体名称。
  * 这里给出平台侧的首期集合，终端升级完成后需要对齐。
- * 详见 {@code docs/sdui/lcd085-refactor/2026-09-18/12_DESIGN_NOTES.md} 缺口 G5。</p>
+ * 详见 {@code docs/sdui/TERMINAL_CONTRACT.md} 待确认项 T5。</p>
  */
 public final class ProtocolErrors {
 

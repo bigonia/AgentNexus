@@ -6,7 +6,7 @@ import java.util.List;
 // v2.display.PrimaryViewPublisher / SectionViewResolver 用它承载平台内部既有的类型化补丁，
 // 再由 SectionViewResolver 合成为完整 Section，以 display.section 下发。
 // v2 协议层面确实没有 Patch（§4.17），要移除的是"把 Patch 直接下发给设备"的旧路径，不是本类。
-// 详见 docs/sdui/lcd085-refactor/2026-09-18/12_DESIGN_NOTES.md §4.17 / §4.18 裁决二。
+// 详见 docs/sdui/PLATFORM_REFACTOR.md §2.3 与旧路径删除门禁。
 public record SectionPatch(
         String pageId,
         List<PatchEntry> patches,
