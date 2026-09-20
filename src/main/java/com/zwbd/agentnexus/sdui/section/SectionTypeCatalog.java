@@ -1,10 +1,9 @@
 package com.zwbd.agentnexus.sdui.section;
 
+import com.zwbd.agentnexus.sdui.event.EventCatalogLoader;
 import com.zwbd.agentnexus.sdui.event.EventCatalogProperties;
-import com.zwbd.agentnexus.sdui.event.EventRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -30,19 +29,23 @@ import java.util.*;
 // 数据由平台配置 sdui-event-catalog.yml 驱动，属于 UI 模板域的类型目录。
 // 待收敛（P5c，依赖 T6 定稿）：YAML 内的类型集合从 14 类收敛为 03_UI_MODEL.md §2.1 的五类；
 // 收敛的是内容，不是本类。见 12_DESIGN_NOTES.md §7 与 11_FEATURE_MATRIX.md 5.15。
+//
+// 解耦（2026-09-20，T17）：原先经 @Lazy EventRegistry 取 sectionTypes，使 v2.display.SectionDataCodec
+// （→ 本类 → EventRegistry）把整个旧事件模型拖进保留闭包。本类只需要 YAML 里的 section type 条目，
+// 那是配置加载器的产物，与运行时事件模型无关，故改为直接依赖 EventCatalogLoader。
 public class SectionTypeCatalog {
 
-    private final EventRegistry eventRegistry;
+    private final EventCatalogLoader catalogLoader;
 
     private final Map<String, SectionTypeDef> catalog = new LinkedHashMap<>();
 
-    public SectionTypeCatalog(@Lazy EventRegistry eventRegistry) {
-        this.eventRegistry = eventRegistry;
+    public SectionTypeCatalog(EventCatalogLoader catalogLoader) {
+        this.catalogLoader = catalogLoader;
     }
 
     @PostConstruct
     void init() {
-        for (EventCatalogProperties.SectionTypeEntry entry : eventRegistry.getSectionTypes()) {
+        for (EventCatalogProperties.SectionTypeEntry entry : catalogLoader.sectionTypes().values()) {
             String type = entry.getType();
             boolean interactive = entry.getEvents() != null && !entry.getEvents().isEmpty();
             List<SectionFieldDef> displayFields = convertFields(entry.getFields());

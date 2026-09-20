@@ -11,9 +11,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -81,6 +83,7 @@ class CapabilityQueryServiceTest {
         assertNull(summary.get("surface"));
         assertTrue(service.actions("dev-x").isEmpty());
         assertTrue(service.triggers("dev-x").isEmpty());
+        assertTrue(service.sectionTypes("dev-x").isEmpty());
     }
 
     @Test
@@ -186,6 +189,18 @@ class CapabilityQueryServiceTest {
 
         assertEquals(2, overview.get("deviceCount"));
         assertEquals(1L, overview.get("syncedCount"));
+    }
+
+    @Test
+    @DisplayName("Section 类型门禁读设备声明的 surface.ui，不并读旧能力快照")
+    void sectionTypesComeFromSchema() {
+        syncDevice("dev-a");
+
+        Set<String> supported = service.sectionTypes("dev-a");
+
+        assertEquals(new LinkedHashSet<>(SimulatedLcd085Device.SCHEMA.surface().ui().sectionTypes()), supported);
+        assertTrue(supported.contains("text_section"));
+        assertFalse(supported.contains("map_section"), "设备没声明的类型不能凭空出现");
     }
 
     // ── 辅助 ───────────────────────────────────────────────────────────────

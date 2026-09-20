@@ -1,8 +1,8 @@
 package com.zwbd.agentnexus.sdui.ui;
 
-import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.ui.repo.SduiUiTemplateRepository;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -83,7 +83,7 @@ class SduiUiTemplateServiceTest {
                 repository,
                 new SectionDataCodec(mockCatalog),
                 mock(com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher.class),
-                mock(DeviceCapabilityProjection.class),
+                mock(CapabilityQueryService.class),
                 mockCatalog,
                 mockPageService
         );

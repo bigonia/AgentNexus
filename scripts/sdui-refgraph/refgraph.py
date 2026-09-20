@@ -297,8 +297,9 @@ if WIRING:
 
 print(f'\n=== 保留闭包：KEEP 沿类型引用可达的候选池类（P5c 的不可删清单）===')
 print('  为什么不用"直接引用者是不是 ui / workflow"来筛：那会漏掉被保留方**间接**依赖的类。')
-print('  例：ui.SduiUiTemplateService -> section.SectionTypeCatalog -> event.EventRegistry。')
-print('  EventRegistry 的直接引用者全在候选池，但它实际上删不掉。')
+print('  例：ui.SduiUiTemplateService -> section.SectionTypeCatalog -> event.EventCatalogLoader'
+      ' -> event.EventDefinition。')
+print('  EventDefinition 的直接引用者全在候选池，但它实际上删不掉。')
 print('  保留闭包 = 从 KEEP 出发沿 refs / supers 可达的池内类；它们出现在可删集里即为误判。')
 print('  种子要排除"已知待裁剪层"：① 接线根（WebSocketConfig 只留 v2 端点注册，把它当种子会')
 print('  将 SduiWebSocketHandler -> MessageRouter -> DeviceSessionManager 整条旧链误判为保留）；')
@@ -351,9 +352,48 @@ for pkg in sorted(by_pkg2):
     for n in sorted(by_pkg2[pkg]):
         print(f'     {n}')
 still = sorted(POOL2 - DEL2)
-print(f'\n  推演后仍保留在池中（引用方为 ui / v2，属真实依赖）: {len(still)}')
+
+
+def protectors_of(t):
+    """把 t 拖住的**保留层入口**：从 t 沿反引用上溯（限定在候选池内），收口到 KEEP2 成员。
+
+    t 常常不是被保留方**直接**引用，而是陷在旧协议簇的内部循环里——循环本身不是保护，
+    真正需要逐条处理的是那个把循环挂到保留层上的入口。返回空集表示它已无保留层引用者
+    （纯内部循环或已彻底孤立），这类随循环一起消失，不需要单独改造。
+    """
+    seen, q, roots = {t}, deque([t]), set()
+    while q:
+        f = q.popleft()
+        for b in rev[f]:
+            if b in KEEP2:
+                roots.add(b)
+            elif b in POOL2 and b not in seen:
+                seen.add(b)
+                q.append(b)
+    return sorted(roots)
+
+
+by_root, orphans = defaultdict(set), []
 for f in still:
-    print(f'     {f.replace(SDUI + ".", "")}')
+    roots = protectors_of(f)
+    if roots:
+        for r in roots:
+            by_root[r].add(f)
+    else:
+        orphans.append(f)
+
+print(f'\n  推演后仍留在池中: {len(still)}')
+print('  它们不是"被 ui / v2 引用"——多数陷在旧协议簇的内部循环里。下方给出把每一类')
+print('  拖住的**保留层入口**，这才是 P5c 必须逐条处理的阻塞源（按拖住的类数排序）：')
+for r in sorted(by_root, key=lambda x: (-len(by_root[x]), x)):
+    names = sorted(t.replace(SDUI + '.', '') for t in by_root[r])
+    more = '' if len(names) <= 5 else f' … 另 {len(names) - 5} 个'
+    print(f'    ← {r.replace(SDUI + ".", ""):38s} 拖住 {len(names):2d} 个：'
+          + ', '.join(names[:5]) + more)
+if orphans:
+    print(f'    （无保留层入口，随循环一起消失）{len(orphans)} 个：'
+          + ', '.join(f.replace(SDUI + '.', '') for f in orphans[:5])
+          + ('' if len(orphans) <= 5 else f' … 另 {len(orphans) - 5} 个'))
 
 with open('target/refgraph.json', 'w', encoding='utf-8') as fh:
     json.dump({'deletable': sorted(DEL),

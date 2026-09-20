@@ -69,6 +69,25 @@ public class CapabilityQueryService {
         return schemaOf(deviceId).map(CapabilitySchemaV2::board);
     }
 
+    /**
+     * 设备允许的 Section 类型（{@code surface.ui.sectionTypes}）。
+     *
+     * <p>UI 模板的可用性门禁读这里——设备声明它接受哪些 Section 类型，平台据此判断
+     * 某个模板能否下发给它。v2 已裁决 Section 类型的能力门禁归 {@code CapabilitySchemaV2}
+     * 承担（{@code v2.display.SectionViewResolver} 明确不在渲染侧二次判断），因此这是
+     * 该问题的唯一来源，不再并读旧的 {@code CapabilitySnapshot}。</p>
+     *
+     * <p>未完成能力同步的设备返回空集——调用方据此拒绝下发，而不是回退到旧能力快照。</p>
+     */
+    public Set<String> sectionTypes(String deviceId) {
+        CapabilitySchemaV2 schema = schemaOf(deviceId).orElse(null);
+        if (schema == null || schema.surface() == null || schema.surface().ui() == null
+                || schema.surface().ui().sectionTypes() == null) {
+            return Set.of();
+        }
+        return new LinkedHashSet<>(schema.surface().ui().sectionTypes());
+    }
+
     // ── 能力域视图 ─────────────────────────────────────────────────────────
 
     /**

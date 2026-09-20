@@ -1,8 +1,8 @@
 package com.zwbd.agentnexus.sdui.ui;
 
-import com.zwbd.agentnexus.sdui.protocol.catalog.DeviceCapabilityProjection;
 import com.zwbd.agentnexus.sdui.section.*;
 import com.zwbd.agentnexus.sdui.ui.repo.SduiUiTemplateRepository;
+import com.zwbd.agentnexus.sdui.v2.capability.CapabilityQueryService;
 import com.zwbd.agentnexus.sdui.v2.display.PrimaryViewPublisher;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
@@ -18,20 +18,20 @@ public class SduiUiTemplateService {
     private final SduiUiTemplateRepository repository;
     private final SectionDataCodec sectionDataCodec;
     private final PrimaryViewPublisher primaryViewPublisher;
-    private final DeviceCapabilityProjection capabilityProjection;
+    private final CapabilityQueryService capabilities;
     private final SectionTypeCatalog sectionTypeCatalog;
     private final PageService pageService;
 
     public SduiUiTemplateService(SduiUiTemplateRepository repository,
                                  SectionDataCodec sectionDataCodec,
                                  PrimaryViewPublisher primaryViewPublisher,
-                                 DeviceCapabilityProjection capabilityProjection,
+                                 CapabilityQueryService capabilities,
                                  SectionTypeCatalog sectionTypeCatalog,
                                  PageService pageService) {
         this.repository = repository;
         this.sectionDataCodec = sectionDataCodec;
         this.primaryViewPublisher = primaryViewPublisher;
-        this.capabilityProjection = capabilityProjection;
+        this.capabilities = capabilities;
         this.sectionTypeCatalog = sectionTypeCatalog;
         this.pageService = pageService;
     }
@@ -225,9 +225,15 @@ public class SduiUiTemplateService {
         return definition;
     }
 
+    /**
+     * 校验设备是否接受该模板要求的 Section 类型。
+     *
+     * <p>可用类型来自设备声明的 v2 能力 Schema（{@code surface.ui.sectionTypes}）。判定是
+     * "模板要求 ⊆ 设备声明"，不再与平台类型目录求交——类型本身是否存在已在模板创建时用
+     * {@link SectionTypeCatalog#isValidType(String)} 校验过，此处重复求交只会引入第二个真值。</p>
+     */
     public void validateDeviceSupportsTemplate(String deviceId, Map<String, Object> definition) {
-        Set<String> supported = new LinkedHashSet<>();
-        capabilityProjection.sections(deviceId).forEach(section -> supported.add(section.type()));
+        Set<String> supported = capabilities.sectionTypes(deviceId);
         for (Object item : list(definition.get("requiredSectionTypes"))) {
             String sectionType = string(item);
             if (!supported.contains(sectionType)) {

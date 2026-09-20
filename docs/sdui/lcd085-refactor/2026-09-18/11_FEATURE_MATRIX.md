@@ -280,4 +280,4 @@ P5b 追加的测试资产：
 | T14 | 终端上报交互结果时携带的 token 字段名与位置 | 5.1.3、5.5 |
 | T15 | 平台能否为动态节点签发专用绑定 / 新 token 以驱动终端本地动作（G25） | 5.6.1、5.7、5.7.1 |
 | T16 | 下行音频的容器约定：终端是否需要 WAV 头，还是只接裸 PCM（平台侧暂按裸 PCM 发送） | 4.8、5.8.2 |
-| T17 | `ui` 包如何从旧能力 / 事件模型解耦（入口 `SduiUiTemplateService` / `DevicePrimaryUiService` / `WorkflowUiContextService`）——**P5c 的准入前置**，不解耦则保留闭包 39 个类删不掉 | 6.x（P5c 清单） |
+| ~~T17~~ | ~~`ui` 包如何从旧能力 / 事件模型解耦~~ —— **已关闭（0.14.2）**：入口不是三个 ui 服务，而是**两条边**（`ui.SduiUiTemplateService → DeviceCapabilityProjection`、`section.SectionTypeCatalog → EventRegistry`），均已切断，保留闭包 39 → 22。见 12_DESIGN_NOTES.md §7.3.2 / §4.22 | 6.x（P5c 清单） |
