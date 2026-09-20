@@ -43,6 +43,8 @@
 - 路径一律用 v2 词汇（`actions` / `triggers` / `view` / `requests` / `bindings`），**不复用旧协议词**（`commands` / `sections`）。路径里出现旧词，就一定有人往回接旧模型。
 - 能力的 `usableIn` 是前端必须尊重的分界线：只声明 `binding` 的动作平台发不出请求，接口如实返回 `unsupported`，不伪造下行。
 - "端点是否仍被前端使用"不要靠印象：跑 `scripts/sdui-front-paths.py` 扫 `static/*.html` 得到调用面。曾据此推翻一处错误的 `@Deprecated "前端未使用"` 注释。
+- 扫描器只能看见**字面量路径**：页面里写 `api(devicePath('/requests'))` 这类辅助函数拼接会**静默漏报**（脚本现在会提示"路径不是字面量"）。带参数的路径曾因正则匹配到右括号即止而被截断成半截（0.14.3 修正），截断后的路径无法与控制器端点对账，会把"仍在使用的端点"显示成没人用。
+- **§7.2 的"释放量"是推演上限，不是"该删"的结论**（0.14.3 复核）：`/telemetry/trends`（§2.1）与 `/section-triggers`（§2.3）都在接口契约内，属活功能，对应控制层类**不裁**。真正的裁剪对象只有 `WebSocketConfig` 的旧端点注册两行。
 - 节点目录真值在 `NodeTypeRegistry`（编辑器与运行时共用），新增节点类型必须同时更新 `WorkflowActionMapper` 的映射并跑登记表一致性用例。
 - `/board-types/{board}/section-triggers` 曾记为"接口集里最后一处旧模型泄漏、待改由 v2 Schema 派生"——**该定性已撤销（0.14.1）**。它的输入是平台页面定义与 Section 类型目录（`sdui-event-catalog.yml`），与终端固件无关；`UiSpec` 只有类型名名单，派生三级树不成立；且 v2 已裁决 Section 类型门禁归 `CapabilitySchemaV2` 校验。不阻塞 P5c，无需改写。
 
@@ -62,10 +64,13 @@
   ① `ui.SduiUiTemplateService → DeviceCapabilityProjection` 改为经 `CapabilityQueryService.sectionTypes(deviceId)` 读 v2 Schema 的 `surface.ui.sectionTypes`；
   ② `section.SectionTypeCatalog → EventRegistry` 改为 `EventCatalogLoader`。
   **T17 的原始边界是错的**："三个 ui 服务都要改"不成立——`DevicePrimaryUiService` / `WorkflowUiContextService` 只依赖 `section/` 平台 UI 模型，从未引用旧能力模型。**A 类仍 12**，出闭包 ≠ 立即可删。
+- **0.14.3 已完成（P5c 5.18 结项）**：新建 `static/sdui-v2-console.html`（能力 Schema → 请求下发 → 主视图 → 实时流四页签），让原本**无任何调用方**的 v2 调试端点（`/request`、`/view`、`/view/state`、`/requests*`、`/events/stream`）有了调用方。旧三页**不改造**——它们本身在 P5c 待删清单里，且停在"节点目录驱动"的编排视角。同时修正 `scripts/sdui-front-paths.py` 的路径截断与"非字面量"漏报。**不改可删集**，价值是把 P5c 的验收手段提前备好。
+  → 页面路径必须写成完整字面量，否则扫描器看不见（见"对外接口集"节）。
 - LCD_085 平台侧升级 **P5c**（准入=终端固件全量切换）：按 `12_DESIGN_NOTES.md` §7 清单删除旧协议路径。分流开关已删除（0.12.0），**回滚不能按设备进行**，只能一次性完成。
   引用图实测（0.14.2）：`sdui` 主代码 = v2 54 + 非 v2 165，保留包 71，接线根 1，候选池 93 = **A 类可整文件删 12** + C 类 81（其中 **22 个属保留闭包**，较 0.14.1 的 39 已收敛）。
   v2 对非 v2 的硬依赖 **7 个类**；`sdui` 外零引用。
-  **执行顺序**：① 裁 `BoardTypeController` / `WebSocketConfig` / `DeviceController`（真实释放量各 2 / 2 / 1，其余控制层类释放 0）；② `ui` 侧解耦已完成，`debug` 层随 P5c 改写；③ 重跑脚本，旧协议簇才真正进入可删集。
+  **执行顺序**：① **只剩 `WebSocketConfig` 的旧端点注册两行**（0.14.3 依 §4.24 收窄：`/section-triggers` 与 `/telemetry/trends` 均在接口契约内，对应控制层类不裁，原"三处共释放 5 类"实为"一处释放 2 类"）；② `ui` 侧解耦已完成，`debug` 层随 P5c 改写；③ 重跑脚本，旧协议簇才真正进入可删集。
+  ⚠ §7.2 表里的"真实释放量"是**推演上限**（"假如删掉能释放几个"），不是"应当删除"的结论。
   **主阻塞源已定位**：接线根 `WebSocketConfig` 的旧端点注册，拖住 **56** 个池内类。另有 **25 个滞留类无保留层入口**——只陷在旧协议簇内部循环里，裁掉入口后自动可删，**不需要单独改造**。
   **保留闭包 22 个是真依赖，不是待清理对象**：平台 UI/Section 模型 12 + 事件目录配置 3 + 节点目录 6 + TTS 1。`SectionTypeCatalog` **不是"ui 专属"**（v2 经 `SectionDataCodec` 同样依赖）。
   `EventDefinition` 仍被 `EventCatalogLoader` 拖着（loader 从同一份 YAML 同时构建事件定义与类型条目）；释放它需 P5c 拆 YAML 的 `commands` 与 `sections.types`。

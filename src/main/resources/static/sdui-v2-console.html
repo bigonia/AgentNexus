@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SDUI v2 协议联调台</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f6f7f9;
+            --panel: #ffffff;
+            --line: #d9dee7;
+            --text: #18202c;
+            --muted: #667085;
+            --accent: #1769e0;
+            --ok: #087443;
+            --warn: #9a6700;
+            --bad: #b42318;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        header {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        h1 { margin: 0; font-size: 16px; font-weight: 650; }
+
+        h2 {
+            margin: 0 0 10px;
+            font-size: 12px;
+            font-weight: 650;
+            color: var(--muted);
+            letter-spacing: .04em;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 296px minmax(0, 1fr);
+            min-height: calc(100vh - 56px);
+        }
+
+        aside {
+            padding: 16px;
+            border-right: 1px solid var(--line);
+            background: var(--panel);
+        }
+
+        section { padding: 16px 20px; min-width: 0; }
+
+        .field { display: grid; gap: 6px; margin-bottom: 12px; }
+
+        label { font-size: 12px; color: var(--muted); font-weight: 650; }
+
+        select, input, textarea, button {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #fff;
+            color: var(--text);
+            font: inherit;
+        }
+
+        select, input { height: 34px; padding: 0 9px; }
+
+        textarea {
+            padding: 9px;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12.5px;
+        }
+
+        button { height: 34px; padding: 0 11px; cursor: pointer; font-weight: 650; }
+
+        button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        button.secondary { background: #eef4ff; border-color: #b8cdf8; color: #174ea6; }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+
+        .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .toolbar > button { width: auto; }
+        .toolbar > input { width: auto; min-width: 190px; }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        aside .panel { background: #fbfcfd; }
+
+        .pill {
+            font-size: 12px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            background: #eef1f5;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .pill.ok { background: #e6f4ec; color: var(--ok); }
+        .pill.bad { background: #fdecea; color: var(--bad); }
+        .pill.warn { background: #fdf3e0; color: var(--warn); }
+
+        .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+
+        .tab { width: auto; padding: 0 14px; border-radius: 999px; color: var(--muted); }
+        .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+        .muted { color: var(--muted); font-size: 12.5px; }
+
+        pre {
+            margin: 0;
+            padding: 10px;
+            background: #0f172a;
+            color: #dbe6f5;
+            border-radius: 6px;
+            font-size: 12px;
+            overflow: auto;
+            max-height: 300px;
+        }
+
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+        th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+        th { color: var(--muted); font-weight: 650; font-size: 12px; }
+
+        .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #eef1f5; color: var(--muted); }
+        .tag.req { background: #e6f4ec; color: var(--ok); }
+        .tag.bind { background: #fdf3e0; color: var(--warn); }
+
+        .split { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 14px; }
+
+        .pick {
+            display: block;
+            width: 100%;
+            height: auto;
+            text-align: left;
+            padding: 7px 9px;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .pick.active { border-color: var(--accent); background: #eef4ff; }
+
+        .log { max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+        .log div { padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 12px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+        .log div:last-child { border-bottom: none; }
+
+        .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+        .kv > div { background: #fbfcfd; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+        .kv b { display: block; font-size: 11.5px; color: var(--muted); font-weight: 650; margin-bottom: 3px; }
+        .kv span { font-size: 14px; font-weight: 650; }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>SDUI v2 协议联调台</h1>
+    <div class="toolbar">
+        <input id="apiBase" placeholder="API Base（留空为同源）">
+        <span id="status" class="pill">idle</span>
+    </div>
+</header>
+
+<main>
+    <aside>
+        <div class="field">
+            <label for="device">设备</label>
+            <select id="device"></select>
+        </div>
+        <div class="toolbar" style="margin-bottom:12px">
+            <button id="refresh" class="secondary">刷新设备</button>
+            <button id="loadCaps" class="primary">读能力</button>
+        </div>
+        <div class="panel">
+            <h2>能力同步</h2>
+            <div id="syncInfo" class="muted">未加载</div>
+        </div>
+        <div class="panel">
+            <h2>实时流</h2>
+            <div class="toolbar" style="margin-bottom:8px">
+                <button id="connectStreams" class="secondary">连接</button>
+                <button id="disconnectStreams" class="secondary">断开</button>
+            </div>
+            <div id="streamState" class="muted">未连接</div>
+        </div>
+        <div class="panel">
+            <h2>说明</h2>
+            <div class="muted">
+                调试请求与工作流走同一条出站路径与同一套状态机，差别只在"谁决定动作"。
+                只声明 <code>binding</code> 的动作平台发不出请求，这里会如实返回不可达，而不是伪造一条下行。
+            </div>
+        </div>
+    </aside>
+
+    <section>
+        <div class="tabs">
+            <button class="tab active" data-tab="caps">能力</button>
+            <button class="tab" data-tab="request">请求下发</button>
+            <button class="tab" data-tab="view">主视图</button>
+            <button class="tab" data-tab="stream">实时流</button>
+        </div>
+
+        <div data-panel="caps">
+            <div class="panel">
+                <h2>能力摘要</h2>
+                <div id="capSummary" class="kv"></div>
+            </div>
+            <div class="panel">
+                <h2>能力面 surface</h2>
+                <pre id="capSurface">尚未加载</pre>
+            </div>
+            <div class="panel">
+                <h2>完整 Schema</h2>
+                <pre id="capSchema">尚未加载</pre>
+            </div>
+            <div class="panel">
+                <h2>动作目录 actions（usableIn 分界）</h2>
+                <div id="capActions" class="muted">尚未加载</div>
+            </div>
+            <div class="panel">
+                <h2>触发源目录 triggers</h2>
+                <div id="capTriggers" class="muted">尚未加载</div>
+            </div>
+        </div>
+
+        <div data-panel="request" class="hidden">
+            <div class="split">
+                <div>
+                    <div class="panel">
+                        <h2>可下达请求</h2>
+                        <div id="requestPicks" class="muted">尚未加载</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="panel">
+                        <h2>参数与下发</h2>
+                        <div id="paramForm" class="muted">请先选择一个请求</div>
+                        <div class="toolbar" style="margin-top:12px">
+                            <button id="sendRequest" class="primary" disabled>下达请求</button>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <h2>结果</h2>
+                        <pre id="requestResult">尚未下达</pre>
+                    </div>
+                    <div class="panel">
+                        <h2>请求历史</h2>
+                        <div class="log" id="requestHistory"><div class="muted">尚无记录</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div data-panel="view" class="hidden">
+            <div class="panel">
+                <h2>下发主视图</h2>
+                <div class="field">
+                    <label for="viewMode">模式</label>
+                    <select id="viewMode">
+                        <option value="section">section（单 Section 完整替换）</option>
+                        <option value="image">image（全屏图片）</option>
+                        <option value="canvas">canvas（矩阵画布）</option>
+                    </select>
+                </div>
+                <div id="viewSectionFields">
+                    <div class="field">
+                        <label for="viewSection">Section JSON</label>
+                        <textarea id="viewSection" rows="10">{
+  "type": "status_section",
+  "id": "console-demo",
+  "data": {}
+}</textarea>
+                    </div>
+                    <div class="muted">类型须在设备 schema 的 <code>surface.ui.sectionTypes</code> 内；v2 只有完整替换，没有增量 Patch。</div>
+                </div>
+                <div id="viewBinaryFields" class="hidden">
+                    <div class="kv" style="margin-bottom:12px">
+                        <div class="field" style="margin:0"><label for="viewWidth">width</label><input id="viewWidth" type="number" min="1" value="32"></div>
+                        <div class="field" style="margin:0"><label for="viewHeight">height</label><input id="viewHeight" type="number" min="1" value="32"></div>
+                        <div class="field" style="margin:0"><label for="viewPaletteSize">paletteSize</label><input id="viewPaletteSize" type="number" min="1" value="16"></div>
+                        <div class="field" style="margin:0" id="viewExpectedBytesField"><label for="viewExpectedBytes">expectedBytes</label><input id="viewExpectedBytes" type="number" min="1" value="1024"></div>
+                        <div class="field" style="margin:0" id="viewMaxFpsField"><label for="viewMaxFps">maxFps</label><input id="viewMaxFps" type="number" min="1" value="10"></div>
+                    </div>
+                    <div class="field">
+                        <label for="viewPalette">paletteRgb565（逗号分隔的整数，如 65535,0,2047）</label>
+                        <input id="viewPalette" placeholder="65535,0,2047">
+                    </div>
+                    <div class="field">
+                        <label for="viewPayload">payloadBase64（索引矩阵；留空则只开会话，不推帧）</label>
+                        <textarea id="viewPayload" rows="4" placeholder="留空表示只下发 begin / open"></textarea>
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <button id="sendView" class="primary">下发主视图</button>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>结果</h2>
+                <pre id="viewResult">尚未下发</pre>
+            </div>
+            <div class="panel">
+                <h2>显示会话状态</h2>
+                <div class="toolbar" style="margin-bottom:10px">
+                    <button id="readViewState" class="secondary">读取状态</button>
+                    <button id="clearViewState" class="secondary">清空会话</button>
+                </div>
+                <pre id="viewState">尚未读取</pre>
+            </div>
+        </div>
+
+        <div data-panel="stream" class="hidden">
+            <div class="panel">
+                <h2>请求结果流 requests/stream</h2>
+                <div class="toolbar" style="margin-bottom:10px">
+                    <button id="clearRequestLog" class="secondary">清空</button>
+                </div>
+                <div class="log" id="requestLog"><div class="muted">未连接</div></div>
+            </div>
+            <div class="panel">
+                <h2>终端事件流 events/stream</h2>
+                <div class="toolbar" style="margin-bottom:10px">
+                    <button id="clearEventLog" class="secondary">清空</button>
+                </div>
+                <div class="log" id="eventLog"><div class="muted">未连接</div></div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+const state = {
+    devices: [],
+    actions: [],
+    triggers: [],
+    requestable: [],
+    selected: null,
+    streams: {requests: null, events: null}
+};
+
+const $ = id => document.getElementById(id);
+
+function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => (
+        {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+    ));
+}
+
+function apiUrl(path) {
+    const base = $('apiBase').value.trim();
+    return base ? base.replace(/\/$/, '') + path : path;
+}
+
+function setStatus(text, kind) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+async function api(path, options) {
+    setStatus('loading');
+    const res = await fetch(apiUrl(path), Object.assign(
+        {headers: {'Content-Type': 'application/json'}}, options || {}));
+    const json = await res.json();
+    if (!res.ok || json.code !== 20000) {
+        setStatus('error', 'bad');
+        throw new Error(json.message || res.statusText);
+    }
+    setStatus('ok', 'ok');
+    return json.data;
+}
+
+function deviceId() {
+    return $('device').value;
+}
+
+// ── 设备 ────────────────────────────────────────────────────────────────
+
+async function loadDevices() {
+    try {
+        const data = await api('/api/v1/sdui/devices?size=200');
+        state.devices = (data && data.items) || [];
+        $('device').innerHTML = state.devices.map(d =>
+            `<option value="${escapeHtml(d.deviceId)}">${escapeHtml(d.name || d.deviceId)} — ${escapeHtml(d.status || '')}</option>`
+        ).join('') || '<option value="">无设备</option>';
+    } catch (e) {
+        $('device').innerHTML = '<option value="">加载失败</option>';
+        setStatus(e.message, 'bad');
+    }
+}
+
+// ── 能力 ────────────────────────────────────────────────────────────────
+
+async function loadCapabilities() {
+    if (!deviceId()) return;
+    try {
+        const [summary, sync] = await Promise.all([
+            api(`/api/v1/sdui/capabilities/${encodeURIComponent(deviceId())}`),
+            api(`/api/v1/sdui/capabilities/${encodeURIComponent(deviceId())}/sync`)
+        ]);
+        renderSummary(summary);
+        renderSync(sync);
+    } catch (e) {
+        $('capSummary').innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+    }
+    state.actions = await loadActions();
+    state.triggers = await loadTriggers();
+    await loadSchema();
+}
+
+async function loadSchema() {
+    try {
+        $('capSchema').textContent = JSON.stringify(
+            await api(`/api/v1/sdui/capabilities/${encodeURIComponent(deviceId())}/schema`), null, 2);
+    } catch (e) {
+        $('capSchema').textContent = '未同步：' + e.message;
+    }
+}
+
+async function loadActions() {
+    let data;
+    try {
+        data = await api(`/api/v1/sdui/capabilities/${encodeURIComponent(deviceId())}/actions`);
+    } catch (e) {
+        $('capActions').innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+        return [];
+    }
+    const actions = (data && data.actions) || [];
+    $('capActions').innerHTML = actions.length ? table(
+        ['动作', 'usableIn', '参数'],
+        actions.map(a => [
+            `<code>${escapeHtml(a.name)}</code>`,
+            usableTags(a),
+            (a.params || []).map(p => escapeHtml(paramLabel(p))).join('<br>') || '<span class="muted">无</span>'
+        ])
+    ) : '<div class="muted">设备尚未完成能力同步，或 Schema 未声明动作。</div>';
+    return actions;
+}
+
+async function loadTriggers() {
+    let data;
+    try {
+        data = await api(`/api/v1/sdui/capabilities/${encodeURIComponent(deviceId())}/triggers`);
+    } catch (e) {
+        $('capTriggers').innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+        return [];
+    }
+    const triggers = (data && data.triggers) || [];
+    $('capTriggers').innerHTML = triggers.length ? table(
+        ['触发源', 'source', '可配置', 'maxResponses'],
+        triggers.map(t => [
+            `<code>${escapeHtml(t.id)}</code>`,
+            escapeHtml(t.source),
+            t.configurable ? '是' : '否',
+            escapeHtml(t.maxResponses)
+        ])
+    ) : '<div class="muted">设备尚未完成能力同步，或 Schema 未声明触发源。</div>';
+    return triggers;
+}
+
+function usableTags(action) {
+    const tags = [];
+    if (action.usableInRequest) tags.push('<span class="tag req">request</span>');
+    if (action.usableInBinding) tags.push('<span class="tag bind">binding</span>');
+    return tags.join(' ') || '<span class="tag">未声明</span>';
+}
+
+function paramLabel(p) {
+    const bounds = [];
+    if (p.min != null) bounds.push('min ' + p.min);
+    if (p.max != null) bounds.push('max ' + p.max);
+    if (p.values && p.values.length) bounds.push(p.values.join('|'));
+    return [p.name, p.type, p.required ? '必填' : '可选'].concat(bounds).join(' · ');
+}
+
+function renderSummary(summary) {
+    const cells = [
+        ['在线', summary.online ? '在线' : '离线'],
+        ['同步状态', summary.syncState],
+        ['Schema 已同步', summary.schemaSynced ? '是' : '否'],
+        ['板型', summary.board == null ? '—' : summary.board],
+        ['协议版本', summary.protocolVersion == null ? '—' : summary.protocolVersion],
+        ['Schema 版本', summary.schemaVersion == null ? '—' : summary.schemaVersion],
+        ['动作数', summary.actionCount],
+        ['触发源数', summary.triggerCount],
+        ['capability_hash', summary.capabilityHash == null ? '—' : String(summary.capabilityHash).slice(0, 16)]
+    ];
+    $('capSummary').innerHTML = cells.map(([k, v]) =>
+        `<div><b>${escapeHtml(k)}</b><span>${escapeHtml(v)}</span></div>`).join('');
+    $('capSurface').textContent = JSON.stringify(summary.surface, null, 2);
+}
+
+function renderSync(sync) {
+    const parts = [
+        `state=${sync.state}`,
+        `hashKnown=${sync.hashKnown}`,
+        `needsSchemaUpload=${sync.needsSchemaUpload}`,
+        `businessAllowed=${sync.businessAllowed}`
+    ];
+    $('syncInfo').innerHTML = parts.map(p => `<div>${escapeHtml(p)}</div>`).join('');
+}
+
+function table(headers, rows) {
+    return '<table><thead><tr>' + headers.map(h => `<th>${escapeHtml(h)}</th>`).join('') +
+        '</tr></thead><tbody>' + rows.map(r =>
+            '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('') +
+        '</tbody></table>';
+}
+
+// ── 请求下发 ────────────────────────────────────────────────────────────
+
+async function loadRequests() {
+    if (!deviceId()) return;
+    try {
+        const data = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/requests`);
+        state.requestable = (data && data.requests) || [];
+        const bindingOnly = (data && data.bindingOnly) || [];
+        $('requestPicks').innerHTML = state.requestable.length
+            ? state.requestable.map(a =>
+                `<button class="pick" data-name="${escapeHtml(a.name)}"><code>${escapeHtml(a.name)}</code></button>`).join('')
+            : '<div class="muted">该设备当前没有可下达的动作（Schema 未声明 usableIn=request）。</div>';
+        if (bindingOnly.length) {
+            $('requestPicks').innerHTML += '<div class="muted" style="margin-top:10px">仅本地响应（平台发不出请求）：<br>' +
+                bindingOnly.map(a => `<span class="tag bind">${escapeHtml(a.name)}</span>`).join(' ') + '</div>';
+        }
+        document.querySelectorAll('.pick').forEach(btn => btn.addEventListener('click', () => selectRequest(btn.dataset.name)));
+    } catch (e) {
+        $('requestPicks').innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function selectRequest(name) {
+    state.selected = state.requestable.find(a => a.name === name) || null;
+    document.querySelectorAll('.pick').forEach(b => b.classList.toggle('active', b.dataset.name === name));
+    renderParamForm();
+    $('sendRequest').disabled = !state.selected;
+}
+
+function renderParamForm() {
+    const action = state.selected;
+    if (!action) {
+        $('paramForm').innerHTML = '<div class="muted">请先选择一个请求</div>';
+        return;
+    }
+    const params = action.params || [];
+    if (!params.length) {
+        $('paramForm').innerHTML = `<div><code>${escapeHtml(action.name)}</code> 无参数。</div>`;
+        return;
+    }
+    $('paramForm').innerHTML = `<div><code>${escapeHtml(action.name)}</code></div>` + params.map(p => {
+        const id = 'param-' + p.name;
+        let control;
+        if (p.values && p.values.length) {
+            control = `<select id="${id}" data-param="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type)}">` +
+                (p.required ? '' : '<option value=""></option>') +
+                p.values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('') + '</select>';
+        } else if (p.type === 'boolean') {
+            control = `<select id="${id}" data-param="${escapeHtml(p.name)}" data-type="boolean">` +
+                '<option value=""></option><option value="true">true</option><option value="false">false</option></select>';
+        } else {
+            const attrs = p.type === 'int' ? 'type="number"' : '';
+            const min = p.min != null ? ` min="${escapeHtml(p.min)}"` : '';
+            const max = p.max != null ? ` max="${escapeHtml(p.max)}"` : '';
+            control = `<input id="${id}" data-param="${escapeHtml(p.name)}" data-type="${escapeHtml(p.type)}" ${attrs}${min}${max} ${p.required ? 'required' : ''}>`;
+        }
+        return `<div class="field"><label for="${id}">${escapeHtml(p.name)} · ${escapeHtml(p.type)}${p.required ? ' · 必填' : ''}</label>${control}</div>`;
+    }).join('');
+}
+
+function collectParams() {
+    const params = {};
+    document.querySelectorAll('[data-param]').forEach(el => {
+        const raw = el.value;
+        if (raw === '') return;
+        const name = el.dataset.param;
+        if (el.dataset.type === 'int') {
+            params[name] = Number.parseInt(raw, 10);
+        } else if (el.dataset.type === 'boolean') {
+            params[name] = raw === 'true';
+        } else {
+            params[name] = raw;
+        }
+    });
+    return params;
+}
+
+async function sendRequest() {
+    if (!state.selected) return;
+    try {
+        const result = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/request`, {
+            method: 'POST',
+            body: JSON.stringify({name: state.selected.name, params: collectParams()})
+        });
+        $('requestResult').textContent = JSON.stringify(result, null, 2);
+        await loadHistory();
+    } catch (e) {
+        $('requestResult').textContent = JSON.stringify({error: e.message}, null, 2);
+    }
+}
+
+async function loadHistory() {
+    if (!deviceId()) return;
+    try {
+        const data = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/requests/history?limit=30`);
+        const history = (data && data.history) || [];
+        $('requestHistory').innerHTML = history.length
+            ? history.map(entry => `<div>${escapeHtml(formatJournal(entry))}</div>`).join('')
+            : '<div class="muted">尚无记录</div>';
+    } catch (e) {
+        $('requestHistory').innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function formatJournal(entry) {
+    const status = entry.ok ? 'ok' : 'fail';
+    const error = entry.error ? ` ${entry.error}` : '';
+    const detail = entry.detail ? ` ${JSON.stringify(entry.detail)}` : '';
+    return `[${entry.at || ''}] ${status}${error} ${entry.name} ${JSON.stringify(entry.params || {})}${detail}`;
+}
+
+// ── 主视图 ──────────────────────────────────────────────────────────────
+
+function syncViewFields() {
+    const mode = $('viewMode').value;
+    $('viewSectionFields').classList.toggle('hidden', mode !== 'section');
+    $('viewBinaryFields').classList.toggle('hidden', mode === 'section');
+    $('viewExpectedBytesField').classList.toggle('hidden', mode !== 'image');
+    $('viewMaxFpsField').classList.toggle('hidden', mode !== 'canvas');
+}
+
+function buildViewBody() {
+    const mode = $('viewMode').value;
+    if (mode === 'section') {
+        let section;
+        try {
+            section = JSON.parse($('viewSection').value);
+        } catch (e) {
+            throw new Error('Section JSON 无法解析: ' + e.message);
+        }
+        return {mode, section};
+    }
+    const body = {
+        mode,
+        width: Number.parseInt($('viewWidth').value, 10),
+        height: Number.parseInt($('viewHeight').value, 10),
+        paletteSize: Number.parseInt($('viewPaletteSize').value, 10)
+    };
+    if (mode === 'image') {
+        body.expectedBytes = Number.parseInt($('viewExpectedBytes').value, 10);
+    } else {
+        body.maxFps = Number.parseInt($('viewMaxFps').value, 10);
+    }
+    const palette = $('viewPalette').value.trim();
+    if (palette) {
+        body.paletteRgb565 = palette.split(',').map(s => Number.parseInt(s.trim(), 10));
+    }
+    const payload = $('viewPayload').value.trim();
+    if (payload) {
+        body.payloadBase64 = payload;
+    }
+    ['width', 'height', 'paletteSize'].forEach(k => {
+        if (!Number.isFinite(body[k]) || body[k] <= 0) throw new Error(k + ' 必须是正整数');
+    });
+    return body;
+}
+
+async function sendView() {
+    try {
+        const result = await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/view`, {
+            method: 'POST',
+            body: JSON.stringify(buildViewBody())
+        });
+        $('viewResult').textContent = JSON.stringify(result, null, 2);
+    } catch (e) {
+        $('viewResult').textContent = JSON.stringify({error: e.message}, null, 2);
+    }
+}
+
+async function readViewState() {
+    try {
+        $('viewState').textContent = JSON.stringify(
+            await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/view/state`), null, 2);
+    } catch (e) {
+        $('viewState').textContent = JSON.stringify({error: e.message}, null, 2);
+    }
+}
+
+async function clearViewState() {
+    try {
+        $('viewState').textContent = JSON.stringify(
+            await api(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/view/state`, {method: 'DELETE'}), null, 2);
+    } catch (e) {
+        $('viewState').textContent = JSON.stringify({error: e.message}, null, 2);
+    }
+}
+
+// ── 实时流 ──────────────────────────────────────────────────────────────
+
+function appendLog(id, name, data) {
+    const box = $(id);
+    if (box.querySelector('.muted')) box.innerHTML = '';
+    const row = document.createElement('div');
+    row.textContent = `[${new Date().toLocaleTimeString()}] ${name} ${data}`;
+    box.prepend(row);
+}
+
+function connectStreams() {
+    if (!deviceId()) return;
+    disconnectStreams();
+    const onError = () => {
+        $('streamState').innerHTML = '<span class="pill bad">连接中断</span>';
+    };
+    const requests = new EventSource(apiUrl(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/requests/stream`));
+    ['open', 'request'].forEach(name =>
+        requests.addEventListener(name, e => { if (e.data) appendLog('requestLog', name, e.data); }));
+    requests.onerror = onError;
+
+    const events = new EventSource(apiUrl(`/api/v1/sdui/debug/${encodeURIComponent(deviceId())}/events/stream`));
+    ['open', 'platform.interaction', 'business.cleared', 'device.connection'].forEach(name =>
+        events.addEventListener(name, e => { if (e.data) appendLog('eventLog', name, e.data); }));
+    events.onerror = onError;
+
+    state.streams = {requests, events};
+    $('streamState').innerHTML =
+        `<span class="pill ok">已连接 ${escapeHtml(deviceId())}</span><div class="muted" style="margin-top:6px">requests / events</div>`;
+}
+
+function disconnectStreams() {
+    const {requests, events} = state.streams;
+    if (requests) { requests.onerror = null; requests.close(); }
+    if (events) { events.onerror = null; events.close(); }
+    state.streams = {requests: null, events: null};
+    $('streamState').textContent = '未连接';
+}
+
+// ── 装配 ────────────────────────────────────────────────────────────────
+
+function showTab(name) {
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('[data-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
+}
+
+async function refreshDeviceScoped() {
+    state.selected = null;
+    $('paramForm').innerHTML = '<div class="muted">请先选择一个请求</div>';
+    $('sendRequest').disabled = true;
+    disconnectStreams();
+    await loadCapabilities();
+    await loadRequests();
+    await loadHistory();
+    await readViewState();
+}
+
+document.querySelectorAll('.tab').forEach(btn =>
+    btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+$('refresh').addEventListener('click', async () => {
+    await loadDevices();
+    await refreshDeviceScoped();
+});
+$('loadCaps').addEventListener('click', refreshDeviceScoped);
+$('device').addEventListener('change', refreshDeviceScoped);
+$('sendRequest').addEventListener('click', sendRequest);
+$('sendView').addEventListener('click', sendView);
+$('viewMode').addEventListener('change', syncViewFields);
+$('readViewState').addEventListener('click', readViewState);
+$('clearViewState').addEventListener('click', clearViewState);
+$('connectStreams').addEventListener('click', connectStreams);
+$('disconnectStreams').addEventListener('click', disconnectStreams);
+$('clearRequestLog').addEventListener('click', () => $('requestLog').innerHTML = '<div class="muted">已清空</div>');
+$('clearEventLog').addEventListener('click', () => $('eventLog').innerHTML = '<div class="muted">已清空</div>');
+
+syncViewFields();
+loadDevices().then(refreshDeviceScoped);
+</script>
+</body>
+</html>

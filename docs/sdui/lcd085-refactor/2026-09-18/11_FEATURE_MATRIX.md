@@ -131,9 +131,10 @@ v2 是唯一协议，因此旧路径的删除不再有"把设备按回旧协议"
 | 5.16 | 删除能力名称上报路径 | 04§4 | 否 | P5c | DEFERRED | 终端切换完成 | 已 deprecated |
 | 5.16.1 | 删除旧上行音频处理链 | 04§7 | 否 | P5c | **BLOCKED** | 需 T11 先落地 | `AudioRecordHandler` / `AudioRecordChunkHandler` / `AudioRecordSessionManager` 是平台唯一录音通路 |
 | 5.17 | 删除 `DeviceProtocolRouter` 与 `sdui.routing` | - | 是 | P5a | **DONE** | - | 0.12.0 已删除 |
-| 5.18 | 前端调试页面对齐 v2 | - | 是 | P5c | TODO | - | `static/sdui-*.html` 三个页面 |
+| 5.18 | 前端调试页面对齐 v2 | - | 是 | P5c | **DONE** | - | 新增 `static/sdui-v2-console.html`：能力 Schema 查看、请求目录与参数表单、请求/事件 SSE、主视图下发，覆盖调试域全部 v2 端点（此前无调用方）；旧三页的处置见 12§4.23 |
 
-> 5.18 不依赖终端切换，可随时提前做；当前排在 P5c 只是因为与调试链路一起验证成本更低。
+> 5.18 不依赖终端切换，因此提前完成。新页只读 v2 能力 Schema 与调试域端点，不引用旧能力 / 事件模型，也不影响 P5c 的删除集——它给 P5c 腾出的不是可删类，而是**验收手段**：终端切换后可直接用它确认 v2 通道逐条可用。
+> 旧三页 `sdui-node-test.html` / `sdui-workflow-editor.html` / `sdui-workflow-test.html` 的定性不变，随 P5c 裁剪控制层时一并处理（见 12§7.2 / §7.3）。
 
 ## 6. 自实现补充功能汇总
 

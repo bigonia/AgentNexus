@@ -378,6 +378,47 @@ capabilityProjection.sections(deviceId).forEach(section -> supported.add(section
 
 这一节能直接回答"删这一个到底能解锁什么"，取代原先按引用数排序的粗筛。
 
+### 4.23 前端调试页面对齐 v2：新建联调台，不改造旧三页（2026-09-20，0.14.3）
+
+**背景**：0.14.0 重整接口集后，调试域按 v2 请求路径重写，但 `scripts/sdui-front-paths.py` 显示三个页面**只用到 `node-tests` 三个端点**；`/request`、`/view`、`/requests*`、`/events/stream` 全部无调用方。留下的空白是：P5c 需要"终端切换后逐条确认 v2 通道可用"，而当时没有任何工具能做这件事。
+
+**先排除误判**：把三个页面的每一条调用路径与当前控制器端点逐一比对，**全部仍然有效**——0.14.0 删掉的是 `/debug/{id}/command`、`/debug/{id}/commands*`、`/debug/{id}/section*`、`/debug/node-workflows/**` 这些前端从未调用的路径。旧页面没有坏链，它们只是停在"节点目录驱动"的工作流测试视角，看不到 v2 的能力面与请求面。
+
+**顺带修掉扫描器的一处漏报**。做上述比对时发现 `scripts/sdui-front-paths.py` 的路径提取有缺陷：正则 `[^\s"'`)|]+` 逐字符匹配到右括号即止，而 JS 模板里带参数的路径写作 `${encodeURIComponent(deviceId)}`，于是**所有带参数的路径都被截成半截**（`/api/v1/sdui/debug/${encodeURIComponent(deviceId`），占位符替换随之失效。后果不是显示难看，而是**截断后的路径无法与控制器端点对账**——"仍在使用的端点"会看起来像没人用。这与 §7.2 判断端点存废用的是同一份输出，所以先修它。
+
+修正两处：① 把 `${...}` 整体作为一个匹配单元，带参数的路径现在能完整列出；② 新增"路径不是字面量"提示——若调用点写成 `api(devicePath('/requests'))`，路径由辅助函数拼出，扫描器看不见，这类静默漏报必须能被发现。本页因此改为直接写完整路径（模板字面量内部仍可插值），修正后扫描输出 0 告警。
+
+**处置：新建 `static/sdui-v2-console.html`，不改造旧三页。** 三条理由：
+
+1. **视角不同**。旧页从节点目录（`CapabilityNodeCatalog`）出发，是编排视角；新页从设备能力 Schema 出发，是协议联调视角。终端对接真正需要的是后者——先看设备声明了什么，再按 `usableIn` 挑一个平台发得出去的动作，确认它到底通不通。
+2. **旧三页本身在 P5c 待删清单里**（§7.2 / §7.3）。改造一份即将删除的前端只会留下迁移债；新页与旧页并存，P5c 剪除旧协议簇时旧页随之消失。
+3. **不引入第二处真值**。新页只经四类 v2 端点取数：能力四端点（单一来源 `CapabilityQueryService`）、出站两端点（与业务同走 `PlatformRequestService`）、请求目录与历史（`usableIn` 分级）、两条 SSE（平台内部已有事件的转发，不自造事件类型）。没有一处新增平台侧能力推断。
+
+**页面覆盖**：
+
+| 页签 | 端点 | 回答什么 |
+| --- | --- | --- |
+| 能力 | `GET /capabilities/{id}`、`/sync`、`/schema`、`/actions`、`/triggers` | 声明了什么、同步到哪一步、哪些动作平台发得出去 |
+| 请求下发 | `GET /debug/{id}/requests`、`POST /request`、`GET /requests/history` | 按参数规格表单化下达，结果落历史 |
+| 主视图 | `POST /view`（section / image / canvas）、`GET` / `DELETE /view/state` | 三种主视图互斥、显示会话字节数与拒帧数 |
+| 实时流 | `GET /requests/stream`、`GET /events/stream` | 请求结果与 `platform.interaction` / `business.cleared` / `device.connection` 的实时到达 |
+
+**对 P5c 的影响**：不改变可删集——新页不引用旧模型，也不释放旧类。它提供的是**验收手段**：终端固件切到 v2 后，5.10–5.16 的每一项删除都可先用本页确认对应通道已在 v2 上跑通，再动刀。
+
+### 4.24 §7.2 的"释放量"是推演值，不等于该删（2026-09-20）
+
+做 §4.23 的路径对账时发现一处文档间的不一致，需要指出。
+
+§7.3.4 的执行顺序第 1 步写作"裁 §7.2 的三个控制层类 → 释放 3 个旧模型类"，即 `BoardTypeController`（`/section-triggers` → `SectionTriggerCatalog`、`SectionTriggerCatalogService`）、`DeviceController`（`/telemetry/trends` → `TelemetryTrendService`）、`WebSocketConfig`（旧端点两行 → `SduiWebSocketHandler`、`MessageRouter`）。
+
+但前两个端点**都在 0.14.0 的接口契约里**：`/telemetry/trends` 是 §2.1 设备域的正式端点；`/section-triggers` 是 §2.3 中带长篇辩护的编排面板数据源，契约明确写它"不阻塞 P5c，也无需改写……前端当前未调用属编排面板尚未接线"。
+
+**这与 §7.2 不矛盾，但容易被读错**：表格里的"真实释放量 2 / 2 / 1"回答的是"**假如**删掉这类能释放几个"，是**推演上限**，不是"应当删除"的结论。§7.2 自己的判据也只写"处理方式：删除端点，或改读 v2 的能力 Schema"——对这两个端点，契约给出的答案是**不处理**。
+
+**结论：5.10.1（"裁剪控制层对旧能力 / 事件模型的暴露"）在当前状态下没有可安全执行的删除动作**，应重新裁定为"控制层现有暴露均在契约内，属活功能；真正的裁剪对象只有 `WebSocketConfig` 的旧端点注册两行，而它属于 P5c 准入（需终端切换）"。§7.3.4 执行顺序第 1 步因此实际只剩第三项，可释放 2 类而非 5 类。
+
+这条裁决**收紧**了删除集（少删 3 个类，方向保守），但需在终端切换前与编排面板的接线计划一并确认：若 `/section-triggers` 最终被编排面板采用则必须保留；若编排改用别的方式取三级树，则它随 §7.2 处理。
+
 ## 5. 未决问题
 
 | # | 问题 | 影响 | 状态 |
@@ -441,6 +482,8 @@ python scripts/sdui-refgraph/refgraph.py
 python scripts/sdui-front-paths.py
 ```
 
+脚本输出的每条路径都可直接与控制器端点对账——**前提是路径以字面量书写**（模板字面量内部仍可插值）。带参数的路径曾在 0.14.3 之前被正则截断，修正见 §4.23；脚本现在还会提示"路径不是字面量"的调用点，避免用辅助函数拼接导致静默漏报。
+
 **规模（0.14.2 实测）**：`sdui` 主代码中 v2 54 个、非 v2 165 个，其中保留包（`ui` / `workflow` / `artifact` / `repo` / `model` / `dto` / `controller` / `debug` / `resources`）占 71 个，`sdui` 外 58 个。候选池 93 = **A 类 12（可整文件删）** + C 类 81（需先裁剪引用方）。C 类里有 **22 个属保留闭包**（§7.3，0.14.2 解耦后由 39 收敛而来）——在保留方改动前删不掉，真正可争取的是其余 59 个。
 
 脚本输出另有三节供执行顺序使用（0.14.1 新增两节、0.14.2 新增一节，见 §4.21 / §4.22）：**释放容量**（逐个推演"裁掉它能释放几个"，与"引用几个"不是一回事）、**保留闭包**（保留方直接或间接依赖的池内类，即不可删清单）、**阻塞源归因**（把每一类拖住的保留层入口，取代原先"引用方为 ui / v2"的粗筛——解耦后该口径已失真）。
@@ -503,7 +546,7 @@ python scripts/sdui-front-paths.py
 /api/v1/sdui/node-workflows{,/management/**}           编辑器、工作流测试页
 ```
 
-结论：调试域**只有 `node-tests` 三个端点**被前端调用；`/debug/{deviceId}/request`、`/view`、`/requests*`、`/events/stream` 目前无调用方。裁剪控制层时，前端会随之改版——`static/*.html` 本身也在 §7.3 的待删清单里。
+结论：调试域**只有 `node-tests` 三个端点**被旧三页调用；`/debug/{deviceId}/request`、`/view`、`/requests*`、`/events/stream` 的调用方由 0.14.3 新增的 `static/sdui-v2-console.html` 提供（§4.23）。旧三页的定性不变，裁剪控制层时随之改版——`static/*.html` 本身也在 §7.3 的待删清单里。
 
 ### 7.3 第三步：保留闭包——**不能**随控制层裁剪释放的旧协议簇
 
@@ -593,7 +636,9 @@ ui.SduiUiTemplateService
 2. ~~让 `ui` 层与 `debug` 层从旧能力 / 事件模型解耦~~ → **`ui` 侧已于 0.14.2 完成（T17 结项）**；`debug` 层随 P5c 改写；
 3. 步骤 1–2 完成后重跑脚本，旧协议簇才真正进入可删集。
 
-`static/*.html` 三个调试页仍在待删清单（前端实际调用面见 §7.2）。
+> **第 1 步的规模已按 §4.24 收窄**：上表"释放量"是推演上限而非删除结论。`/telemetry/trends` 与 `/section-triggers` 都在 0.14.0 的接口契约内，故这两个控制层类**不裁**；第 1 步实际只剩接线根 `WebSocketConfig` 一项（释放 2 类，且属 P5c 准入）。
+
+`static/*.html` 旧三个调试页仍在待删清单（前端实际调用面见 §7.2）。0.14.3 新增的 `sdui-v2-console.html` **不在**待删清单内——它只读 v2 能力 Schema 与调试域端点，是终端切换后的验收工具（§4.23）。
 
 ### 7.4 必须保留（v2 硬依赖，P5c 不可动）
 
